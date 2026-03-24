@@ -1,0 +1,33 @@
+{
+  "name": "@takos-computer/computer-core",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent": "./src/agent/index.ts",
+    "./agent/public-runner": "./src/agent/public-runner.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@langchain/core": "^1.1.8",
+    "@langchain/langgraph": "^1.0.7",
+    "@langchain/langgraph-checkpoint": "^1.0.0",
+    "@langchain/openai": "^1.2.0",
+    "@takos-computer/actions-engine": "workspace:*",
+    "@takos-computer/common": "workspace:*",
+    "drizzle-orm": "^0.45.1",
+    "zod": "^3.25.32"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  },
+  "files": [
+    "src",
+    "package.json"
+  ]
+}

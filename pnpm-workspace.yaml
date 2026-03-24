@@ -1,0 +1,11 @@
+# takos-computer workspace definition
+#
+# Structure:
+#   apps/*       - Container entry points (browser, executor)
+#   packages/*   - Shared libraries
+#   scripts      - Build tooling
+
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'scripts'
