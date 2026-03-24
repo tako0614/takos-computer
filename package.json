@@ -1,0 +1,33 @@
+{
+  "name": "takos-computer",
+  "version": "1.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "description": "Takos Computer — browser automation and agent executor services",
+  "scripts": {
+    "build:all": "pnpm -r build",
+    "test:all": "pnpm -r test",
+    "typecheck:all": "pnpm -r typecheck",
+    "clean": "pnpm -r exec rm -rf dist node_modules",
+    "clean:dist": "pnpm -r exec rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.61.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "@cloudflare/workers-types": "^4.20260118.0",
+      "esbuild": "^0.25.12",
+      "wrangler": "^4.61.0",
+      "hono": ">=4.12.4"
+    }
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "packageManager": "pnpm@9.14.2"
+}
