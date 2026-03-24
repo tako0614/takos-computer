@@ -14,7 +14,7 @@ import {
 } from '@langchain/langgraph-checkpoint';
 import type { RunnableConfig } from '@langchain/core/runnables';
 import { BadRequestError, InternalError } from '../../shared/utils/error-response';
-import { getDb, lgCheckpoints, lgWrites } from '../../../infra/db';
+import { getDb, lgCheckpoints, lgWrites } from '../../infra/db';
 import { eq, and, lt, desc } from 'drizzle-orm';
 import { toIsoString } from '../../shared/utils';
 import { logError, logInfo, logWarn } from '../../shared/utils/logger';

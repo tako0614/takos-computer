@@ -1,7 +1,7 @@
 import type { Env, DbEnv, AiEnv } from '../../shared/types';
 
 type ThreadContextEnv = DbEnv & AiEnv;
-import { getDb, accounts, threads, messages } from '../../../infra/db';
+import { getDb, accounts, threads, messages } from '../../infra/db';
 import { eq, and, gt, inArray, desc, asc } from 'drizzle-orm';
 import { now, toIsoString } from '../../shared/utils';
 import { createMultiModelClient, getProviderFromModel } from './llm';

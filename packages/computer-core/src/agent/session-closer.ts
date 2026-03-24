@@ -8,11 +8,11 @@
 
 import type { Env } from '../../shared/types';
 import type { AgentContext, AgentEvent } from './types';
-import { SnapshotManager } from '../sync/snapshot';
+import { SnapshotManager } from '../../sync/snapshot';
 import { generateId } from '../../shared/utils';
-import { getDb, sessions, accounts, accountMetadata, files, runs } from '../../../infra/db';
+import { getDb, sessions, accounts, accountMetadata, files, runs } from '../../infra/db';
 import { and, eq, inArray } from 'drizzle-orm';
-import { callRuntimeRequest } from '../execution/runtime';
+import { callRuntimeRequest } from '../../execution/runtime';
 import { logError, logWarn } from '../../shared/utils/logger';
 import type { SqlDatabaseBinding } from '../../shared/types/bindings';
 

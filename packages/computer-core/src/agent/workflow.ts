@@ -1,13 +1,13 @@
 import type { Env } from '../../shared/types';
 import type { AgentMessage } from './types';
-import type { SnapshotTree } from '../sync/types';
+import type { SnapshotTree } from '../../sync/types';
 import { createLLMClient } from './llm';
-import { SnapshotManager } from '../sync/snapshot';
+import { SnapshotManager } from '../../sync/snapshot';
 import { generateId, now } from '../../shared/utils';
-import { getDb, pullRequests, prReviews, sessions, accounts, runs, branches, files } from '../../../infra/db';
+import { getDb, pullRequests, prReviews, sessions, accounts, runs, branches, files } from '../../infra/db';
 import { eq, and, sql } from 'drizzle-orm';
-import { buildPRDiffText } from '../pull-requests/ai-review';
-import { callRuntimeRequest } from '../execution/runtime';
+import { buildPRDiffText } from '../../pull-requests/ai-review';
+import { callRuntimeRequest } from '../../execution/runtime';
 import { logError } from '../../shared/utils/logger';
 
 // ── Public types ────────────────────────────────────────────────────────

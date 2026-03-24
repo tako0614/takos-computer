@@ -4,7 +4,7 @@
  */
 
 import type { AgentMessage, AgentTool, ToolCall } from '../types';
-import { logError } from '../../../shared/utils/logger';
+import { logError } from '../../shared/utils/logger';
 import {
   DEFAULT_MODEL_ID,
   getModelProvider,
