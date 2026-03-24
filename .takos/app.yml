@@ -1,0 +1,84 @@
+apiVersion: takos.dev/v1alpha1
+kind: Package
+metadata:
+  name: takos-computer
+spec:
+  version: "1.0.0"
+  description: Browser automation and agent executor
+  category: service
+  tags:
+    - browser
+    - executor
+    - agent
+    - playwright
+---
+apiVersion: takos.dev/v1alpha1
+kind: Workload
+metadata:
+  name: browser
+spec:
+  type: container
+  pluginConfig:
+    dockerfile: apps/browser/Dockerfile
+    port: 8080
+    instanceType: standard-2
+    maxInstances: 25
+---
+apiVersion: takos.dev/v1alpha1
+kind: Workload
+metadata:
+  name: executor
+spec:
+  type: container
+  pluginConfig:
+    dockerfile: apps/executor/Dockerfile
+    port: 8080
+    instanceType: basic
+    maxInstances: 100
+---
+apiVersion: takos.dev/v1alpha1
+kind: Workload
+metadata:
+  name: browser-host
+spec:
+  type: worker
+  pluginConfig:
+    config: deploy/wrangler.browser-host.toml
+---
+apiVersion: takos.dev/v1alpha1
+kind: Workload
+metadata:
+  name: executor-host
+spec:
+  type: worker
+  pluginConfig:
+    config: deploy/wrangler.executor-host.toml
+---
+apiVersion: takos.dev/v1alpha1
+kind: Binding
+metadata:
+  name: executor-control
+spec:
+  from: executor-host
+  to: takos-control
+  mount:
+    as: TAKOS_CONTROL
+    type: service
+---
+apiVersion: takos.dev/v1alpha1
+kind: Endpoint
+metadata:
+  name: browser-api
+spec:
+  protocol: http
+  targetRef: browser-host
+  path: /session
+---
+apiVersion: takos.dev/v1alpha1
+kind: Endpoint
+metadata:
+  name: executor-api
+spec:
+  protocol: http
+  targetRef: executor-host
+  path: /dispatch
