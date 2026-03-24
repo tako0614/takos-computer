@@ -18,8 +18,8 @@ import type { Env } from '../../shared/types';
 import type { SqlDatabaseBinding, ObjectStoreBinding } from '../../shared/types/bindings';
 import type { AgentContext } from './types';
 import { AgentRunner, type AgentRunnerIo } from './runner';
-import { AbstractAgentWorker } from '../multi-agent/base-worker';
-import type { AgentWorkerConfig, AgentMessage } from '../multi-agent/types';
+import { AbstractAgentWorker } from '../../multi-agent/base-worker';
+import type { AgentWorkerConfig, AgentMessage } from '../../multi-agent/types';
 import { logError, logInfo } from '../../shared/utils/logger';
 
 // ── Input / Output contracts ────────────────────────────────────────

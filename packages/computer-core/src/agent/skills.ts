@@ -7,12 +7,12 @@ import type {
 } from './skill-contracts';
 import type { AgentConfig, AgentMessage, AgentEvent } from './types';
 import type { ToolExecutorLike } from '../../tools/executor';
-import { getDb, runs, threads } from '../../../infra/db';
+import { getDb, runs, threads } from '../../infra/db';
 import { eq } from 'drizzle-orm';
 import { listLocalizedOfficialSkills, resolveSkillLocale } from './official-skills';
-import { listEnabledCustomSkillContext } from '../source/skills';
-import { listMcpServers } from '../platform/mcp';
-import { getWorkspaceLocale } from '../identity/locale';
+import { listEnabledCustomSkillContext } from '../../source/skills';
+import { listMcpServers } from '../../platform/mcp';
+import { getWorkspaceLocale } from '../../identity/locale';
 import { getDelegationPacketFromRunInput, isDelegationLocale } from './delegation';
 import { listSkillTemplates } from './skill-templates';
 import { logError, logWarn } from '../../shared/utils/logger';

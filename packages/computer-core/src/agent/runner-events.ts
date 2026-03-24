@@ -8,7 +8,7 @@
 import type { RunStatus, Env } from '../../shared/types';
 import type { AgentEvent } from './types';
 import type { EventEmissionError } from './runner-types';
-import { getDb, runEvents } from '../../../infra/db';
+import { getDb, runEvents } from '../../infra/db';
 import type { RunTerminalPayload } from '../../run-notifier-types';
 import {
   buildTerminalPayload,

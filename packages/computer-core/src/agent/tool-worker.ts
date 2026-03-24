@@ -19,8 +19,8 @@
 
 import type { ToolExecutorLike } from '../../tools/executor';
 import type { ToolCall, ToolResult, ToolDefinition } from '../../tools/types';
-import { AbstractAgentWorker } from '../multi-agent/base-worker';
-import type { AgentWorkerConfig, AgentMessage } from '../multi-agent/types';
+import { AbstractAgentWorker } from '../../multi-agent/base-worker';
+import type { AgentWorkerConfig, AgentMessage } from '../../multi-agent/types';
 import { logError, logInfo, logWarn } from '../../shared/utils/logger';
 
 // ── Input / Output contracts ────────────────────────────────────────

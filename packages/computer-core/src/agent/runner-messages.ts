@@ -7,10 +7,10 @@
 
 import type { RunStatus, Env } from '../../shared/types';
 import type { AgentMessage, ToolCall } from './types';
-import { getDb, runs, threads, messages } from '../../../infra/db';
+import { getDb, runs, threads, messages } from '../../infra/db';
 import { and, eq, sql, desc } from 'drizzle-orm';
 import { getContextWindowForModel } from './model-catalog';
-import { readMessageFromR2 } from '../offload/messages';
+import { readMessageFromR2 } from '../../offload/messages';
 import { buildThreadContextSystemMessage, queryRelevantThreadMessages } from './thread-context';
 import { logError, logInfo, logWarn } from '../../shared/utils/logger';
 import {

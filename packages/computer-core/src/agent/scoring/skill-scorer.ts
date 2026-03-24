@@ -19,7 +19,7 @@ import {
   getCategoryKeywords,
   getOutputModeKeywords,
 } from '../text/tokenizer';
-import { logWarn } from '../../../shared/utils/logger';
+import { logWarn } from '../../shared/utils/logger';
 
 // ── Constants ───────────────────────────────────────────────────────────
 

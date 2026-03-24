@@ -13,17 +13,17 @@
  * typed {@link DelegationOutput}.
  */
 
-import { AbstractAgentWorker } from '../multi-agent/base-worker';
+import { AbstractAgentWorker } from '../../multi-agent/base-worker';
 import type {
   AgentWorkerConfig,
   AgentMessage as CoordinatorMessage,
-} from '../multi-agent/types';
+} from '../../multi-agent/types';
 import {
   buildDelegationPacket,
 } from './delegation';
-import { createThreadRun, type CreateThreadRunResult } from '../execution/run-creation';
-import { createThread, updateThreadStatus } from '../threads/threads';
-import { resolveRunModel } from '../runs/create-thread-run-validation';
+import { createThreadRun, type CreateThreadRunResult } from '../../execution/run-creation';
+import { createThread, updateThreadStatus } from '../../threads/threads';
+import { resolveRunModel } from '../../runs/create-thread-run-validation';
 import type { Env } from '../../shared/types';
 import type { D1Database } from '../../shared/types/bindings';
 import { logInfo, logWarn } from '../../shared/utils/logger';
@@ -507,7 +507,7 @@ export class DelegationCoordinator extends AbstractAgentWorker<DelegationInput, 
     const deadline = Date.now() + effectiveTimeout;
 
     // Import DB utilities lazily to avoid circular deps
-    const { getDb, runs } = await import('../../../infra/db');
+    const { getDb, runs } = await import('../../infra/db');
     const { eq } = await import('drizzle-orm');
 
     const db = getDb(this.db!);
