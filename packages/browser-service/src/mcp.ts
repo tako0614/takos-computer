@@ -126,9 +126,23 @@ export function createBrowserMcpServer(browser: BrowserManager): McpServer {
 /**
  * Create a request handler for the MCP server that works with Hono.
  * Handles POST /mcp for Streamable HTTP transport.
+ *
+ * @param authToken - If provided, validates Authorization: Bearer <token> header.
  */
-export function createMcpRequestHandler(mcpServer: McpServer) {
+export function createMcpRequestHandler(mcpServer: McpServer, authToken?: string) {
   return async (request: Request): Promise<Response> => {
+    // Bearer token auth check
+    if (authToken) {
+      const header = request.headers.get('Authorization');
+      const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
+      if (!token || token !== authToken) {
+        return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });

@@ -136,10 +136,12 @@ export function createBrowserServiceApp(options: BrowserServiceOptions = {}) {
   });
 
   // MCP endpoint — Streamable HTTP transport for tool discovery & execution
+  // Auth via MCP_AUTH_TOKEN env var (injected by takopack secretRef at deploy time)
   app.post('/mcp', async (c) => {
     const { createBrowserMcpServer, createMcpRequestHandler } = await import('./mcp.js');
     const mcpServer = createBrowserMcpServer(browser);
-    const handler = createMcpRequestHandler(mcpServer);
+    const authToken = process.env.MCP_AUTH_TOKEN || undefined;
+    const handler = createMcpRequestHandler(mcpServer, authToken);
     return handler(c.req.raw);
   });
 
