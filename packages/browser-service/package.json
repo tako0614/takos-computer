@@ -8,9 +8,11 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "@takos-computer/common": "workspace:*",
     "hono": "^4.7.0",
-    "playwright-core": "^1.52.0"
+    "playwright-core": "^1.52.0",
+    "zod": "^3.23.0"
   },
   "exports": {
     ".": "./src/index.ts",
