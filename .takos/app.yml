@@ -77,8 +77,26 @@ spec:
 apiVersion: takos.dev/v1alpha1
 kind: Endpoint
 metadata:
+  name: browser-mcp
+spec:
+  protocol: http
+  targetRef: browser-host
+  path: /mcp
+---
+apiVersion: takos.dev/v1alpha1
+kind: Endpoint
+metadata:
   name: executor-api
 spec:
   protocol: http
   targetRef: executor-host
   path: /dispatch
+---
+apiVersion: takos.dev/v1alpha1
+kind: McpServer
+metadata:
+  name: takos-computer
+spec:
+  endpointRef: browser-mcp
+  name: takos-computer
+  transport: streamable-http

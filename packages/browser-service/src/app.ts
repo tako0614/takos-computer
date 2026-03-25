@@ -135,6 +135,14 @@ export function createBrowserServiceApp(options: BrowserServiceOptions = {}) {
     return c.json(result);
   });
 
+  // MCP endpoint — Streamable HTTP transport for tool discovery & execution
+  app.post('/mcp', async (c) => {
+    const { createBrowserMcpServer, createMcpRequestHandler } = await import('./mcp.js');
+    const mcpServer = createBrowserMcpServer(browser);
+    const handler = createMcpRequestHandler(mcpServer);
+    return handler(c.req.raw);
+  });
+
   app.onError((err, c) => {
     logger.error('Request error', { error: err });
     return c.json({ error: err.message }, 500);
