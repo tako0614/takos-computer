@@ -55,6 +55,26 @@ spec:
     config: deploy/wrangler.executor-host.toml
 ---
 apiVersion: takos.dev/v1alpha1
+kind: Resource
+metadata:
+  name: mcp-auth-secret
+spec:
+  type: secretRef
+  binding: MCP_AUTH_TOKEN
+  generate: true
+---
+apiVersion: takos.dev/v1alpha1
+kind: Binding
+metadata:
+  name: mcp-secret-to-browser
+spec:
+  from: mcp-auth-secret
+  to: browser-host
+  mount:
+    as: MCP_AUTH_TOKEN
+    type: secretRef
+---
+apiVersion: takos.dev/v1alpha1
 kind: Binding
 metadata:
   name: executor-control
@@ -100,3 +120,4 @@ spec:
   endpointRef: browser-mcp
   name: takos-computer
   transport: streamable-http
+  authSecretRef: mcp-auth-secret
