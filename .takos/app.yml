@@ -11,6 +11,16 @@ spec:
     - executor
     - agent
     - playwright
+  env:
+    required:
+      - TAKOS_ACCESS_TOKEN
+  takos:
+    scopes:
+      - threads:read
+      - threads:write
+      - runs:read
+      - runs:write
+      - repos:read
 ---
 apiVersion: takos.dev/v1alpha1
 kind: Workload
