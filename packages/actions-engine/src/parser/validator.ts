@@ -4,7 +4,7 @@
 import { z } from 'zod';
 import { buildDependencyGraph, detectCycle, DependencyError } from '../scheduler/dependency.js';
 import type { Workflow, WorkflowDiagnostic } from '../types.js';
-import { normalizeNeedsInput } from '../scheduler/job.js';
+import { normalizeNeedsInput } from '../scheduler/job-context.js';
 
 // =============================================================================
 // Zod Schemas

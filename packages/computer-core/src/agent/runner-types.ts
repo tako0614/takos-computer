@@ -2,6 +2,10 @@
  * Internal types and constants for the Agent Runner module.
  */
 
+import type { Env } from '../../shared/types';
+import { INDEX_QUEUE_MESSAGE_VERSION } from '../../shared/types';
+import { generateId } from '../../shared/utils';
+import { logWarn } from '../../shared/utils/logger';
 import { MAX_TOTAL_TOOL_CALLS_PER_RUN, MAX_TOOL_EXECUTIONS_HISTORY } from '../../shared/config/limits';
 
 export const MAX_TOTAL_TOOL_CALLS = MAX_TOTAL_TOOL_CALLS_PER_RUN;
@@ -70,4 +74,36 @@ export function addToolExecution(
     toolExecutions.splice(0, removeCount);
   }
   toolExecutions.push(execution);
+}
+
+// ── Queue job helpers ───────────────────────────────────────────────
+
+/** Enqueue post-run index jobs (info unit + thread context). */
+export async function enqueuePostRunJobs(
+  env: Env,
+  spaceId: string,
+  runId: string,
+  threadId: string,
+): Promise<void> {
+  if (!env.INDEX_QUEUE) return;
+
+  const enqueue = async (type: string, targetId: string) => {
+    try {
+      await env.INDEX_QUEUE!.send({
+        version: INDEX_QUEUE_MESSAGE_VERSION,
+        jobId: generateId(),
+        spaceId,
+        type,
+        targetId,
+        timestamp: Date.now(),
+      });
+    } catch (err) {
+      logWarn(`Failed to enqueue ${type} job for ${targetId}`, { module: type, detail: err });
+    }
+  };
+
+  await Promise.all([
+    enqueue('info_unit', runId),
+    enqueue('thread_context', threadId),
+  ]);
 }

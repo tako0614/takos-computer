@@ -5,8 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./agent": "./src/agent/index.ts",
-    "./agent/public-runner": "./src/agent/public-runner.ts"
+    "./agent": "./src/agent/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

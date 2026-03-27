@@ -45,6 +45,57 @@ export interface LLMProvider {
 }
 
 // ============================================================================
+// Base LLM Provider — shared fetch / error handling
+// ============================================================================
+
+abstract class BaseLLMProvider implements LLMProvider {
+  constructor(protected config: ModelConfig) {}
+
+  /** Provider name used in error messages (e.g. "OpenAI", "Anthropic"). */
+  protected abstract readonly providerName: string;
+
+  /** Build the full request URL. */
+  protected abstract getUrl(): string;
+
+  /** Build HTTP headers (Content-Type is always included). */
+  protected abstract getHeaders(): Record<string, string>;
+
+  /** Build the JSON request body. */
+  protected abstract buildRequestBody(
+    messages: AgentMessage[],
+    tools?: AgentTool[],
+  ): Record<string, unknown>;
+
+  /** Parse the provider-specific JSON response into a normalised LLMResponse. */
+  protected abstract parseResponse(data: unknown): LLMResponse;
+
+  /** Validate that the response payload is structurally sound (throw on bad data). */
+  protected abstract validateResponse(data: unknown): void;
+
+  async chat(
+    messages: AgentMessage[],
+    tools?: AgentTool[],
+    signal?: AbortSignal,
+  ): Promise<LLMResponse> {
+    const response = await fetch(this.getUrl(), {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(this.buildRequestBody(messages, tools)),
+      signal,
+    });
+
+    if (!response.ok) {
+      const error = sanitizeLlmError(await response.text());
+      throw new Error(`${this.providerName} API error: ${response.status} - ${error}`);
+    }
+
+    const data: unknown = await response.json();
+    this.validateResponse(data);
+    return this.parseResponse(data);
+  }
+}
+
+// ============================================================================
 // OpenAI Provider
 // ============================================================================
 
@@ -55,8 +106,19 @@ interface OpenAIMessage {
   tool_call_id?: string;
 }
 
-class OpenAIProvider implements LLMProvider {
-  constructor(private config: ModelConfig) {}
+class OpenAIProvider extends BaseLLMProvider {
+  protected readonly providerName = 'OpenAI';
+
+  protected getUrl(): string {
+    return 'https://api.openai.com/v1/chat/completions';
+  }
+
+  protected getHeaders(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${this.config.apiKey}`,
+    };
+  }
 
   private convertTools(tools: AgentTool[]) {
     return tools.map(tool => ({
@@ -104,7 +166,7 @@ class OpenAIProvider implements LLMProvider {
     return /^o[0-9]/.test(m) || m.includes('o1') || m.includes('o3') || m.includes('gpt-5');
   }
 
-  async chat(messages: AgentMessage[], tools?: AgentTool[], signal?: AbortSignal): Promise<LLMResponse> {
+  protected buildRequestBody(messages: AgentMessage[], tools?: AgentTool[]): Record<string, unknown> {
     const requestBody: Record<string, unknown> = {
       model: this.config.model,
       max_completion_tokens: this.config.maxTokens || 4096,
@@ -120,31 +182,23 @@ class OpenAIProvider implements LLMProvider {
       requestBody.tools = this.convertTools(tools);
     }
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.apiKey}`,
-      },
-      body: JSON.stringify(requestBody),
-      signal,
-    });
+    return requestBody;
+  }
 
-    if (!response.ok) {
-      const error = sanitizeLlmError(await response.text());
-      throw new Error(`OpenAI API error: ${response.status} - ${error}`);
+  protected validateResponse(data: unknown): void {
+    const d = data as { choices?: unknown[] };
+    if (!d.choices || d.choices.length === 0) {
+      throw new Error('OpenAI API returned empty choices array');
     }
+  }
 
-    const data = await response.json() as {
+  protected parseResponse(data: unknown): LLMResponse {
+    const d = data as {
       choices: { message: { content: string | null; tool_calls?: { id: string; function: { name: string; arguments: string } }[] }; finish_reason: string }[];
       usage: { prompt_tokens: number; completion_tokens: number };
     };
 
-    if (!data.choices || data.choices.length === 0) {
-      throw new Error('OpenAI API returned empty choices array');
-    }
-
-    const choice = data.choices[0];
+    const choice = d.choices[0];
     const toolCalls: ToolCall[] = [];
     if (choice.message.tool_calls) {
       for (const tc of choice.message.tool_calls) {
@@ -160,7 +214,7 @@ class OpenAIProvider implements LLMProvider {
       content: choice.message.content || '',
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       stopReason: choice.finish_reason as LLMResponse['stopReason'],
-      usage: { inputTokens: data.usage.prompt_tokens, outputTokens: data.usage.completion_tokens },
+      usage: { inputTokens: d.usage.prompt_tokens, outputTokens: d.usage.completion_tokens },
     };
   }
 }
@@ -174,8 +228,20 @@ interface AnthropicMessage {
   content: string | { type: string; text?: string; tool_use_id?: string; content?: string; id?: string; name?: string; input?: unknown }[];
 }
 
-class AnthropicProvider implements LLMProvider {
-  constructor(private config: ModelConfig) {}
+class AnthropicProvider extends BaseLLMProvider {
+  protected readonly providerName = 'Anthropic';
+
+  protected getUrl(): string {
+    return 'https://api.anthropic.com/v1/messages';
+  }
+
+  protected getHeaders(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'x-api-key': this.config.apiKey,
+      'anthropic-version': '2023-06-01',
+    };
+  }
 
   private convertTools(tools: AgentTool[]) {
     return tools.map(tool => ({
@@ -240,7 +306,7 @@ class AnthropicProvider implements LLMProvider {
     return { system: systemPrompt, messages: anthropicMessages };
   }
 
-  async chat(messages: AgentMessage[], tools?: AgentTool[], signal?: AbortSignal): Promise<LLMResponse> {
+  protected buildRequestBody(messages: AgentMessage[], tools?: AgentTool[]): Record<string, unknown> {
     const { system, messages: anthropicMessages } = this.convertMessages(messages);
 
     const requestBody: Record<string, unknown> = {
@@ -257,36 +323,27 @@ class AnthropicProvider implements LLMProvider {
       requestBody.tools = this.convertTools(tools);
     }
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': this.config.apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify(requestBody),
-      signal,
-    });
+    return requestBody;
+  }
 
-    if (!response.ok) {
-      const error = sanitizeLlmError(await response.text());
-      throw new Error(`Anthropic API error: ${response.status} - ${error}`);
+  protected validateResponse(data: unknown): void {
+    const d = data as { content?: unknown };
+    if (!d.content || !Array.isArray(d.content)) {
+      throw new Error('Anthropic API returned invalid content structure');
     }
+  }
 
-    const data = await response.json() as {
+  protected parseResponse(data: unknown): LLMResponse {
+    const d = data as {
       content: { type: string; text?: string; id?: string; name?: string; input?: unknown }[];
       stop_reason: string;
       usage: { input_tokens: number; output_tokens: number };
     };
 
-    if (!data.content || !Array.isArray(data.content)) {
-      throw new Error('Anthropic API returned invalid content structure');
-    }
-
     let textContent = '';
     const toolCalls: ToolCall[] = [];
 
-    for (const block of data.content) {
+    for (const block of d.content) {
       if (block.type === 'text') {
         textContent += block.text || '';
       } else if (block.type === 'tool_use') {
@@ -301,8 +358,8 @@ class AnthropicProvider implements LLMProvider {
     return {
       content: textContent,
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      stopReason: data.stop_reason === 'tool_use' ? 'tool_calls' : (data.stop_reason as LLMResponse['stopReason']),
-      usage: { inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens },
+      stopReason: d.stop_reason === 'tool_use' ? 'tool_calls' : (d.stop_reason as LLMResponse['stopReason']),
+      usage: { inputTokens: d.usage.input_tokens, outputTokens: d.usage.output_tokens },
     };
   }
 }
@@ -316,8 +373,19 @@ interface GeminiContent {
   parts: { text?: string; functionCall?: { name: string; args: unknown }; functionResponse?: { name: string; response: unknown } }[];
 }
 
-class GoogleProvider implements LLMProvider {
-  constructor(private config: ModelConfig) {}
+class GoogleProvider extends BaseLLMProvider {
+  protected readonly providerName = 'Google';
+
+  protected getUrl(): string {
+    return `https://generativelanguage.googleapis.com/v1beta/models/${this.config.model}:generateContent`;
+  }
+
+  protected getHeaders(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': this.config.apiKey,
+    };
+  }
 
   private convertTools(tools: AgentTool[]) {
     return [{
@@ -379,7 +447,7 @@ class GoogleProvider implements LLMProvider {
     return { systemInstruction, contents };
   }
 
-  async chat(messages: AgentMessage[], tools?: AgentTool[], signal?: AbortSignal): Promise<LLMResponse> {
+  protected buildRequestBody(messages: AgentMessage[], tools?: AgentTool[]): Record<string, unknown> {
     const { systemInstruction, contents } = this.convertMessages(messages);
 
     const requestBody: Record<string, unknown> = {
@@ -398,37 +466,27 @@ class GoogleProvider implements LLMProvider {
       requestBody.tools = this.convertTools(tools);
     }
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.config.model}:generateContent`;
+    return requestBody;
+  }
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-goog-api-key': this.config.apiKey,
-      },
-      body: JSON.stringify(requestBody),
-      signal,
-    });
-
-    if (!response.ok) {
-      const error = sanitizeLlmError(await response.text());
-      throw new Error(`Google API error: ${response.status} - ${error}`);
+  protected validateResponse(data: unknown): void {
+    const d = data as { candidates?: { content?: { parts?: unknown[] } }[] };
+    if (!d.candidates || d.candidates.length === 0) {
+      throw new Error('Google API returned empty candidates array');
     }
+    const candidate = d.candidates[0];
+    if (!candidate.content || !candidate.content.parts) {
+      throw new Error('Google API returned invalid candidate content structure');
+    }
+  }
 
-    const data = await response.json() as {
+  protected parseResponse(data: unknown): LLMResponse {
+    const d = data as {
       candidates: { content: { parts: { text?: string; functionCall?: { name: string; args: unknown } }[] }; finishReason: string }[];
       usageMetadata: { promptTokenCount: number; candidatesTokenCount: number };
     };
 
-    if (!data.candidates || data.candidates.length === 0) {
-      throw new Error('Google API returned empty candidates array');
-    }
-
-    const candidate = data.candidates[0];
-
-    if (!candidate.content || !candidate.content.parts) {
-      throw new Error('Google API returned invalid candidate content structure');
-    }
+    const candidate = d.candidates[0];
     let textContent = '';
     const toolCalls: ToolCall[] = [];
 
@@ -452,8 +510,8 @@ class GoogleProvider implements LLMProvider {
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       stopReason: finishReason as LLMResponse['stopReason'],
       usage: {
-        inputTokens: data.usageMetadata?.promptTokenCount || 0,
-        outputTokens: data.usageMetadata?.candidatesTokenCount || 0,
+        inputTokens: d.usageMetadata?.promptTokenCount || 0,
+        outputTokens: d.usageMetadata?.candidatesTokenCount || 0,
       },
     };
   }

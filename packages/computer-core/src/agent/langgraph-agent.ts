@@ -7,7 +7,8 @@
  * This file is the backward-compatible facade. Implementation is split into:
  *   - langgraph-tools.ts        : shared helpers, tool creation, public types
  *   - langgraph-graph.ts        : state definition, graph construction, agent factory
- *   - langgraph-checkpointer.ts : D1 checkpoint persistence
+ *   - langgraph-checkpointer.ts          : D1 checkpoint persistence (I/O)
+ *   - langgraph-checkpointer-recovery.ts : checkpoint recovery / cleanup
  */
 
 import {
@@ -25,13 +26,14 @@ export {
   extractMessageText,
   toolParameterToZod,
   stringifyToolResult,
-  anySignal,
   throwIfAborted,
   generateToolCallId,
   createLangChainTool,
   type LangGraphEvent,
   type CreateAgentOptions,
 } from './langgraph-tools';
+
+export { anySignal } from './runner-types';
 
 export {
   AgentState,
@@ -40,6 +42,12 @@ export {
 } from './langgraph-graph';
 
 export { D1CheckpointSaver } from './langgraph-checkpointer';
+export {
+  deleteThread,
+  recoverCorruptedCheckpoint,
+  type CheckpointDeserializer,
+  type RecoveryResult,
+} from './langgraph-checkpointer-recovery';
 
 // Import what we need for the functions that remain in this file
 import { extractMessageText, throwIfAborted, type LangGraphEvent } from './langgraph-tools';

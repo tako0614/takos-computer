@@ -2,7 +2,7 @@
  * Dependency resolution using DAG (Directed Acyclic Graph)
  */
 import type { Workflow } from '../types.js';
-import { normalizeNeedsInput } from './job.js';
+import { normalizeNeedsInput } from './job-context.js';
 
 /**
  * Error thrown when dependency resolution fails

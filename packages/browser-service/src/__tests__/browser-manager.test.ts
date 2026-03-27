@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import type { BrowserContext, Page, ElementHandle } from 'playwright-core';
 
 // Mock playwright-core before importing
 vi.mock('playwright-core', () => ({
@@ -17,8 +18,52 @@ vi.mock('@takos-computer/common/logger', () => ({
   }),
 }));
 
-import { BrowserManager } from '../browser-manager.js';
+import { BrowserManager, type BrowserAction } from '../browser-manager.js';
 import { chromium } from 'playwright-core';
+
+// ---------------------------------------------------------------------------
+// Mock factory helpers — build partial mocks and cast through `unknown`
+// so we avoid `as any` while keeping tests readable.
+// ---------------------------------------------------------------------------
+
+type MockPage = Partial<Page> & {
+  goto: ReturnType<typeof vi.fn>;
+  url: ReturnType<typeof vi.fn>;
+  title: ReturnType<typeof vi.fn>;
+};
+
+type MockContext = Partial<BrowserContext> & {
+  pages: ReturnType<typeof vi.fn>;
+  newPage: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+};
+
+function createMockPage(overrides: Partial<Record<keyof Page, unknown>> = {}): MockPage {
+  return {
+    goto: vi.fn(),
+    url: vi.fn().mockReturnValue('about:blank'),
+    title: vi.fn().mockResolvedValue(''),
+    ...overrides,
+  } as MockPage;
+}
+
+function createMockContext(
+  pages: MockPage[],
+  overrides: Partial<Record<keyof BrowserContext, unknown>> = {},
+): MockContext {
+  return {
+    pages: vi.fn().mockReturnValue(pages),
+    newPage: vi.fn(),
+    close: vi.fn(),
+    ...overrides,
+  } as MockContext;
+}
+
+function stubLaunch(ctx: MockContext): void {
+  vi.mocked(chromium.launchPersistentContext).mockResolvedValue(
+    ctx as unknown as BrowserContext,
+  );
+}
 
 describe('BrowserManager', () => {
   beforeEach(() => {
@@ -89,22 +134,15 @@ describe('BrowserManager', () => {
 
     it('throws when neither selector nor evaluate provided (after bootstrap)', async () => {
       // Setup mock context and page
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
+      const mockPage = createMockPage({
         content: vi.fn(),
         screenshot: vi.fn(),
         pdf: vi.fn(),
         evaluate: vi.fn(),
         $$: vi.fn(),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -115,28 +153,21 @@ describe('BrowserManager', () => {
     });
 
     it('extracts data using selector — queries elements and returns tag/text/attributes', async () => {
-      const mockElement = {
+      const mockElement: Partial<ElementHandle> = {
         evaluate: vi.fn()
           .mockResolvedValueOnce('div')   // tagName
-          .mockResolvedValueOnce({ class: 'item', id: 'el1' }), // attributes
+          .mockResolvedValueOnce({ class: 'item', id: 'el1' }) as ElementHandle['evaluate'], // attributes
         textContent: vi.fn().mockResolvedValue('  Hello World  '),
       };
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
+      const mockPage = createMockPage({
         $$: vi.fn().mockResolvedValue([mockElement]),
         evaluate: vi.fn(),
         content: vi.fn(),
         screenshot: vi.fn(),
         pdf: vi.fn(),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -149,22 +180,15 @@ describe('BrowserManager', () => {
     });
 
     it('extracts data using evaluate — calls page.evaluate with the expression', async () => {
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
+      const mockPage = createMockPage({
         evaluate: vi.fn().mockResolvedValue({ count: 42 }),
         $$: vi.fn(),
         content: vi.fn(),
         screenshot: vi.fn(),
         pdf: vi.fn(),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -208,17 +232,11 @@ describe('BrowserManager', () => {
 
   describe('bootstrap', () => {
     it('launches persistent context and returns page info', async () => {
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
+      const mockPage = createMockPage({
         title: vi.fn().mockResolvedValue('New Tab'),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       const result = await mgr.bootstrap({});
@@ -230,17 +248,12 @@ describe('BrowserManager', () => {
     });
 
     it('navigates to URL when provided', async () => {
-      const mockPage = {
-        goto: vi.fn(),
+      const mockPage = createMockPage({
         url: vi.fn().mockReturnValue('https://example.com'),
         title: vi.fn().mockResolvedValue('Example'),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       const result = await mgr.bootstrap({ url: 'https://example.com' });
@@ -253,17 +266,9 @@ describe('BrowserManager', () => {
     });
 
     it('uses custom viewport', async () => {
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      const mockPage = createMockPage();
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({ viewport: { width: 1920, height: 1080 } });
@@ -277,17 +282,11 @@ describe('BrowserManager', () => {
     });
 
     it('creates new page when no default pages exist', async () => {
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([]),
+      const mockPage = createMockPage();
+      const mockContext = createMockContext([], {
         newPage: vi.fn().mockResolvedValue(mockPage),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       const result = await mgr.bootstrap({});
@@ -297,17 +296,9 @@ describe('BrowserManager', () => {
     });
 
     it('closes existing context when re-bootstrapping', async () => {
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      const mockPage = createMockPage();
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -320,17 +311,13 @@ describe('BrowserManager', () => {
   describe('goto with mocked context', () => {
     it('returns url, title and status', async () => {
       const mockResponse = { status: vi.fn().mockReturnValue(200) };
-      const mockPage = {
+      const mockPage = createMockPage({
         goto: vi.fn().mockResolvedValue(mockResponse),
         url: vi.fn().mockReturnValue('https://example.com/page'),
         title: vi.fn().mockResolvedValue('Page Title'),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -342,17 +329,11 @@ describe('BrowserManager', () => {
     });
 
     it('returns null status when response is null', async () => {
-      const mockPage = {
+      const mockPage = createMockPage({
         goto: vi.fn().mockResolvedValue(null),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -364,10 +345,7 @@ describe('BrowserManager', () => {
 
   describe('action with mocked context', () => {
     function setupBrowserWithPage() {
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
+      const mockPage = createMockPage({
         click: vi.fn(),
         fill: vi.fn(),
         selectOption: vi.fn(),
@@ -378,13 +356,9 @@ describe('BrowserManager', () => {
         $: vi.fn(),
         keyboard: { press: vi.fn() },
         mouse: { wheel: vi.fn() },
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
       return { mockPage, mockContext };
     }
 
@@ -542,25 +516,20 @@ describe('BrowserManager', () => {
       await mgr.bootstrap({});
 
       await expect(
-        mgr.action({ type: 'unknown-action' } as any),
+        mgr.action({ type: 'unknown-action' } as unknown as BrowserAction),
       ).rejects.toThrow('Unknown action type: unknown-action');
     });
   });
 
   describe('html with mocked context', () => {
     it('returns page content and url', async () => {
-      const mockPage = {
-        goto: vi.fn(),
+      const mockPage = createMockPage({
         url: vi.fn().mockReturnValue('https://example.com'),
         title: vi.fn().mockResolvedValue('Example'),
         content: vi.fn().mockResolvedValue('<html><body><h1>Hello</h1></body></html>'),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -575,18 +544,11 @@ describe('BrowserManager', () => {
   describe('screenshot with mocked context', () => {
     it('calls page.screenshot with fullPage=false and type=png and returns buffer', async () => {
       const screenshotBuffer = Buffer.from('fake-png-data');
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
+      const mockPage = createMockPage({
         screenshot: vi.fn().mockResolvedValue(screenshotBuffer),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -601,18 +563,11 @@ describe('BrowserManager', () => {
   describe('pdf with mocked context', () => {
     it('calls page.pdf with A4 format and returns buffer', async () => {
       const pdfBuffer = Buffer.from('fake-pdf-data');
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
+      const mockPage = createMockPage({
         pdf: vi.fn().mockResolvedValue(pdfBuffer),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -626,17 +581,9 @@ describe('BrowserManager', () => {
 
   describe('close with mocked context', () => {
     it('closes the context and resets state', async () => {
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      const mockPage = createMockPage();
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -652,17 +599,11 @@ describe('BrowserManager', () => {
     });
 
     it('handles error during context.close gracefully', async () => {
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
+      const mockPage = createMockPage();
+      const mockContext = createMockContext([mockPage], {
         close: vi.fn().mockRejectedValue(new Error('Browser crashed')),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -675,17 +616,9 @@ describe('BrowserManager', () => {
 
   describe('tab management with mocked context', () => {
     it('closeTab throws for out-of-range index', async () => {
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      const mockPage = createMockPage();
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -695,17 +628,9 @@ describe('BrowserManager', () => {
     });
 
     it('switchTab throws for out-of-range index', async () => {
-      const mockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([mockPage]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      const mockPage = createMockPage();
+      const mockContext = createMockContext([mockPage]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -714,24 +639,15 @@ describe('BrowserManager', () => {
     });
 
     it('newTab creates page and sets it as active', async () => {
-      const newMockPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
-      };
-      const origPage = {
-        goto: vi.fn(),
-        url: vi.fn().mockReturnValue('about:blank'),
-        title: vi.fn().mockResolvedValue(''),
-      };
-      const mockContext = {
+      const newMockPage = createMockPage();
+      const origPage = createMockPage();
+      const mockContext = createMockContext([origPage], {
         pages: vi.fn()
           .mockReturnValueOnce([origPage]) // bootstrap
           .mockReturnValue([origPage, newMockPage]), // after newTab
         newPage: vi.fn().mockResolvedValue(newMockPage),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});
@@ -742,22 +658,16 @@ describe('BrowserManager', () => {
     });
 
     it('tabs returns info for each page', async () => {
-      const page1 = {
-        goto: vi.fn(),
+      const page1 = createMockPage({
         url: vi.fn().mockReturnValue('https://a.com'),
         title: vi.fn().mockResolvedValue('Page A'),
-      };
-      const page2 = {
-        goto: vi.fn(),
+      });
+      const page2 = createMockPage({
         url: vi.fn().mockReturnValue('https://b.com'),
         title: vi.fn().mockResolvedValue('Page B'),
-      };
-      const mockContext = {
-        pages: vi.fn().mockReturnValue([page1, page2]),
-        newPage: vi.fn(),
-        close: vi.fn(),
-      };
-      vi.mocked(chromium.launchPersistentContext).mockResolvedValue(mockContext as any);
+      });
+      const mockContext = createMockContext([page1, page2]);
+      stubLaunch(mockContext);
 
       const mgr = new BrowserManager();
       await mgr.bootstrap({});

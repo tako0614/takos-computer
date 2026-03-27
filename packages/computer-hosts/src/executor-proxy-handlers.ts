@@ -10,7 +10,15 @@ import type { DurableObjectNamespace, R2Bucket } from './cf-types';
 import type { D1RawOptions } from './d1-raw';
 import { executeD1RawStatement } from './d1-raw';
 import { validateD1ProxySql } from './sql-validation';
-import type { AgentExecutorEnv, AiRunBinding } from './executor-utils';
+import {
+  ok,
+  err,
+  classifyProxyError,
+  headersToRecord,
+  decodeBase64ToBytes,
+  type AgentExecutorEnv,
+  type AiRunBinding,
+} from './executor-utils';
 
 type Env = AgentExecutorEnv;
 
@@ -32,43 +40,6 @@ function buildSanitizedDOHeaders(
   const result: Record<string, string> = {};
   headers.forEach((v, k) => { result[k] = v; });
   return result;
-}
-
-function ok(data: unknown): Response {
-  return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
-}
-
-function err(message: string, status = 500): Response {
-  return new Response(JSON.stringify({ error: message }), { status, headers: { 'Content-Type': 'application/json' } });
-}
-
-function classifyProxyError(e: unknown): { status: number; message: string } {
-  const name = e instanceof Error ? e.name : '';
-  const msg = e instanceof Error ? e.message : String(e);
-  if (name === 'AbortError' || name === 'TimeoutError' || msg.includes('timed out') || msg.includes('timeout'))
-    return { status: 504, message: 'Proxy request timed out' };
-  if (msg.includes('SQLITE_BUSY') || msg.includes('database is locked'))
-    return { status: 503, message: 'Database busy, retry later' };
-  if (msg.includes('SQLITE_CONSTRAINT'))
-    return { status: 409, message: 'Database constraint violation' };
-  if (msg.includes('SQLITE_ERROR') || msg.includes('D1_ERROR'))
-    return { status: 400, message: 'Database query error' };
-  if (name === 'NetworkError' || msg.includes('ECONNREFUSED') || msg.includes('fetch failed'))
-    return { status: 502, message: 'Upstream connection failed' };
-  if (e instanceof TypeError || e instanceof RangeError)
-    return { status: 400, message: 'Invalid request' };
-  return { status: 500, message: 'Internal proxy error' };
-}
-
-function headersToRecord(headers: Headers): Record<string, string> {
-  return Object.fromEntries(headers.entries());
-}
-
-function decodeBase64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
 }
 
 function requireSql(sql: unknown, endpoint: string): Response | null {
@@ -160,7 +131,14 @@ export async function handleR2Proxy(path: string, prefix: string, body: Record<s
           const binaryKey = rawRequest.headers.get('X-R2-Key');
           if (!binaryKey) return err('Missing X-R2-Key header for binary PUT', 400);
           const optionsHeader = rawRequest.headers.get('X-R2-Options');
-          const putOptions = optionsHeader ? JSON.parse(optionsHeader) : undefined;
+          let putOptions: Record<string, unknown> | undefined;
+          if (optionsHeader) {
+            try {
+              putOptions = JSON.parse(optionsHeader) as Record<string, unknown>;
+            } catch {
+              return err('Invalid JSON in X-R2-Options header', 400);
+            }
+          }
           const contentLength = rawRequest.headers.get('Content-Length');
           if (contentLength && parseInt(contentLength, 10) > MAX_PROXY_PUT_BYTES) {
             return err(`Payload exceeds maximum size of ${MAX_PROXY_PUT_BYTES} bytes`, 413);

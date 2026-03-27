@@ -4,7 +4,7 @@ type ThreadContextEnv = DbEnv & AiEnv;
 import { getDb, accounts, threads, messages } from '../../infra/db';
 import { eq, and, gt, inArray, desc, asc } from 'drizzle-orm';
 import { now, toIsoString } from '../../shared/utils';
-import { createMultiModelClient, getProviderFromModel } from './llm';
+import { createLLMClient, getProviderFromModel } from './llm';
 import { DEFAULT_MODEL_ID } from './model-catalog';
 import type { AgentMessage } from './types';
 import { logWarn } from '../../shared/utils/logger';
@@ -207,8 +207,7 @@ async function buildUpdatedThreadSummary(params: {
     return null;
   }
 
-  const llm = createMultiModelClient({
-    apiKey,
+  const llm = createLLMClient(apiKey, {
     model,
     anthropicApiKey: env.ANTHROPIC_API_KEY,
     googleApiKey: env.GOOGLE_API_KEY,

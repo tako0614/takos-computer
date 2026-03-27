@@ -12,10 +12,8 @@ export { shouldResetRunToQueuedOnContainerError } from './run-lifecycle';
 export {
   type LLMConfig,
   LLMClient,
-  CHARS_PER_TOKEN,
   VALID_PROVIDERS,
   createLLMClient,
-  createMultiModelClient,
   createLLMClientFromEnv,
   getProviderFromModel,
 } from './llm';

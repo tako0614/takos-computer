@@ -32,12 +32,12 @@ describe('cf-types structural contracts', () => {
   describe('D1Database', () => {
     it('accepts a conforming D1Database implementation', () => {
       const db: D1Database = {
-        prepare: (query: string) => ({
+        prepare: (query: string): D1PreparedStatement => ({
           bind: (..._values: unknown[]) => db.prepare(query),
           first: async () => null,
           run: async () => ({ results: [], success: true, meta: {} }),
           all: async () => ({ results: [], success: true, meta: {} }),
-          raw: async () => [] as any,
+          raw: (async (): Promise<unknown[][]> => []) as D1PreparedStatement['raw'],
         }),
         batch: async () => [],
         exec: async () => ({ count: 0, duration: 0 }),

@@ -1,163 +1,45 @@
 /**
- * Agent Runner - Executes agent runs with LangGraph
+ * Agent Runner — orchestrates agent run execution.
  *
- * Uses LangGraph.js for stateful agent execution with tool calling.
- *
- * This file contains the AgentRunner class and re-exports.
- * Implementation is split into:
- *   - runner-events.ts    : event emission helpers
- *   - runner-messages.ts  : run status, conversation history, message helpers
- *   - runner-types.ts     : constants, utility functions, shared types
- *   - session-closer.ts   : auto-close session (snapshot + file sync)
- *   - skills.ts           : skill loading, resolution, and context
- *   - simple-loop.ts      : simple LLM loop and no-LLM fallback
- *   - execute-run.ts      : queue consumer entry point
+ * Heavy logic is split into sibling modules:
+ *   runner-io / runner-setup / runner-engine / runner-events /
+ *   runner-messages / runner-types / session-closer / skills /
+ *   simple-loop / execute-run
  */
 
 import type { RunStatus, Env } from '../../shared/types';
-import { INDEX_QUEUE_MESSAGE_VERSION } from '../../shared/types';
 import type { ObjectStoreBinding, SqlDatabaseBinding } from '../../shared/types/bindings';
-import type { AgentContext, AgentConfig, AgentEvent, AgentMessage, ToolCall } from './types';
+import type { AgentContext, AgentConfig, AgentEvent, AgentMessage } from './types';
 import type { ToolExecutorLike } from '../../tools/executor';
-import { LLMClient, createMultiModelClient, getProviderFromModel, type ModelProvider } from './llm';
+import { LLMClient, createLLMClient, getProviderFromModel, type ModelProvider } from './llm';
 import { RunCancelledError } from './run-lifecycle';
-import { generateId, safeJsonParseOrDefault } from '../../shared/utils';
-import { runLangGraphRunner } from './langgraph-runner';
 import type { SkillCatalogEntry, SkillSelection, SkillContext } from './skills';
 import { getAgentConfig } from './runner-config';
 import { DEFAULT_MODEL_ID } from './model-catalog';
 import type { RunTerminalPayload } from '../../run-notifier-types';
-import { logError, logInfo, logWarn } from '../../shared/utils/logger';
-import { AppError, AuthenticationError, InternalError } from '../../shared/utils/error-response';
+import { logError, logWarn } from '../../shared/utils/logger';
+import { AppError } from '../../shared/utils/error-response';
 import {
   handleSuccessfulRunCompletion,
   handleCancelledRun,
   handleFailedRun,
   type RunLifecycleDeps,
 } from './run-lifecycle';
-import { buildToolCatalogContent } from './prompts';
-import { buildBudgetedSystemPrompt, LANE_PRIORITY, LANE_MAX_TOKENS, type PromptLane } from './prompt-budget';
 
 // Extracted modules
 import type { ToolExecution } from './runner-types';
-import { sanitizeErrorMessage } from './runner-types';
+import { sanitizeErrorMessage, enqueuePostRunJobs } from './runner-types';
 import { autoCloseSession as autoCloseSessionImpl } from './session-closer';
-import {
-  emitSkillLoadOutcome,
-  type SkillLoadResult,
-} from './skills';
-import { runWithSimpleLoop, runWithoutLLM } from './simple-loop';
-import { AgentMemoryRuntime } from '../../memory-graph/runtime';
-import type { AgentMemoryBackend } from '../../memory-graph/runtime';
-import { RemoteToolExecutor } from './remote-tool-executor';
-import {
-  buildDelegationSystemMessage,
-  buildDelegationUserMessage,
-  getDelegationPacketFromRunInput,
-} from './delegation';
+import type { AgentMemoryRuntime } from '../../memory-graph/runtime';
 
-// Re-export from split modules for backward compatibility
-export {
-  type EventEmitterState,
-  createEventEmitterState,
-  emitEventImpl,
-  buildTerminalEventPayloadImpl,
-} from './runner-events';
-
-export {
-  updateRunStatusImpl,
-  isValidToolCallsArray,
-  type ConversationHistoryDeps,
-  normalizeRunStatus,
-  buildConversationHistory,
-} from './runner-messages';
-
-// Re-export executeRun for backward compatibility (index.ts imports it from here)
+export type { AgentRunnerIo } from './runner-io';
 export { executeRun } from './execute-run';
 
-// Import what we need from split modules
-import {
-  type EventEmitterState,
-  createEventEmitterState,
-  emitEventImpl,
-  buildTerminalEventPayloadImpl,
-} from './runner-events';
+import { type EventEmitterState, createEventEmitterState, emitEventImpl, buildTerminalEventPayloadImpl } from './runner-events';
 import { normalizeRunStatus } from './runner-messages';
-
-// ── AgentRunnerIo interface ──────────────────────────────────────────
-
-export interface AgentRunnerIo {
-  getRunBootstrap(input: {
-    runId: string;
-  }): Promise<{
-    status: RunStatus | null;
-    spaceId: string;
-    sessionId: string | null;
-    threadId: string;
-    userId: string;
-    agentType: string;
-  }>;
-  getRunRecord(input: {
-    runId: string;
-  }): Promise<{
-    status: RunStatus | null;
-    input: string | null;
-    parentRunId: string | null;
-  }>;
-  getRunStatus(input: { runId: string }): Promise<RunStatus | null>;
-  getConversationHistory(input: {
-    runId: string;
-    threadId: string;
-    spaceId: string;
-    aiModel: string;
-  }): Promise<AgentMessage[]>;
-  addMessage(input: {
-    runId: string;
-    threadId: string;
-    message: AgentMessage;
-    metadata?: Record<string, unknown>;
-  }): Promise<void>;
-  updateRunStatus(input: {
-    runId: string;
-    status: RunStatus;
-    usage: { inputTokens: number; outputTokens: number };
-    output?: string;
-    error?: string;
-  }): Promise<void>;
-  getCurrentSessionId(input: { runId: string; spaceId: string }): Promise<string | null>;
-  isCancelled(input: { runId: string }): Promise<boolean>;
-  resolveSkillPlan(input: {
-    runId: string;
-    threadId: string;
-    spaceId: string;
-    agentType: string;
-    history: AgentMessage[];
-    availableToolNames: string[];
-  }): Promise<SkillLoadResult>;
-  getMemoryActivation(input: { spaceId: string }): Promise<import('../../memory-graph/types').ActivationResult>;
-  finalizeMemoryOverlay(input: {
-    runId: string;
-    spaceId: string;
-    claims: import('../../memory-graph/types').Claim[];
-    evidence: import('../../memory-graph/types').Evidence[];
-  }): Promise<void>;
-  getToolCatalog(input: { runId: string }): Promise<{
-    tools: import('../../tools/types').ToolDefinition[];
-    mcpFailedServers: string[];
-  }>;
-  executeTool(input: {
-    runId: string;
-    toolCall: import('../../tools/types').ToolCall;
-  }): Promise<import('../../tools/types').ToolResult>;
-  cleanupToolExecutor(input: { runId: string }): Promise<void>;
-  emitRunEvent(input: {
-    runId: string;
-    type: AgentEvent['type'];
-    data: Record<string, unknown>;
-    sequence: number;
-    skipDb?: boolean;
-  }): Promise<void>;
-}
+import type { AgentRunnerIo } from './runner-io';
+import { prepareRunExecution } from './runner-setup';
+import { executeRunEngine } from './runner-engine';
 
 // ── AgentRunner class ──────────────────────────────────────────────
 
@@ -225,61 +107,10 @@ export class AgentRunner {
     const providerKey = providerKeyMap[this.modelProvider];
 
     if (providerKey) {
-      this.llmClient = createMultiModelClient({
-        apiKey: providerKey,
+      this.llmClient = createLLMClient(providerKey, {
         model: aiModel,
         anthropicApiKey: this.anthropicKey,
         googleApiKey: this.googleKey,
-      });
-    }
-  }
-
-  // ── Tool executor initialization ──────────────────────────────────
-
-  private async initToolExecutor(): Promise<void> {
-    this.toolExecutor = await RemoteToolExecutor.create(this.context.runId, {
-      getToolCatalog: (input: { runId: string }) => this.runIo.getToolCatalog(input),
-      executeTool: (input: { runId: string; toolCall: ToolCall }) => this.runIo.executeTool(input),
-      cleanupToolExecutor: (input: { runId: string }) => this.runIo.cleanupToolExecutor(input),
-    });
-
-    const availableTools = this.toolExecutor.getAvailableTools();
-    this.config.tools = availableTools.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.parameters,
-    }));
-
-    const toolCatalog = buildToolCatalogContent(
-      availableTools.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-      })),
-    );
-
-    const lanes: PromptLane[] = [
-      {
-        priority: LANE_PRIORITY.BASE_PROMPT,
-        name: 'base',
-        content: this.config.systemPrompt,
-        maxTokens: LANE_MAX_TOKENS.BASE_PROMPT,
-      },
-      {
-        priority: LANE_PRIORITY.TOOL_CATALOG,
-        name: 'tools',
-        content: toolCatalog,
-        maxTokens: LANE_MAX_TOKENS.TOOL_CATALOG,
-      },
-    ];
-
-    this.config.systemPrompt = buildBudgetedSystemPrompt(lanes);
-
-    const failedMcp = this.toolExecutor.mcpFailedServers;
-    if (failedMcp.length > 0) {
-      await this.emitEvent('thinking', {
-        message: `Warning: Failed to load MCP servers: ${failedMcp.join(', ')}`,
-        warning: true,
-        failed_mcp_servers: failedMcp,
       });
     }
   }
@@ -380,40 +211,8 @@ export class AgentRunner {
 
   // ── Queue jobs ────────────────────────────────────────────────────
 
-  private async enqueueInfoUnitJob(): Promise<void> {
-    if (!this.env.INDEX_QUEUE) return;
-    try {
-      await this.env.INDEX_QUEUE.send({
-        version: INDEX_QUEUE_MESSAGE_VERSION,
-        jobId: generateId(),
-        spaceId: this.context.spaceId,
-        type: 'info_unit',
-        targetId: this.context.runId,
-        timestamp: Date.now(),
-      });
-    } catch (err) {
-      logWarn(`Failed to enqueue info unit job for run ${this.context.runId}`, { module: 'info_unit', detail: err });
-    }
-  }
-
-  private async enqueueThreadContextJob(): Promise<void> {
-    if (!this.env.INDEX_QUEUE) return;
-    try {
-      await this.env.INDEX_QUEUE.send({
-        version: INDEX_QUEUE_MESSAGE_VERSION,
-        jobId: generateId(),
-        spaceId: this.context.spaceId,
-        type: 'thread_context',
-        targetId: this.context.threadId,
-        timestamp: Date.now(),
-      });
-    } catch (err) {
-      logWarn(`Failed to enqueue thread context job for thread ${this.context.threadId}`, { module: 'thread_context', detail: err });
-    }
-  }
-
   private async enqueuePostRunJobs(): Promise<void> {
-    await Promise.all([this.enqueueInfoUnitJob(), this.enqueueThreadContextJob()]);
+    await enqueuePostRunJobs(this.env, this.context.spaceId, this.context.runId, this.context.threadId);
   }
 
   // ── Conversation / message helpers ────────────────────────────────
@@ -451,7 +250,7 @@ export class AgentRunner {
     return this.runIo.getRunRecord({ runId: this.context.runId });
   }
 
-  private async resolveSkillPlan(history: AgentMessage[]): Promise<SkillLoadResult> {
+  private async resolveSkillPlan(history: AgentMessage[]): Promise<import('./skills').SkillLoadResult> {
     return this.runIo.resolveSkillPlan({
       runId: this.context.runId,
       threadId: this.context.threadId,
@@ -462,240 +261,17 @@ export class AgentRunner {
     });
   }
 
-  private createMemoryBackend(): AgentMemoryBackend | undefined {
-    return {
-      bootstrap: () => this.runIo.getMemoryActivation({ spaceId: this.context.spaceId }),
-      finalize: ({ claims, evidence }) => this.runIo.finalizeMemoryOverlay({
-        runId: this.context.runId,
-        spaceId: this.context.spaceId,
-        claims,
-        evidence,
-      }),
-    };
-  }
-
   // ── Lifecycle delegation ──────────────────────────────────────────
 
-  private getLifecycleDeps(): RunLifecycleDeps {
+  private lifecycleDeps(): RunLifecycleDeps {
     return {
       updateRunStatus: this.updateRunStatus.bind(this),
       emitEvent: this.emitEvent.bind(this),
       buildTerminalEventPayload: this.buildTerminalEventPayload.bind(this),
       autoCloseSession: this.autoCloseSession.bind(this),
       enqueuePostRunJobs: this.enqueuePostRunJobs.bind(this),
-      sanitizeErrorMessage: sanitizeErrorMessage,
+      sanitizeErrorMessage,
     };
-  }
-
-  private async handleSuccessfulRunCompletion(): Promise<void> {
-    await handleSuccessfulRunCompletion(this.getLifecycleDeps());
-  }
-
-  private async handleCancelledRun(): Promise<void> {
-    await handleCancelledRun(this.getLifecycleDeps());
-  }
-
-  private async handleFailedRun(error: unknown): Promise<void> {
-    await handleFailedRun(this.getLifecycleDeps(), error);
-  }
-
-  // ── Run preparation ───────────────────────────────────────────────
-
-  private async prepareRunExecution(): Promise<{
-    engine: 'langgraph' | 'simple' | 'none';
-    history: AgentMessage[];
-  }> {
-    await this.throwIfCancelled('before-start');
-    const canUseLangGraph = this.modelProvider === 'openai'
-      && !!this.openAiKey;
-    const engine = !this.llmClient
-      ? 'none'
-      : canUseLangGraph
-        ? 'langgraph'
-        : 'simple';
-
-    await this.updateRunStatus('running');
-    await this.emitEvent('started', {
-      agent_type: this.config.type,
-      engine,
-    });
-
-    if (!this.llmClient) {
-      await this.emitEvent('thinking', {
-        message: `Warning: No API key configured for ${this.modelProvider} (model: ${this.aiModel}). Running in limited mode without LLM.`,
-        warning: true,
-      });
-    }
-
-    await this.initToolExecutor();
-
-    const history = await this.getConversationHistory();
-    if (!this.llmClient) {
-      await this.throwIfCancelled('before-execution');
-      return { engine, history };
-    }
-
-    const currentRun = await this.getRunRecord();
-    const runInput = safeJsonParseOrDefault<Record<string, unknown> | unknown>(currentRun.input || '{}', {});
-    const runInputObject = runInput && typeof runInput === 'object' && !Array.isArray(runInput)
-      ? runInput as Record<string, unknown>
-      : {};
-    const delegationPacket = currentRun.parentRunId
-      ? getDelegationPacketFromRunInput(runInputObject)
-      : null;
-    const delegationObservability = runInputObject.delegation_observability;
-    const savedDelegationObservability = delegationObservability && typeof delegationObservability === 'object' && !Array.isArray(delegationObservability)
-      ? delegationObservability as Record<string, unknown>
-      : null;
-    if (delegationPacket) {
-      await this.emitEvent('thinking', {
-        message: 'Loaded delegated execution context for sub-agent run',
-        delegated_context: true,
-        delegation_product_hint: delegationPacket.product_hint,
-        delegation_locale: delegationPacket.locale,
-        delegation_constraints_count: delegationPacket.constraints.length,
-        delegation_context_count: delegationPacket.context.length,
-        delegation_has_thread_summary: !!delegationPacket.thread_summary,
-        delegation_explicit_fields_count: typeof savedDelegationObservability?.explicit_field_count === 'number'
-          ? savedDelegationObservability.explicit_field_count
-          : null,
-        delegation_inferred_fields_count: typeof savedDelegationObservability?.inferred_field_count === 'number'
-          ? savedDelegationObservability.inferred_field_count
-          : null,
-      });
-    }
-    const skillResult = await this.resolveSkillPlan(history);
-
-    this.skillLocale = skillResult.skillLocale;
-    this.availableSkills = skillResult.availableSkills;
-    this.selectedSkills = skillResult.selectedSkills;
-    this.activatedSkills = skillResult.activatedSkills;
-
-    await emitSkillLoadOutcome(skillResult, this.emitEvent.bind(this));
-
-    // Initialize memory runtime and wire observer + idempotency into tool executor
-    try {
-      this.memoryRuntime = new AgentMemoryRuntime(
-        this.db,
-        this.context,
-        this.env,
-        this.createMemoryBackend(),
-      );
-      await this.memoryRuntime.bootstrap();
-      if (this.toolExecutor) {
-        const observer = this.memoryRuntime.createToolObserver();
-        this.toolExecutor.setObserver(observer);
-      }
-    } catch (err) {
-      logWarn('Memory runtime initialization failed, continuing without memory', {
-        module: 'services/agent/runner',
-        detail: err,
-      });
-      this.memoryRuntime = undefined;
-    }
-
-    await this.throwIfCancelled('before-execution');
-
-    return { engine, history };
-  }
-
-  // ── Engine execution ──────────────────────────────────────────────
-
-  private async runWithLangGraph(history: AgentMessage[]): Promise<void> {
-    if (!this.openAiKey) {
-      throw new AuthenticationError('API key is required for LangGraph');
-    }
-    if (!this.toolExecutor) {
-      throw new InternalError('Tool executor not initialized');
-    }
-    await runLangGraphRunner({
-      apiKey: this.openAiKey,
-      model: this.aiModel,
-      systemPrompt: this.config.systemPrompt,
-      skillPlan: {
-        locale: this.skillLocale,
-        availableSkills: this.availableSkills,
-        selectableSkills: this.availableSkills.filter((skill) => skill.availability !== 'unavailable'),
-        selectedSkills: this.selectedSkills,
-        activatedSkills: this.activatedSkills,
-      },
-      history,
-      threadId: this.context.threadId,
-      runId: this.context.runId,
-      sessionId: this.context.sessionId,
-      toolExecutor: this.toolExecutor as never,
-      db: this.db,
-      maxIterations: this.config.maxIterations || 10,
-      temperature: this.config.temperature ?? 0.7,
-      toolExecutions: this.toolExecutions,
-      emitEvent: this.emitEvent.bind(this),
-      addMessage: this.addMessage.bind(this),
-      updateRunStatus: this.updateRunStatus.bind(this),
-      env: this.env,
-      spaceId: this.context.spaceId,
-      shouldCancel: this.checkCancellation.bind(this),
-      abortSignal: this.abortSignal,
-      memoryRuntime: this.memoryRuntime ?? undefined,
-    });
-  }
-
-  private async runSimpleLoop(): Promise<void> {
-    if (!this.llmClient) {
-      throw new InternalError('No LLM client available');
-    }
-    await runWithSimpleLoop({
-      env: this.env,
-      config: this.config,
-      llmClient: this.llmClient,
-      toolExecutor: this.toolExecutor,
-      skillLocale: this.skillLocale,
-      availableSkills: this.availableSkills,
-      selectedSkills: this.selectedSkills,
-      activatedSkills: this.activatedSkills,
-      spaceId: this.context.spaceId,
-      abortSignal: this.abortSignal,
-      toolExecutions: this.toolExecutions,
-      totalUsage: this.totalUsage,
-      toolCallCount: this.toolCallCount,
-      totalToolCalls: this.totalToolCalls,
-      memoryRuntime: this.memoryRuntime ?? undefined,
-      throwIfCancelled: (ctx) => this.throwIfCancelled(ctx),
-      emitEvent: (type, data) => this.emitEvent(type, data),
-      addMessage: (msg, meta) => this.addMessage(msg, meta),
-      updateRunStatus: (status, output, error) => this.updateRunStatus(status, output, error),
-      buildTerminalEventPayload: (status, details) => this.buildTerminalEventPayload(status, details),
-      getConversationHistory: () => this.getConversationHistory(),
-    });
-  }
-
-  private async executeRunEngine(
-    history: AgentMessage[],
-    engine: 'langgraph' | 'simple' | 'none',
-  ): Promise<void> {
-    if (engine === 'none') {
-      await runWithoutLLM(
-        {
-          toolExecutor: this.toolExecutor,
-          emitEvent: (type, data) => this.emitEvent(type, data),
-          addMessage: (msg, meta) => this.addMessage(msg, meta),
-          updateRunStatus: (status, output, error) => this.updateRunStatus(status, output, error),
-          buildTerminalEventPayload: (status, details) => this.buildTerminalEventPayload(status, details),
-        },
-        history,
-      );
-      return;
-    }
-
-    if (engine === 'simple') {
-      await this.emitEvent('thinking', {
-        message: 'Using simple mode for selected model',
-        engine: 'simple',
-      });
-      await this.runSimpleLoop();
-      return;
-    }
-
-    await this.runWithLangGraph(history);
   }
 
   // ── Cleanup ───────────────────────────────────────────────────────
@@ -732,19 +308,80 @@ export class AgentRunner {
     }
   }
 
+  // ── Bridging helpers for extracted modules ──────────────────────────
+
+  /** Mutable state snapshot consumed by prepareRunExecution */
+  private buildSetupState() {
+    return {
+      env: this.env, db: this.db, context: this.context, config: this.config,
+      aiModel: this.aiModel, modelProvider: this.modelProvider,
+      openAiKey: this.openAiKey, llmClient: this.llmClient,
+      toolExecutor: this.toolExecutor, skillLocale: this.skillLocale,
+      availableSkills: this.availableSkills, selectedSkills: this.selectedSkills,
+      activatedSkills: this.activatedSkills, memoryRuntime: this.memoryRuntime,
+      runIo: this.runIo,
+    };
+  }
+
+  /** Sync mutated fields back from setup state */
+  private applySetupState(s: ReturnType<AgentRunner['buildSetupState']>): void {
+    this.toolExecutor = s.toolExecutor;
+    this.skillLocale = s.skillLocale;
+    this.availableSkills = s.availableSkills;
+    this.selectedSkills = s.selectedSkills;
+    this.activatedSkills = s.activatedSkills;
+    this.memoryRuntime = s.memoryRuntime;
+  }
+
+  /** Read-only snapshot consumed by executeRunEngine */
+  private buildEngineState() {
+    return {
+      env: this.env, db: this.db, context: this.context, config: this.config,
+      aiModel: this.aiModel, modelProvider: this.modelProvider,
+      openAiKey: this.openAiKey, llmClient: this.llmClient,
+      toolExecutor: this.toolExecutor, skillLocale: this.skillLocale,
+      availableSkills: this.availableSkills, selectedSkills: this.selectedSkills,
+      activatedSkills: this.activatedSkills, toolExecutions: this.toolExecutions,
+      totalUsage: this.totalUsage, toolCallCount: this.toolCallCount,
+      totalToolCalls: this.totalToolCalls, abortSignal: this.abortSignal,
+      memoryRuntime: this.memoryRuntime,
+    };
+  }
+
   // ── Main entry point ──────────────────────────────────────────────
 
   async run(): Promise<void> {
+    const boundDeps = {
+      throwIfCancelled: (ctx: string) => this.throwIfCancelled(ctx),
+      checkCancellation: (force?: boolean) => this.checkCancellation(force),
+      emitEvent: (type: AgentEvent['type'], data: Record<string, unknown>) =>
+        this.emitEvent(type, data),
+      addMessage: (msg: AgentMessage, meta?: Record<string, unknown>) =>
+        this.addMessage(msg, meta),
+      updateRunStatus: (status: RunStatus, output?: string, error?: string) =>
+        this.updateRunStatus(status, output, error),
+      buildTerminalEventPayload: (
+        status: 'completed' | 'failed' | 'cancelled',
+        details?: Record<string, unknown>,
+      ) => this.buildTerminalEventPayload(status, details),
+      getConversationHistory: () => this.getConversationHistory(),
+      getRunRecord: () => this.getRunRecord(),
+      resolveSkillPlan: (h: AgentMessage[]) => this.resolveSkillPlan(h),
+    };
+
     try {
-      const { engine, history } = await this.prepareRunExecution();
-      await this.executeRunEngine(history, engine);
-      await this.handleSuccessfulRunCompletion();
+      const setupState = this.buildSetupState();
+      const { engine, history } = await prepareRunExecution(setupState, boundDeps);
+      this.applySetupState(setupState);
+
+      await executeRunEngine(this.buildEngineState(), boundDeps, history, engine);
+      await handleSuccessfulRunCompletion(this.lifecycleDeps());
     } catch (error) {
       if (error instanceof RunCancelledError) {
-        await this.handleCancelledRun();
+        await handleCancelledRun(this.lifecycleDeps());
         return;
       }
-      await this.handleFailedRun(error);
+      await handleFailedRun(this.lifecycleDeps(), error);
       throw error;
     } finally {
       await this.cleanupAfterRun();
