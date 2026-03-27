@@ -7,8 +7,8 @@ import {
   createInProgressJobResult,
   finalizeJobResult,
   getDependencySkipReason,
-  normalizeNeedsInput,
-} from '../../scheduler/job.js';
+} from '../../scheduler/job-policy.js';
+import { normalizeNeedsInput } from '../../scheduler/job-context.js';
 
 describe('job policy helpers', () => {
   it('normalizes job needs definitions', () => {

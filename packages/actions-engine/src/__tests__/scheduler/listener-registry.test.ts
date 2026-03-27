@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createListenerRegistry } from '../../scheduler/job.js';
+import { createListenerRegistry } from '../../scheduler/listener-registry.js';
 
 describe('listener registry snapshot emits', () => {
   it('keeps current emit stable when a listener is removed during emit', () => {

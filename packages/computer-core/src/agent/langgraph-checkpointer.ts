@@ -2,6 +2,8 @@
  * D1 Checkpoint Saver for LangGraph
  *
  * Persists LangGraph checkpoints and pending writes to D1 (Cloudflare SQL).
+ *
+ * Recovery / cleanup operations are in `./langgraph-checkpointer-recovery.ts`.
  */
 
 import {
@@ -17,8 +19,13 @@ import { BadRequestError, InternalError } from '../../shared/utils/error-respons
 import { getDb, lgCheckpoints, lgWrites } from '../../infra/db';
 import { eq, and, lt, desc } from 'drizzle-orm';
 import { toIsoString } from '../../shared/utils';
-import { logError, logInfo, logWarn } from '../../shared/utils/logger';
+import { logError, logWarn } from '../../shared/utils/logger';
 import type { SqlDatabaseBinding } from '../../shared/types/bindings';
+import {
+  deleteThread as deleteThreadImpl,
+  recoverCorruptedCheckpoint as recoverCorruptedCheckpointImpl,
+  type RecoveryResult,
+} from './langgraph-checkpointer-recovery';
 
 // ── Internal helpers ─────────────────────────────────────────────────────
 
@@ -102,16 +109,11 @@ export class D1CheckpointSaver extends BaseCheckpointSaver<number> {
     super();
   }
 
+  // ── Recovery / cleanup (delegated) ──────────────────────────────────
+
   /** Delete all checkpoints and writes for a thread. */
   async deleteThread(threadId: string): Promise<void> {
-    try {
-      const db = getDb(this.db);
-      await db.delete(lgWrites).where(eq(lgWrites.threadId, threadId));
-      await db.delete(lgCheckpoints).where(eq(lgCheckpoints.threadId, threadId));
-    } catch (error) {
-      const errorMsg = errorMessage(error);
-      throw new InternalError(`Failed to delete thread checkpoints: ${errorMsg}`);
-    }
+    return deleteThreadImpl(this.db, threadId);
   }
 
   /**
@@ -122,129 +124,12 @@ export class D1CheckpointSaver extends BaseCheckpointSaver<number> {
   async recoverCorruptedCheckpoint(
     threadId: string,
     checkpointNs: string = '',
-    checkpointId?: string
-  ): Promise<{
-    recovered: boolean;
-    cleanedWrites: number;
-    resetToParent: boolean;
-    error?: string;
-  }> {
-    try {
-      const db = getDb(this.db);
-
-      const row = checkpointId
-        ? await db.select().from(lgCheckpoints).where(
-            and(
-              eq(lgCheckpoints.threadId, threadId),
-              eq(lgCheckpoints.checkpointNs, checkpointNs),
-              eq(lgCheckpoints.checkpointId, checkpointId),
-            )
-          ).get()
-        : await db.select().from(lgCheckpoints).where(
-            and(
-              eq(lgCheckpoints.threadId, threadId),
-              eq(lgCheckpoints.checkpointNs, checkpointNs),
-            )
-          ).orderBy(desc(lgCheckpoints.ts)).get();
-
-      if (!row) {
-        return { recovered: false, cleanedWrites: 0, resetToParent: false, error: 'Checkpoint not found' };
-      }
-
-      try {
-        await this.serde.loadsTyped(row.checkpointType, fromBase64(row.checkpointData));
-      } catch {
-        logError(`Core checkpoint ${row.checkpointId} is corrupted, resetting to parent`, undefined, { module: 'd1checkpointer' });
-
-        if (row.parentCheckpointId) {
-          // Delete this corrupted checkpoint and its writes
-          await db.delete(lgWrites).where(
-            and(
-              eq(lgWrites.threadId, threadId),
-              eq(lgWrites.checkpointId, row.checkpointId),
-            )
-          );
-          await db.delete(lgCheckpoints).where(
-            and(
-              eq(lgCheckpoints.threadId, threadId),
-              eq(lgCheckpoints.checkpointNs, checkpointNs),
-              eq(lgCheckpoints.checkpointId, row.checkpointId),
-            )
-          );
-
-          return {
-            recovered: true,
-            cleanedWrites: 0,
-            resetToParent: true,
-            error: `Corrupted checkpoint deleted, will resume from parent: ${row.parentCheckpointId}`,
-          };
-        } else {
-          return {
-            recovered: false,
-            cleanedWrites: 0,
-            resetToParent: false,
-            error: 'Root checkpoint is corrupted and cannot be recovered',
-          };
-        }
-      }
-
-      const writes = await db.select({
-        taskId: lgWrites.taskId,
-        channel: lgWrites.channel,
-        valueType: lgWrites.valueType,
-        valueData: lgWrites.valueData,
-      }).from(lgWrites).where(
-        and(
-          eq(lgWrites.threadId, threadId),
-          eq(lgWrites.checkpointNs, checkpointNs),
-          eq(lgWrites.checkpointId, row.checkpointId),
-        )
-      ).all();
-
-      const corruptedWrites: Array<{ taskId: string; channel: string }> = [];
-
-      for (const w of writes) {
-        try {
-          await this.serde.loadsTyped(w.valueType, fromBase64(w.valueData));
-        } catch {
-          corruptedWrites.push({ taskId: w.taskId, channel: w.channel });
-        }
-      }
-
-      if (corruptedWrites.length === 0) {
-        return { recovered: true, cleanedWrites: 0, resetToParent: false };
-      }
-
-      for (const write of corruptedWrites) {
-        await db.delete(lgWrites).where(
-          and(
-            eq(lgWrites.threadId, threadId),
-            eq(lgWrites.checkpointNs, checkpointNs),
-            eq(lgWrites.checkpointId, row.checkpointId),
-            eq(lgWrites.taskId, write.taskId),
-            eq(lgWrites.channel, write.channel),
-          )
-        );
-      }
-
-      logInfo(`Recovered checkpoint ${row.checkpointId}: ` +
-        `deleted ${corruptedWrites.length} corrupted writes from channels: ${corruptedWrites.map(w => w.channel).join(', ')}`, { module: 'd1checkpointer' });
-
-      return {
-        recovered: true,
-        cleanedWrites: corruptedWrites.length,
-        resetToParent: false,
-      };
-    } catch (error) {
-      const errorMsg = errorMessage(error);
-      return {
-        recovered: false,
-        cleanedWrites: 0,
-        resetToParent: false,
-        error: `Recovery failed: ${errorMsg}`,
-      };
-    }
+    checkpointId?: string,
+  ): Promise<RecoveryResult> {
+    return recoverCorruptedCheckpointImpl(this.db, this.serde, threadId, checkpointNs, checkpointId);
   }
+
+  // ── Validation ──────────────────────────────────────────────────────
 
   /** Validate that the parent checkpoint exists and belongs to the same thread. */
   private async validateAncestry(

@@ -1,0 +1,16 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/common" },
+    { "path": "packages/actions-engine" },
+    { "path": "packages/agent-core" },
+    { "path": "packages/cloudflare-compat" },
+    { "path": "packages/browser-service" },
+    { "path": "packages/computer-core" },
+    { "path": "packages/computer-agent" },
+    { "path": "packages/computer-hosts" },
+    { "path": "packages/executor-service" },
+    { "path": "apps/browser" },
+    { "path": "apps/executor" }
+  ]
+}

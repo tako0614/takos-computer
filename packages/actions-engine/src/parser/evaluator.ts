@@ -1,0 +1,340 @@
+/**
+ * Expression parser and evaluator (recursive-descent)
+ */
+import type { ExecutionContext } from '../types.js';
+import {
+  ExpressionError,
+  BLOCKED_PROPERTY_KEYS,
+  COMPARISON_OPERATORS,
+  MAX_EVALUATE_CALLS,
+  MAX_PARSE_ACCESS_DEPTH,
+  type Token,
+  type TokenType,
+} from './expression-types.js';
+import {
+  fnContains,
+  fnStartsWith,
+  fnEndsWith,
+  fnFormat,
+  fnJoin,
+  fnToJSON,
+  fnFromJSON,
+  fnHashFiles,
+  fnSuccess,
+  fnAlways,
+  fnCancelled,
+  fnFailure,
+} from './functions.js';
+
+/**
+ * Simple expression parser and evaluator
+ */
+export class ExpressionEvaluator {
+  private readonly tokens: Token[];
+  private pos: number;
+  private readonly context: ExecutionContext;
+  private readonly expression: string;
+  private evaluateCallCount: number;
+  private readonly contextMap: Readonly<Record<string, unknown>>;
+
+  constructor(tokens: Token[], context: ExecutionContext, expression: string) {
+    this.tokens = tokens;
+    this.pos = 0;
+    this.context = context;
+    this.expression = expression;
+    this.evaluateCallCount = 0;
+    this.contextMap = {
+      github: context.github,
+      env: context.env,
+      vars: context.vars,
+      secrets: context.secrets,
+      runner: context.runner,
+      job: context.job,
+      steps: context.steps,
+      needs: context.needs,
+      strategy: context.strategy,
+      matrix: context.matrix,
+      inputs: context.inputs,
+    };
+  }
+
+  private current(): Token {
+    return this.tokens[this.pos];
+  }
+
+  private advance(): Token {
+    const token = this.current();
+    this.pos++;
+    return token;
+  }
+
+  private match(type: TokenType): boolean {
+    if (this.current().type === type) {
+      this.advance();
+      return true;
+    }
+    return false;
+  }
+
+  private expect(type: TokenType): Token {
+    const token = this.current();
+    if (token.type !== type) {
+      throw new ExpressionError(
+        `Expected ${type} but got ${token.type}`,
+        this.tokenSource()
+      );
+    }
+    return this.advance();
+  }
+
+  private tokenSource(): string {
+    return this.tokens.map((t) => t.raw).join('');
+  }
+
+  private getIdentifierValue(token: Token): string {
+    if (token.type !== 'identifier' || typeof token.value !== 'string') {
+      const valueType = token.value === null ? 'null' : typeof token.value;
+      throw new ExpressionError(
+        `Expected identifier token with string value but got ${token.type}(${valueType})`,
+        this.expression
+      );
+    }
+    return token.value;
+  }
+
+  /**
+   * Parse and evaluate expression
+   */
+  evaluate(): unknown {
+    this.evaluateCallCount++;
+    if (this.evaluateCallCount > MAX_EVALUATE_CALLS) {
+      throw new ExpressionError(
+        `Expression evaluate call limit exceeded: ${MAX_EVALUATE_CALLS}`,
+        this.expression
+      );
+    }
+    return this.parseOr();
+  }
+
+  private parseOr(): unknown {
+    let left = this.parseAnd();
+    while (this.current().value === '||') {
+      this.advance();
+      const right = this.parseAnd();
+      left = this.toBoolean(left) || this.toBoolean(right);
+    }
+    return left;
+  }
+
+  private parseAnd(): unknown {
+    let left = this.parseComparison();
+    while (this.current().value === '&&') {
+      this.advance();
+      const right = this.parseComparison();
+      left = this.toBoolean(left) && this.toBoolean(right);
+    }
+    return left;
+  }
+
+  private parseComparison(): unknown {
+    const left = this.parseUnary();
+    const op = this.current().value;
+    if (typeof op === 'string' && COMPARISON_OPERATORS.has(op)) {
+      this.advance();
+      const right = this.parseUnary();
+      return this.compare(left, op, right);
+    }
+    return left;
+  }
+
+  private parseUnary(): unknown {
+    if (this.current().value === '!') {
+      this.advance();
+      const value = this.parseUnary();
+      return !this.toBoolean(value);
+    }
+    return this.parseAccess();
+  }
+
+  private checkAccessDepth(depth: number): void {
+    if (depth > MAX_PARSE_ACCESS_DEPTH) {
+      throw new ExpressionError(
+        `Expression access depth limit exceeded: ${MAX_PARSE_ACCESS_DEPTH}`,
+        this.expression
+      );
+    }
+  }
+
+  private parseAccess(): unknown {
+    let value = this.parsePrimary();
+    let depth = 0;
+
+    while (true) {
+      if (this.match('dot')) {
+        this.checkAccessDepth(++depth);
+        const prop = this.getIdentifierValue(this.expect('identifier'));
+        value = this.getProperty(value, prop);
+      } else if (this.match('lbracket')) {
+        this.checkAccessDepth(++depth);
+        const index = this.evaluate();
+        this.expect('rbracket');
+        value = this.getProperty(value, index);
+      } else {
+        break;
+      }
+    }
+
+    return value;
+  }
+
+  private parsePrimary(): unknown {
+    const token = this.current();
+
+    if (token.type === 'string' || token.type === 'number' || token.type === 'boolean') {
+      this.advance();
+      return token.value;
+    }
+    if (token.type === 'null') {
+      this.advance();
+      return null;
+    }
+
+    if (token.type === 'identifier') {
+      const name = this.getIdentifierValue(this.advance());
+
+      // Check if it's a function call
+      if (this.current().type === 'lparen') {
+        return this.parseFunction(name);
+      }
+
+      // Context variable
+      return this.getContextValue(name);
+    }
+
+    if (token.type === 'lparen') {
+      this.advance();
+      const value = this.evaluate();
+      this.expect('rparen');
+      return value;
+    }
+
+    throw new ExpressionError(
+      `Unexpected token: ${token.type}`,
+      this.tokenSource()
+    );
+  }
+
+  private parseFunction(name: string): unknown {
+    this.expect('lparen');
+    const args: unknown[] = [];
+
+    if (this.current().type !== 'rparen') {
+      args.push(this.evaluate());
+      while (this.match('comma')) {
+        args.push(this.evaluate());
+      }
+    }
+
+    this.expect('rparen');
+    return this.callFunction(name, args);
+  }
+
+  private getContextValue(name: string): unknown {
+    return this.contextMap[name];
+  }
+
+  private getProperty(obj: unknown, key: unknown): unknown {
+    if (obj === null || obj === undefined) {
+      return undefined;
+    }
+    const keyString = String(key);
+    if (BLOCKED_PROPERTY_KEYS.has(keyString)) {
+      return undefined;
+    }
+    if (typeof obj === 'object') {
+      return (obj as Record<string, unknown>)[keyString];
+    }
+    return undefined;
+  }
+
+  private compare(left: unknown, op: string, right: unknown): boolean {
+    switch (op) {
+      case '==':
+        return left === right;
+      case '!=':
+        return left !== right;
+      case '<':
+      case '>':
+      case '<=':
+      case '>=': {
+        const l = Number(left);
+        const r = Number(right);
+        if (Number.isNaN(l) || Number.isNaN(r)) {
+          throw new ExpressionError(
+            `Comparison operator '${op}' received a NaN operand`,
+            this.expression
+          );
+        }
+        if (op === '<') return l < r;
+        if (op === '>') return l > r;
+        if (op === '<=') return l <= r;
+        return l >= r;
+      }
+      default:
+        throw new ExpressionError(
+          `Unknown comparison operator: ${op}`,
+          this.expression
+        );
+    }
+  }
+
+  private toBoolean(value: unknown): boolean {
+    if (value === null || value === undefined || value === '') {
+      return false;
+    }
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return value !== 0;
+    }
+    if (typeof value === 'string') {
+      return value.length > 0;
+    }
+    return true;
+  }
+
+  private callFunction(name: string, args: unknown[]): unknown {
+    switch (name) {
+      case 'contains':
+        return fnContains(args);
+      case 'startsWith':
+        return fnStartsWith(args);
+      case 'endsWith':
+        return fnEndsWith(args);
+      case 'format':
+        return fnFormat(args);
+      case 'join':
+        return fnJoin(args);
+      case 'toJSON':
+        return fnToJSON(args);
+      case 'fromJSON':
+        return fnFromJSON(args);
+      case 'hashFiles':
+        return fnHashFiles(args, this.context);
+      case 'success':
+        return fnSuccess(this.context);
+      case 'always':
+        return fnAlways();
+      case 'cancelled':
+        return fnCancelled(this.context);
+      case 'failure':
+        return fnFailure(this.context);
+      default:
+        throw new ExpressionError(
+          `Unknown function: ${name}`,
+          this.tokenSource()
+        );
+    }
+  }
+}

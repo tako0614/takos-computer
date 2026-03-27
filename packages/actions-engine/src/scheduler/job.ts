@@ -8,8 +8,6 @@ import type {
   ExecutionPlan,
   ExecutionContext,
   Conclusion,
-  Step,
-  StepResult,
 } from '../types.js';
 import { evaluateCondition } from '../parser/expression.js';
 import {
@@ -18,235 +16,30 @@ import {
   type DependencyGraph,
 } from './dependency.js';
 import { StepRunner, type StepRunnerOptions } from './step.js';
+import {
+  createListenerRegistry,
+  type ListenerRegistry,
+} from './listener-registry.js';
+import {
+  buildNeedsContext,
+  buildJobExecutionContext,
+  buildStepsContext,
+  normalizeNeedsInput,
+} from './job-context.js';
+import {
+  type JobExecutionState,
+  createCompletedJobResult,
+  createInProgressJobResult,
+  classifyStepControl,
+  finalizeJobResult,
+  getDependencySkipReason,
+} from './job-policy.js';
+import type {
+  JobSchedulerEvent,
+  JobSchedulerListener,
+} from './job-events.js';
 
-// --- Listener registry ---
-
-export type EventListener<TEvent> = (event: TEvent) => void;
-
-export interface ListenerRegistry<
-  TEvent,
-  TListener extends EventListener<TEvent> = EventListener<TEvent>,
-> {
-  on(listener: TListener): () => void;
-  emit(event: TEvent): void;
-}
-
-export function createListenerRegistry<
-  TEvent,
-  TListener extends EventListener<TEvent> = EventListener<TEvent>,
->(): ListenerRegistry<TEvent, TListener> {
-  const listeners: TListener[] = [];
-
-  return {
-    on(listener: TListener): () => void {
-      listeners.push(listener);
-      return () => {
-        const index = listeners.indexOf(listener);
-        if (index >= 0) {
-          listeners.splice(index, 1);
-        }
-      };
-    },
-    emit(event: TEvent): void {
-      const listenersSnapshot = [...listeners];
-      for (const listener of listenersSnapshot) {
-        try {
-          listener(event);
-        } catch {
-          // Ignore listener errors
-        }
-      }
-    },
-  };
-}
-
-// --- Job context helpers ---
-
-type NeedsResult = ExecutionContext['needs'][string]['result'];
-
-function normalizeNeedsResult(conclusion: JobResult['conclusion']): NeedsResult {
-  if (
-    conclusion === 'failure' ||
-    conclusion === 'cancelled' ||
-    conclusion === 'skipped'
-  ) {
-    return conclusion;
-  }
-  return 'success';
-}
-
-export function buildNeedsContext(
-  needs: string[],
-  results: ReadonlyMap<string, JobResult>
-): ExecutionContext['needs'] {
-  const needsContext: ExecutionContext['needs'] = {};
-
-  for (const need of needs) {
-    const needResult = results.get(need);
-    if (!needResult) {
-      continue;
-    }
-
-    needsContext[need] = {
-      outputs: { ...needResult.outputs },
-      result: normalizeNeedsResult(needResult.conclusion),
-    };
-  }
-
-  return needsContext;
-}
-
-export function buildJobExecutionContext(
-  context: ExecutionContext,
-  needsContext: ExecutionContext['needs'],
-  envSources: Array<Record<string, string> | undefined>
-): ExecutionContext {
-  const env = Object.assign(
-    {},
-    ...envSources.filter((source): source is Record<string, string> => Boolean(source))
-  );
-
-  return {
-    ...context,
-    env,
-    needs: needsContext,
-    job: {
-      ...context.job,
-      status: 'success',
-    },
-    steps: {},
-  };
-}
-
-export function buildStepsContext(stepResults: StepResult[]): ExecutionContext['steps'] {
-  const stepsContext: ExecutionContext['steps'] = {};
-
-  for (const stepResult of stepResults) {
-    if (stepResult.id) {
-      const conclusion = stepResult.conclusion || 'success';
-      stepsContext[stepResult.id] = {
-        outputs: { ...stepResult.outputs },
-        outcome: conclusion,
-        conclusion,
-      };
-    }
-  }
-
-  return stepsContext;
-}
-
-// --- normalizeNeedsInput ---
-
-export function normalizeNeedsInput(needs: unknown): string[] {
-  if (typeof needs === 'string') return [needs];
-  if (Array.isArray(needs)) return needs.filter((need): need is string => typeof need === 'string');
-  return [];
-}
-
-// --- Job policy helpers ---
-
-export interface JobExecutionState {
-  failed: boolean;
-  cancelled: boolean;
-}
-
-export interface StepControl {
-  shouldStopJob: boolean;
-  shouldMarkJobFailed: boolean;
-  shouldCancelWorkflow: boolean;
-}
-
-export function createCompletedJobResult(
-  id: string,
-  name: string | undefined,
-  conclusion: Conclusion
-): JobResult {
-  return {
-    id,
-    name,
-    steps: [],
-    outputs: {},
-    status: 'completed',
-    conclusion,
-  };
-}
-
-export function createInProgressJobResult(
-  id: string,
-  name: string | undefined
-): JobResult {
-  return {
-    id,
-    name,
-    steps: [],
-    outputs: {},
-    status: 'in_progress',
-    startedAt: new Date(),
-  };
-}
-
-export function classifyStepControl(
-  step: Step,
-  result: StepResult,
-  failFast: boolean
-): StepControl {
-  const shouldStopJob = result.conclusion === 'failure' && !step['continue-on-error'];
-  return {
-    shouldStopJob,
-    shouldMarkJobFailed: shouldStopJob,
-    shouldCancelWorkflow: shouldStopJob && failFast,
-  };
-}
-
-function collectStepOutputs(steps: StepResult[]): Record<string, string> {
-  const outputs: Record<string, string> = {};
-
-  for (const stepResult of steps) {
-    if (!stepResult.id) {
-      continue;
-    }
-    Object.assign(outputs, stepResult.outputs);
-  }
-
-  return outputs;
-}
-
-export function finalizeJobResult(
-  result: JobResult,
-  executionState: JobExecutionState
-): void {
-  result.status = 'completed';
-  result.conclusion = executionState.cancelled
-    ? 'cancelled'
-    : executionState.failed
-      ? 'failure'
-      : 'success';
-  result.completedAt = new Date();
-  result.outputs = collectStepOutputs(result.steps);
-}
-
-export function getDependencySkipReason(
-  needs: string[],
-  results: ReadonlyMap<string, JobResult>
-): string | null {
-  for (const need of needs) {
-    const dependencyResult = results.get(need);
-    if (!dependencyResult) {
-      continue;
-    }
-
-    if (dependencyResult.conclusion === 'success') {
-      continue;
-    }
-
-    const dependencyOutcome = dependencyResult.conclusion ?? 'did not succeed';
-    return `Dependency "${need}" ${dependencyOutcome}`;
-  }
-
-  return null;
-}
-
-// --- End job policy helpers ---
+export type { JobSchedulerEvent, JobSchedulerListener } from './job-events.js';
 
 /**
  * Job scheduler options
@@ -259,23 +52,6 @@ export interface JobSchedulerOptions {
   /** Step runner options */
   stepRunner?: StepRunnerOptions;
 }
-
-/**
- * Job scheduler event types
- */
-export type JobSchedulerEvent =
-  | { type: 'job:start'; jobId: string; job: Job }
-  | { type: 'job:complete'; jobId: string; result: JobResult }
-  | { type: 'job:skip'; jobId: string; reason: string; result: JobResult }
-  | { type: 'phase:start'; phase: number; jobs: string[] }
-  | { type: 'phase:complete'; phase: number }
-  | { type: 'workflow:start'; phases: string[][] }
-  | { type: 'workflow:complete'; results: Record<string, JobResult> };
-
-/**
- * Job scheduler event listener
- */
-export type JobSchedulerListener = (event: JobSchedulerEvent) => void;
 
 /**
  * Job scheduler for workflow execution
@@ -719,4 +495,3 @@ export function createExecutionPlan(workflow: Workflow): ExecutionPlan {
   const phases = groupIntoPhases(graph);
   return { phases };
 }
-

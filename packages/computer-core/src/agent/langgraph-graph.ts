@@ -33,10 +33,10 @@ import {
   stringifyToolResult,
   createLangChainTool,
   generateToolCallId,
-  anySignal,
   throwIfAborted,
   type CreateAgentOptions,
 } from './langgraph-tools';
+import { anySignal } from './runner-types';
 
 // ── Message limits for Workers memory safety (128MB heap) ───────────────
 

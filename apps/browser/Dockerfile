@@ -29,7 +29,7 @@ COPY scripts/build-container.mjs ./scripts/
 # Install all dependencies
 RUN pnpm install --frozen-lockfile
 
-# Bundle takos-browser (esbuild bundles @takos/common from source directly)
+# Bundle takos-browser (esbuild bundles @takos-computer/common from source directly)
 WORKDIR /workspace/apps/browser
 RUN node build.mjs
 
@@ -54,7 +54,7 @@ COPY apps/browser/package.json ./apps/browser/
 # Install only production runtime deps (express, playwright-core)
 ARG PNPM_VERSION
 RUN npm install -g pnpm@${PNPM_VERSION} && \
-    pnpm install --frozen-lockfile --prod --filter @takos/browser...
+    pnpm install --frozen-lockfile --prod --filter @takos-computer/browser...
 
 # Copy bundled output
 COPY --from=builder /workspace/apps/browser/dist ./apps/browser/dist

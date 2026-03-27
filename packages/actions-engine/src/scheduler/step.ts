@@ -1,7 +1,6 @@
 /**
  * Step execution management
  */
-import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter as pathDelimiter, join } from 'node:path';
@@ -19,253 +18,27 @@ import {
   interpolateObject,
 } from '../parser/expression.js';
 
-/**
- * Step runner options
- */
-export interface StepRunnerOptions {
-  /** Custom action resolver */
-  actionResolver?: ActionResolver;
-  /** Custom shell command executor */
-  shellExecutor?: ShellExecutor;
-  /** Default timeout in minutes */
-  defaultTimeout?: number;
-  /** Working directory */
-  workingDirectory?: string;
-  /** Default shell */
-  defaultShell?: Step['shell'];
-}
+import type {
+  StepRunnerOptions,
+  StepRunMetadata,
+  ShellExecutor,
+  StepCommandFiles,
+} from './step-types.js';
+import { resolvePlatformDefaultShell } from './shell-executor.js';
+import { defaultShellExecutor } from './shell-executor.js';
+import { defaultActionResolver } from './action-resolver.js';
 
-/**
- * Metadata for step execution
- */
-export interface StepRunMetadata {
-  /** Zero-based step index within its job */
-  index?: number;
-}
-
-/**
- * Shell executor function type
- */
-export type ShellExecutor = (
-  command: string,
-  options: ShellExecutorOptions
-) => Promise<ShellExecutorResult>;
-
-/**
- * Shell executor options
- */
-export interface ShellExecutorOptions {
-  shell?: Step['shell'];
-  workingDirectory?: string;
-  env?: Record<string, string>;
-  timeout?: number;
-}
-
-/**
- * Shell executor result
- */
-export interface ShellExecutorResult {
-  exitCode: number;
-  stdout: string;
-  stderr: string;
-}
-
-interface StepCommandFiles {
-  directory: string;
-  env: string;
-  output: string;
-  path: string;
-}
+// Re-export types and values so that existing consumers importing from
+// './step.js' continue to work without changes.
+export type {
+  StepRunnerOptions,
+  StepRunMetadata,
+  ShellExecutor,
+  ShellExecutorOptions,
+  ShellExecutorResult,
+} from './step-types.js';
 
 const SIMPLE_OUTPUT_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const BUILTIN_NOOP_ACTIONS = new Set(['actions/checkout', 'actions/setup-node']);
-
-function resolvePlatformDefaultShell(): Step['shell'] {
-  return process.platform === 'win32' ? 'pwsh' : 'bash';
-}
-
-/**
- * Resolve shell name to executable
- */
-function resolveShellExecutable(shell: Step['shell'] | undefined): string | true {
-  if (!shell) {
-    return true;
-  }
-
-  switch (shell) {
-    case 'cmd':
-      return process.platform === 'win32' ? 'cmd.exe' : 'cmd';
-    case 'powershell':
-      return process.platform === 'win32' ? 'powershell.exe' : 'powershell';
-    default:
-      return shell;
-  }
-}
-
-/**
- * Default shell executor
- */
-const defaultShellExecutor: ShellExecutor = async (
-  command: string,
-  options: ShellExecutorOptions
-): Promise<ShellExecutorResult> => {
-  return new Promise<ShellExecutorResult>((resolve, reject) => {
-    const shellExecutable = resolveShellExecutable(options.shell);
-
-    // Always invoke the shell as a separate binary with the command passed as
-    // an argument so that shell: false can be used and user-supplied content in
-    // `command` is never interpreted as a shell command name.
-    let spawnFile: string;
-    let spawnArgs: string[];
-
-    if (shellExecutable === true) {
-      // No explicit shell requested – fall back to the platform default shell
-      // but still spawn it explicitly with shell: false.
-      if (process.platform === 'win32') {
-        spawnFile = 'cmd.exe';
-        spawnArgs = ['/d', '/s', '/c', command];
-      } else {
-        spawnFile = '/bin/sh';
-        spawnArgs = ['-c', command];
-      }
-    } else {
-      // An explicit shell binary was resolved (bash, powershell, cmd.exe, …).
-      if (shellExecutable === 'cmd.exe' || shellExecutable === 'cmd') {
-        spawnArgs = ['/d', '/s', '/c', command];
-      } else if (
-        shellExecutable === 'powershell.exe' ||
-        shellExecutable === 'powershell' ||
-        shellExecutable === 'pwsh'
-      ) {
-        spawnArgs = ['-NonInteractive', '-Command', command];
-      } else {
-        // Generic POSIX-compatible shell (bash, sh, zsh, …)
-        spawnArgs = ['-c', command];
-      }
-      spawnFile = shellExecutable;
-    }
-
-    // Only pass safe host environment variables to prevent leaking secrets.
-    // Workflow-level env vars are provided via options.env.
-    const safeHostEnv: Record<string, string> = {};
-    const ALLOWED_HOST_VARS = [
-      'PATH', 'HOME', 'USER', 'SHELL', 'LANG', 'LC_ALL', 'LC_CTYPE',
-      'TERM', 'TMPDIR', 'TMP', 'TEMP', 'HOSTNAME',
-      'NODE_ENV', 'CI',
-    ];
-    for (const key of ALLOWED_HOST_VARS) {
-      if (process.env[key]) {
-        safeHostEnv[key] = process.env[key]!;
-      }
-    }
-
-    const child = spawn(spawnFile, spawnArgs, {
-      cwd: options.workingDirectory,
-      env: {
-        ...safeHostEnv,
-        ...(options.env ?? {}),
-      },
-      shell: false,
-      windowsHide: true,
-    });
-
-    let stdout = '';
-    let stderr = '';
-    let timedOut = false;
-
-    const timeout =
-      typeof options.timeout === 'number' && options.timeout > 0
-        ? setTimeout(() => {
-            timedOut = true;
-            child.kill();
-          }, options.timeout)
-        : undefined;
-
-    timeout?.unref?.();
-
-    child.stdout?.on('data', (chunk: string | Buffer) => {
-      stdout += chunk.toString();
-    });
-    child.stderr?.on('data', (chunk: string | Buffer) => {
-      stderr += chunk.toString();
-    });
-
-    child.on('error', (error) => {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-      reject(error);
-    });
-
-    child.on('close', (code, signal) => {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-
-      const exitCode =
-        typeof code === 'number' ? code : timedOut ? 124 : signal ? 128 : 1;
-
-      if (timedOut) {
-        const timeoutMessage = `Command timed out after ${options.timeout}ms`;
-        stderr = appendStderrMessage(stderr, timeoutMessage);
-      } else if (signal) {
-        const signalMessage = `Process terminated by signal: ${signal}`;
-        stderr = appendStderrMessage(stderr, signalMessage);
-      }
-
-      resolve({
-        exitCode,
-        stdout,
-        stderr,
-      });
-    });
-  });
-};
-
-function appendStderrMessage(stderr: string, message: string): string {
-  return stderr.length > 0 ? `${stderr}\n${message}` : message;
-}
-
-/**
- * Default action resolver
- */
-const defaultActionResolver: ActionResolver = async (uses: string) => {
-  const normalizedUses = uses.trim().toLowerCase();
-  const actionName = normalizedUses.split('@')[0];
-
-  if (BUILTIN_NOOP_ACTIONS.has(actionName)) {
-    return {
-      run: async (step, context): Promise<StepResult> => {
-        const outputs: Record<string, string> = {};
-
-        // Keep checkout compatibility for workflows that read steps.<id>.outputs.path.
-        if (actionName === 'actions/checkout') {
-          const configuredPath =
-            typeof step.with?.path === 'string' && step.with.path.length > 0
-              ? step.with.path
-              : context.github.workspace;
-          outputs.path = configuredPath;
-        }
-
-        return {
-          id: step.id,
-          name: step.name,
-          status: 'completed',
-          conclusion: 'success',
-          outputs,
-        };
-      },
-    };
-  }
-
-  return {
-    run: async (): Promise<StepResult> => {
-      throw new Error(
-        `Unsupported action: ${uses}. Provide StepRunnerOptions.actionResolver for action steps.`
-      );
-    },
-  };
-};
 
 /**
  * Step runner for executing individual steps
@@ -621,4 +394,3 @@ export class StepRunner {
     }
   }
 }
-

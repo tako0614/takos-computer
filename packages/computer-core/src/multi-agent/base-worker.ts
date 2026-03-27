@@ -72,7 +72,7 @@ export abstract class AbstractAgentWorker<TInput = unknown, TOutput = unknown> {
         }
       }
     }
-    throw lastError!;
+    throw lastError ?? new Error('All retry attempts failed');
   }
 
   protected sleep(ms: number): Promise<void> {

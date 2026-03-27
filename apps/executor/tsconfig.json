@@ -18,5 +18,9 @@
     "node_modules",
     "**/dist/**",
     "**/generated/**"
+  ],
+  "references": [
+    { "path": "../../packages/actions-engine" },
+    { "path": "../../packages/executor-service" }
   ]
 }
