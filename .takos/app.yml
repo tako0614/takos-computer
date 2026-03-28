@@ -11,30 +11,22 @@ spec:
     - executor
     - agent
     - playwright
-  env:
-    required:
-      - TAKOS_ACCESS_TOKEN
-  takos:
-    scopes:
-      - threads:read
-      - threads:write
-      - runs:read
-      - runs:write
-      - repos:read
-  resources:
-    mcp-auth-secret:
-      type: secretRef
-      binding: MCP_AUTH_TOKEN
-      generate: true
-  services:
+
+  containers:
+    browser:
+      dockerfile: packages/browser-service/Dockerfile
+      port: 8080
+      instanceType: standard-2
+      maxInstances: 25
+    executor:
+      dockerfile: packages/executor-service/Dockerfile
+      port: 8080
+      instanceType: basic
+      maxInstances: 100
+
+  workers:
     browser-host:
-      type: worker
-      containers:
-        - name: browser
-          dockerfile: packages/browser-service/Dockerfile
-          port: 8080
-          instanceType: standard-2
-          maxInstances: 25
+      containers: [browser]
       build:
         fromWorkflow:
           path: .takos/workflows/deploy.yml
@@ -42,13 +34,7 @@ spec:
           artifact: browser-host
           artifactPath: dist/browser-host.js
     executor-host:
-      type: worker
-      containers:
-        - name: executor
-          dockerfile: packages/executor-service/Dockerfile
-          port: 8080
-          instanceType: basic
-          maxInstances: 100
+      containers: [executor]
       build:
         fromWorkflow:
           path: .takos/workflows/deploy.yml
@@ -58,16 +44,39 @@ spec:
       bindings:
         services:
           - takos-control
+
   routes:
     - name: browser-api
-      service: browser-host
+      target: browser-host
       path: /session
     - name: browser-mcp
-      service: browser-host
+      target: browser-host
       path: /mcp
     - name: executor-api
-      service: executor-host
+      target: executor-host
       path: /dispatch
+
+  resources:
+    mcp-auth-secret:
+      type: secretRef
+      binding: MCP_AUTH_TOKEN
+      generate: true
+
+  env:
+    required:
+      - TAKOS_ACCESS_TOKEN
+    inject:
+      BROWSER_API_URL: "{{routes.browser-api.url}}"
+      EXECUTOR_API_URL: "{{routes.executor-api.url}}"
+
+  takos:
+    scopes:
+      - threads:read
+      - threads:write
+      - runs:read
+      - runs:write
+      - repos:read
+
   mcpServers:
     - name: takos-computer
       route: browser-mcp
