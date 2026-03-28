@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>takos browser viewer</title>
+  <link rel="stylesheet" href="/gui/style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "@novnc/novnc/": "https://cdn.jsdelivr.net/npm/@novnc/novnc@1.5.0/lib/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div style="max-width:1340px; margin:0 auto; padding:1rem;">
+    <!-- Toolbar -->
+    <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+      <a href="/gui" class="btn btn-ghost btn-sm" style="text-decoration:none;">&#8592; Sessions</a>
+      <div style="width:1px; height:1.5rem; background:#334155;"></div>
+      <button class="nav-btn" title="Back" onclick="mcpCall('browser_goto',{url:'javascript:history.back()'}).catch(()=>{})">&#8592;</button>
+      <button class="nav-btn" title="Forward" onclick="mcpCall('browser_goto',{url:'javascript:history.forward()'}).catch(()=>{})">&#8594;</button>
+      <button class="nav-btn" title="Reload" onclick="mcpCall('display_key',{key:'F5'})">&#8635;</button>
+      <input type="text" class="url-input" id="url-bar" placeholder="Enter URL..." onkeydown="if(event.key==='Enter'){navigateTo(this.value)}">
+      <button class="btn btn-primary btn-sm" onclick="navigateTo(document.getElementById('url-bar').value)">Go</button>
+    </div>
+
+    <!-- VNC viewport -->
+    <div id="vnc-container" style="width:1280px; max-width:100%; background:#000; border-radius:0.5rem; overflow:hidden;">
+      <div id="vnc-status" style="display:flex; align-items:center; justify-content:center; height:720px; color:#64748b;">
+        <div style="text-align:center;">
+          <div class="spinner" style="margin:0 auto 1rem;"></div>
+          <div>Connecting to VNC...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab bar + controls -->
+    <div style="display:flex; align-items:center; gap:0.5rem; margin-top:0.5rem; min-height:2rem;">
+      <div id="tab-bar" style="display:flex; gap:2px; flex:1; overflow-x:auto;"></div>
+      <button class="btn btn-ghost btn-sm" onclick="newTab()">+ Tab</button>
+      <div style="width:1px; height:1.5rem; background:#334155;"></div>
+      <button class="btn btn-ghost btn-sm" onclick="toggleAppPanel()">Apps</button>
+      <div style="width:1px; height:1.5rem; background:#334155;"></div>
+      <span id="vnc-state" style="font-size:0.6875rem; color:#475569;">disconnected</span>
+      <div style="width:1px; height:1.5rem; background:#334155;"></div>
+      <button class="btn btn-danger btn-sm" onclick="destroySession()">Destroy Session</button>
+    </div>
+
+    <!-- App launcher panel -->
+    <div id="app-panel" style="display:none; margin-top:0.5rem; background:#1e293b; border-radius:0.5rem; padding:0.75rem;">
+      <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+        <span style="font-size:0.75rem; font-weight:600;">Launch App</span>
+        <input type="text" class="url-input" id="app-command" placeholder="command (e.g. xterm, firefox)" style="flex:1;" onkeydown="if(event.key==='Enter'){launchApp()}">
+        <input type="text" class="url-input" id="app-args" placeholder="args (space-separated, optional)" style="flex:1;" onkeydown="if(event.key==='Enter'){launchApp()}">
+        <button class="btn btn-primary btn-sm" onclick="launchApp()">Launch</button>
+      </div>
+      <div id="app-process-list" style="font-size:0.75rem;"></div>
+    </div>
+
+    <div style="margin-top:0.5rem; font-size:0.6875rem; color:#475569;" id="session-id-display"></div>
+  </div>
+
+  <script type="module">
+    import RFB from '@novnc/novnc/core/rfb.js';
+
+    const SESSION_ID = '{{SESSION_ID}}';
+    const MCP_URL = `/session/${encodeURIComponent(SESSION_ID)}/mcp`;
+    const VNC_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/session/${encodeURIComponent(SESSION_ID)}/vnc`;
+
+    document.getElementById('session-id-display').textContent = `Session: ${SESSION_ID}`;
+
+    // -----------------------------------------------------------------------
+    // MCP JSON-RPC helper
+    // -----------------------------------------------------------------------
+    let rpcId = 0;
+
+    async function mcpCall(tool, args = {}) {
+      const res = await fetch(MCP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'tools/call',
+          params: { name: tool, arguments: args },
+          id: ++rpcId,
+        }),
+      });
+      if (!res.ok) throw new Error(`MCP HTTP ${res.status}`);
+      const json = await res.json();
+      if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
+      // Extract text content from MCP tool result
+      const content = json.result?.content;
+      if (!content || !content.length) return null;
+      const first = content[0];
+      if (first.type === 'text') {
+        try { return JSON.parse(first.text); } catch { return first.text; }
+      }
+      return first;
+    }
+
+    // Make available globally for inline handlers
+    window.mcpCall = mcpCall;
+
+    // -----------------------------------------------------------------------
+    // noVNC
+    // -----------------------------------------------------------------------
+    const vncContainer = document.getElementById('vnc-container');
+    const vncStatus = document.getElementById('vnc-status');
+    const stateEl = document.getElementById('vnc-state');
+    const urlBar = document.getElementById('url-bar');
+    let rfb = null;
+
+    function connectVnc() {
+      vncStatus.style.display = 'flex';
+      stateEl.textContent = 'connecting...';
+      try {
+        rfb = new RFB(vncContainer, VNC_URL, { wsProtocols: ['binary'] });
+        rfb.scaleViewport = true;
+        rfb.resizeSession = false;
+        rfb.clipViewport = false;
+        rfb.showDotCursor = true;
+        rfb.qualityLevel = 6;
+        rfb.compressionLevel = 2;
+
+        rfb.addEventListener('connect', () => {
+          vncStatus.style.display = 'none';
+          stateEl.textContent = 'connected';
+          stateEl.style.color = '#6ee7b7';
+        });
+        rfb.addEventListener('disconnect', (e) => {
+          stateEl.textContent = e.detail.clean ? 'disconnected' : 'connection lost';
+          stateEl.style.color = e.detail.clean ? '#475569' : '#fca5a5';
+          if (!e.detail.clean) setTimeout(connectVnc, 2000);
+        });
+        rfb.addEventListener('credentialsrequired', () => rfb.sendCredentials({ password: '' }));
+      } catch (err) {
+        vncStatus.innerHTML = `<div style="text-align:center; color:#ef4444;">
+          <div>VNC connection failed</div>
+          <div style="font-size:0.75rem; margin-top:0.5rem;">${esc(err.message)}</div>
+          <button class="btn btn-primary btn-sm" style="margin-top:1rem;" onclick="location.reload()">Retry</button>
+        </div>`;
+      }
+    }
+    connectVnc();
+
+    // -----------------------------------------------------------------------
+    // Navigation (via MCP)
+    // -----------------------------------------------------------------------
+    window.navigateTo = async function(url) {
+      if (!url) return;
+      if (!url.match(/^https?:\/\//)) url = 'https://' + url;
+      urlBar.value = url;
+      try {
+        await mcpCall('browser_goto', { url });
+      } catch (err) {
+        alert('Navigation failed: ' + err.message);
+      }
+    };
+
+    async function pollPageInfo() {
+      try {
+        const info = await mcpCall('browser_screenshot', {}); // lightweight - just to trigger page info
+        // Use extract to get URL + title
+        const result = await mcpCall('browser_extract', { evaluate: 'JSON.stringify({url:location.href,title:document.title})' });
+        if (result?.data) {
+          const data = typeof result.data === 'string' ? JSON.parse(result.data) : result.data;
+          if (document.activeElement !== urlBar) urlBar.value = data.url;
+          if (data.title) document.title = `${data.title} - takos browser`;
+        }
+      } catch { /* ignore — browser may not be bootstrapped */ }
+    }
+
+    // -----------------------------------------------------------------------
+    // Tab management (via MCP — browser_* tools don't have tab tools yet,
+    // so we fall back to display_key shortcuts)
+    // -----------------------------------------------------------------------
+    const tabBar = document.getElementById('tab-bar');
+
+    // Browser tabs aren't directly available via MCP tools currently.
+    // We'll show a simplified tab bar using keyboard shortcuts.
+    window.newTab = async function() {
+      await mcpCall('display_key', { key: 'ctrl+t' });
+    };
+
+    window.switchTab = async function(index) {
+      // Ctrl+1..9 for tabs
+      if (index >= 0 && index < 9) {
+        await mcpCall('display_key', { key: `ctrl+${index + 1}` });
+      }
+    };
+
+    window.closeTab = async function() {
+      await mcpCall('display_key', { key: 'ctrl+w' });
+    };
+
+    // Hide the tab bar since we can't enumerate tabs via MCP
+    tabBar.style.display = 'none';
+
+    // -----------------------------------------------------------------------
+    // App management (via MCP)
+    // -----------------------------------------------------------------------
+    const appPanel = document.getElementById('app-panel');
+    const appProcessList = document.getElementById('app-process-list');
+    let appPanelVisible = false;
+
+    window.toggleAppPanel = function() {
+      appPanelVisible = !appPanelVisible;
+      appPanel.style.display = appPanelVisible ? 'block' : 'none';
+      if (appPanelVisible) loadApps();
+    };
+
+    window.launchApp = async function() {
+      const command = document.getElementById('app-command').value.trim();
+      if (!command) return;
+      const argsStr = document.getElementById('app-args').value.trim();
+      const args = argsStr ? argsStr.split(/\s+/) : undefined;
+      try {
+        await mcpCall('app_launch', { command, args });
+        document.getElementById('app-command').value = '';
+        document.getElementById('app-args').value = '';
+        loadApps();
+      } catch (err) {
+        alert('Launch failed: ' + err.message);
+      }
+    };
+
+    async function loadApps() {
+      try {
+        const result = await mcpCall('app_list');
+        const procs = result?.processes ?? [];
+        if (!procs.length) {
+          appProcessList.innerHTML = '<div style="color:#64748b;">No running apps</div>';
+          return;
+        }
+        appProcessList.innerHTML = procs.map(p => `
+          <div style="display:flex; align-items:center; gap:0.5rem; padding:0.25rem 0; border-bottom:1px solid #334155;">
+            <span style="color:#94a3b8; font-family:monospace;">${p.pid}</span>
+            <span style="flex:1; color:#e2e8f0;">${esc(p.command)} ${(p.args||[]).map(a => esc(a)).join(' ')}</span>
+            <span class="badge ${p.running ? 'badge-active' : 'badge-stopped'}">${p.running ? 'running' : 'stopped'}</span>
+            <button class="btn btn-danger btn-sm" onclick="killApp(${p.pid})" style="padding:0.125rem 0.375rem;">Kill</button>
+          </div>
+        `).join('');
+      } catch { /* ignore */ }
+    }
+
+    window.killApp = async function(pid) {
+      try {
+        await mcpCall('app_kill', { pid });
+        loadApps();
+      } catch { /* ignore */ }
+    };
+
+    // -----------------------------------------------------------------------
+    // Session management
+    // -----------------------------------------------------------------------
+    window.destroySession = async function() {
+      if (!confirm('Destroy this browser session?')) return;
+      try {
+        if (rfb) rfb.disconnect();
+        await fetch(`/session/${encodeURIComponent(SESSION_ID)}`, { method: 'DELETE' });
+        window.location.href = '/gui';
+      } catch (err) {
+        alert('Destroy failed: ' + err.message);
+      }
+    };
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = String(str ?? '');
+      return d.innerHTML;
+    }
+
+    // -----------------------------------------------------------------------
+    // Init
+    // -----------------------------------------------------------------------
+    setInterval(pollPageInfo, 3000);
+    setInterval(() => { if (appPanelVisible) loadApps(); }, 3000);
+  </script>
+</body>
+</html>

@@ -17,6 +17,7 @@
   "dependencies": {
     "@cloudflare/containers": "^0.1.1",
     "@takos-computer/cloudflare-compat": "workspace:*",
+    "@takos-computer/common": "workspace:*",
     "hono": "^4.7.0"
   },
   "devDependencies": {

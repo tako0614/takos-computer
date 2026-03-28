@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>takos browser sessions</title>
+  <link rel="stylesheet" href="/gui/style.css">
+</head>
+<body>
+  <div style="max-width:960px; margin:0 auto; padding:1.5rem;">
+    <!-- Header -->
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:1.5rem;">
+      <h1 style="font-size:1.25rem; font-weight:600; margin:0;">takos browser sessions</h1>
+      <button class="btn btn-primary" onclick="showCreateModal()">+ Create Session</button>
+    </div>
+
+    <!-- Sessions table -->
+    <div style="background:#1e293b; border-radius:0.75rem; overflow:hidden;">
+      <table class="session-table">
+        <thead>
+          <tr>
+            <th>Session ID</th>
+            <th>Status</th>
+            <th>Space</th>
+            <th>Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="session-list">
+          <tr><td colspan="5" style="text-align:center; color:#64748b; padding:2rem;">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:0.75rem; font-size:0.6875rem; color:#475569;" id="refresh-status">
+      Auto-refresh: every 10s
+    </div>
+  </div>
+
+  <!-- Create session modal -->
+  <div class="modal-overlay" id="create-modal" style="display:none;" onclick="if(event.target===this)hideCreateModal()">
+    <div class="modal-content">
+      <h2 style="font-size:1rem; font-weight:600; margin:0 0 1rem 0;">Create Browser Session</h2>
+      <form id="create-form" onsubmit="handleCreate(event)">
+        <label for="c-sessionId">Session ID</label>
+        <input id="c-sessionId" name="sessionId" required placeholder="e.g. my-session-01">
+
+        <label for="c-spaceId">Space ID</label>
+        <input id="c-spaceId" name="spaceId" required placeholder="e.g. space-abc">
+
+        <label for="c-userId">User ID</label>
+        <input id="c-userId" name="userId" required placeholder="e.g. user-123">
+
+        <label for="c-url">Initial URL (optional)</label>
+        <input id="c-url" name="url" placeholder="https://example.com">
+
+        <div style="display:flex; gap:0.5rem; justify-content:flex-end; margin-top:0.5rem;">
+          <button type="button" class="btn btn-ghost" onclick="hideCreateModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="create-btn">Create</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let refreshTimer = null;
+
+    async function loadSessions() {
+      try {
+        const res = await fetch('/gui/api/sessions');
+        const { sessions } = await res.json();
+        const tbody = document.getElementById('session-list');
+
+        if (!sessions || sessions.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#64748b; padding:2rem;">No active sessions</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = sessions.map(s => {
+          const badgeClass = s.status === 'active' ? 'badge-active' : s.status === 'starting' ? 'badge-starting' : 'badge-stopped';
+          const age = timeAgo(s.createdAt);
+          return `<tr>
+            <td style="font-family:monospace; font-size:0.8125rem;">${esc(s.sessionId)}</td>
+            <td><span class="badge ${badgeClass}">${esc(s.status)}</span></td>
+            <td style="font-size:0.8125rem; color:#94a3b8;">${esc(s.spaceId)}</td>
+            <td style="font-size:0.8125rem; color:#94a3b8;">${age}</td>
+            <td style="display:flex; gap:0.375rem;">
+              <a href="/gui/viewer/${encodeURIComponent(s.sessionId)}" class="btn btn-primary btn-sm">View</a>
+              <button class="btn btn-danger btn-sm" onclick="destroySession('${esc(s.sessionId)}')">Delete</button>
+            </td>
+          </tr>`;
+        }).join('');
+      } catch (err) {
+        document.getElementById('session-list').innerHTML =
+          `<tr><td colspan="5" style="text-align:center; color:#ef4444; padding:2rem;">Failed to load: ${esc(err.message)}</td></tr>`;
+      }
+    }
+
+    function showCreateModal() { document.getElementById('create-modal').style.display = 'flex'; }
+    function hideCreateModal() { document.getElementById('create-modal').style.display = 'none'; }
+
+    async function handleCreate(e) {
+      e.preventDefault();
+      const btn = document.getElementById('create-btn');
+      btn.disabled = true;
+      btn.textContent = 'Creating...';
+
+      const fd = new FormData(e.target);
+      const payload = {
+        sessionId: fd.get('sessionId'),
+        spaceId: fd.get('spaceId'),
+        userId: fd.get('userId'),
+      };
+      const url = fd.get('url');
+      if (url) payload.url = url;
+
+      try {
+        const res = await fetch('/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const { error } = await res.json();
+          throw new Error(error || `HTTP ${res.status}`);
+        }
+        hideCreateModal();
+        e.target.reset();
+        await loadSessions();
+      } catch (err) {
+        alert('Create failed: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Create';
+      }
+    }
+
+    async function destroySession(id) {
+      if (!confirm(`Destroy session "${id}"?`)) return;
+      try {
+        const res = await fetch(`/session/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        await loadSessions();
+      } catch (err) {
+        alert('Destroy failed: ' + err.message);
+      }
+    }
+
+    function timeAgo(iso) {
+      const diff = Date.now() - new Date(iso).getTime();
+      const m = Math.floor(diff / 60000);
+      if (m < 1) return 'just now';
+      if (m < 60) return m + 'm ago';
+      const h = Math.floor(m / 60);
+      if (h < 24) return h + 'h ago';
+      return Math.floor(h / 24) + 'd ago';
+    }
+
+    function esc(str) {
+      const d = document.createElement('div');
+      d.textContent = String(str ?? '');
+      return d.innerHTML;
+    }
+
+    // Init
+    loadSessions();
+    refreshTimer = setInterval(loadSessions, 10000);
+  </script>
+</body>
+</html>
