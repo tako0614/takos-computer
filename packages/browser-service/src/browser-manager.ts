@@ -25,7 +25,10 @@ export type BrowserAction =
   | { type: 'check'; selector: string }
   | { type: 'uncheck'; selector: string }
   | { type: 'focus'; selector: string }
-  | { type: 'clear'; selector: string };
+  | { type: 'clear'; selector: string }
+  | { type: 'mouse_click'; x: number; y: number; button?: 'left' | 'right' | 'middle'; clickCount?: number }
+  | { type: 'mouse_move'; x: number; y: number }
+  | { type: 'keyboard_type'; text: string };
 
 export interface BootstrapPayload {
   url?: string;
@@ -119,6 +122,21 @@ const actionHandlers: Record<string, ActionHandler> = {
     await page.fill(a.selector, '');
     return `Cleared ${a.selector}`;
   },
+  mouse_click: async (page, action) => {
+    const a = action as Extract<BrowserAction, { type: 'mouse_click' }>;
+    await page.mouse.click(a.x, a.y, { button: a.button, clickCount: a.clickCount });
+    return `Mouse clicked at (${a.x}, ${a.y})`;
+  },
+  mouse_move: async (page, action) => {
+    const a = action as Extract<BrowserAction, { type: 'mouse_move' }>;
+    await page.mouse.move(a.x, a.y);
+    return `Mouse moved to (${a.x}, ${a.y})`;
+  },
+  keyboard_type: async (page, action) => {
+    const a = action as Extract<BrowserAction, { type: 'keyboard_type' }>;
+    await page.keyboard.type(a.text);
+    return `Typed "${a.text}"`;
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -138,16 +156,17 @@ export class BrowserManager {
 
     logger.info('Launching persistent browser context', { profileDir: PROFILE_DIR, viewport });
 
+    const useHeaded = Boolean(process.env.DISPLAY);
     this.context = await chromium.launchPersistentContext(PROFILE_DIR, {
-      headless: true,
+      headless: !useHeaded,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-gpu',
+        ...(useHeaded ? [] : ['--disable-gpu']),
         '--no-first-run',
         '--no-zygote',
-        '--single-process',
+        ...(useHeaded ? [] : ['--single-process']),
         '--disable-extensions',
       ],
       viewport,
@@ -227,9 +246,14 @@ export class BrowserManager {
     return { html: content, url: page.url() };
   }
 
-  async screenshot(): Promise<Buffer> {
+  async screenshot(opts?: { format?: 'png' | 'jpeg'; quality?: number }): Promise<Buffer> {
     const page = this.requirePage();
-    return await page.screenshot({ type: 'png', fullPage: false });
+    const format = opts?.format ?? 'png';
+    return await page.screenshot({
+      type: format,
+      quality: format === 'jpeg' ? (opts?.quality ?? 65) : undefined,
+      fullPage: false,
+    });
   }
 
   async pdf(): Promise<Buffer> {
@@ -283,6 +307,30 @@ export class BrowserManager {
     this.activePage = pages[index];
     await this.activePage.bringToFront();
     return { url: this.activePage.url(), title: await this.activePage.title() };
+  }
+
+  async goBack(): Promise<{ url: string; title: string }> {
+    const page = this.requirePage();
+    await page.goBack({ waitUntil: 'load', timeout: 10000 }).catch(() => null);
+    return { url: page.url(), title: await page.title() };
+  }
+
+  async goForward(): Promise<{ url: string; title: string }> {
+    const page = this.requirePage();
+    await page.goForward({ waitUntil: 'load', timeout: 10000 }).catch(() => null);
+    return { url: page.url(), title: await page.title() };
+  }
+
+  async reload(): Promise<{ url: string; title: string }> {
+    const page = this.requirePage();
+    await page.reload({ waitUntil: 'load', timeout: 30000 });
+    return { url: page.url(), title: await page.title() };
+  }
+
+  async pageInfo(): Promise<{ url: string; title: string; viewport: { width: number; height: number } }> {
+    const page = this.requirePage();
+    const viewport = page.viewportSize() ?? DEFAULT_VIEWPORT;
+    return { url: page.url(), title: await page.title(), viewport };
   }
 
   async close(): Promise<void> {

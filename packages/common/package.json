@@ -29,6 +29,10 @@
     "./logger": {
       "types": "./dist/logger.d.ts",
       "import": "./dist/logger.js"
+    },
+    "./cf-types": {
+      "types": "./dist/cf-types.d.ts",
+      "import": "./dist/cf-types.js"
     }
   },
   "scripts": {

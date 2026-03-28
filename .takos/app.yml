@@ -46,12 +46,12 @@ spec:
           - takos-control
 
   routes:
-    - name: browser-api
+    - name: browser-gui
+      target: browser-host
+      path: /gui
+    - name: browser-session
       target: browser-host
       path: /session
-    - name: browser-mcp
-      target: browser-host
-      path: /mcp
     - name: executor-api
       target: executor-host
       path: /dispatch

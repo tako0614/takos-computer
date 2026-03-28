@@ -30,6 +30,38 @@ export {
 export { createLogger, type Logger, type LogLevel } from './logger.js';
 
 // =============================================================================
+// Cloudflare Workers type shims (for Node.js environments)
+// =============================================================================
+export type {
+  D1Database,
+  D1PreparedStatement,
+  D1Result,
+  D1ExecResult,
+  D1RawOptions,
+  R2Bucket,
+  R2Object,
+  R2ObjectMetadata,
+  R2PutOptions,
+  R2ListOptions,
+  R2Objects,
+  DurableObjectId,
+  DurableObjectStub,
+  DurableObjectNamespace,
+  DurableObjectStorage,
+  DurableObjectState,
+  VectorizeIndex,
+  VectorizeVector,
+  VectorizeMatch,
+  VectorizeQueryResult,
+  VectorizeQueryOptions,
+  Ai,
+  Queue,
+  QueueSendOptions,
+  Fetcher,
+  KVNamespace,
+} from './cf-types.js';
+
+// =============================================================================
 // Error Handling
 // =============================================================================
 export {

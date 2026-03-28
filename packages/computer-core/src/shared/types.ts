@@ -19,9 +19,19 @@ export interface IndexJobQueueMessage {
 
 // From models.ts
 export type WorkspaceRole = 'owner' | 'admin' | 'editor' | 'viewer';
+
+// NOTE: MessageRole — intentionally duplicated from @takos/control shared/types/models.ts.
+// takos-computer is a separate repository (git submodule) and cannot import from @takos/control.
+// Canonical definition: takos/packages/control/src/shared/types/models.ts
 export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 
-// From env.ts
+// NOTE: Agent RunStatus — intentionally duplicated from @takos/control shared/types/models.ts.
+// takos-computer is a separate repository (git submodule) and cannot import from @takos/control.
+// Canonical definition: takos/packages/control/src/shared/types/models.ts
+// See also: takos/packages/agent-core/src/run-executor.ts (another copy).
+//
+// This is NOT the same as the GitHub Actions RunStatus ('queued'|'in_progress'|'completed'|'cancelled')
+// defined in takos/packages/actions-engine/src/types.ts — those are different domain concepts.
 export type RunStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface DbEnv {
@@ -66,6 +76,8 @@ export interface Env {
   AGENT_TOTAL_TIMEOUT?: string;
   TOOL_EXECUTION_TIMEOUT?: string;
   LANGGRAPH_TIMEOUT?: string;
+  /** JSON object mapping model IDs to context window sizes, e.g. {"gpt-5.4":200} */
+  MODEL_CONTEXT_WINDOWS?: string;
   TAKOS_OFFLOAD_ENABLED?: string;
   [key: string]: unknown;
 }

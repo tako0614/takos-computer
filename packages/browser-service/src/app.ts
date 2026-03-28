@@ -1,14 +1,10 @@
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { createLogger } from '@takos-computer/common/logger';
-import { isPrivateIP, isLocalhost } from '@takos-computer/common/validation';
 import { BrowserManager } from './browser-manager.js';
-import type {
-  BrowserAction,
-  BootstrapPayload,
-  GotoPayload,
-  ExtractPayload,
-} from './browser-manager.js';
+import { DisplayManager } from './display-manager.js';
+import { ProcessManager } from './process-manager.js';
+import { createVncProxy } from './vnc-proxy.js';
 
 export type BrowserServiceOptions = {
   port?: number;
@@ -16,133 +12,35 @@ export type BrowserServiceOptions = {
   serviceName?: string;
 };
 
-function validateNavigationUrl(url: string): void {
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error('Invalid URL format');
-  }
-
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
-    throw new Error('Only HTTP/HTTPS URLs are allowed');
-  }
-
-  if (parsed.username || parsed.password) {
-    throw new Error('URLs with embedded credentials are not allowed');
-  }
-
-  if (isLocalhost(parsed.hostname)) {
-    throw new Error('Navigation to localhost is not allowed');
-  }
-
-  if (isPrivateIP(parsed.hostname)) {
-    throw new Error('Navigation to private/internal IPs is not allowed');
-  }
-}
-
 export function createBrowserServiceApp(options: BrowserServiceOptions = {}) {
   const logger = createLogger({ service: options.serviceName ?? 'browserd' });
   const browser = new BrowserManager();
+  const display = new DisplayManager();
+  const processes = new ProcessManager();
   const app = new Hono();
 
-  app.get('/internal/healthz', (c) => c.json({
+  // Health check — used by CF Containers for readiness probe
+  app.get('/healthz', (c) => c.json({
     status: 'ok',
     service: options.serviceName ?? 'browserd',
     browser_alive: browser.isAlive(),
+    display: Boolean(process.env.DISPLAY),
   }));
 
-  app.post('/internal/bootstrap', async (c) => {
-    const payload = (await c.req.json()) as BootstrapPayload;
-    if (payload.url) {
-      validateNavigationUrl(payload.url);
-    }
-    const result = await browser.bootstrap(payload);
-    return c.json(result);
-  });
-
-  app.post('/internal/goto', async (c) => {
-    const payload = (await c.req.json()) as GotoPayload;
-    validateNavigationUrl(payload.url);
-    const result = await browser.goto(payload);
-    return c.json(result);
-  });
-
-  app.post('/internal/action', async (c) => {
-    const action = (await c.req.json()) as BrowserAction;
-    if (!action.type) {
-      return c.json({ error: 'Missing action type' }, 400);
-    }
-    const result = await browser.action(action);
-    return c.json(result);
-  });
-
-  app.post('/internal/extract', async (c) => {
-    const payload = (await c.req.json()) as ExtractPayload;
-    const result = await browser.extract(payload);
-    return c.json(result);
-  });
-
-  app.get('/internal/html', async (c) => {
-    const result = await browser.html();
-    return c.json(result);
-  });
-
-  app.get('/internal/screenshot', async () => {
-    const png = await browser.screenshot();
-    return new Response(new Uint8Array(png), {
-      headers: {
-        'Content-Type': 'image/png',
-        'Content-Length': png.length.toString(),
-      },
-    });
-  });
-
-  app.post('/internal/pdf', async () => {
-    const pdf = await browser.pdf();
-    return new Response(new Uint8Array(pdf), {
-      headers: {
-        'Content-Type': 'application/pdf',
-        'Content-Length': pdf.length.toString(),
-      },
-    });
-  });
-
-  app.get('/internal/tabs', async (c) => c.json({ tabs: await browser.tabs() }));
-
-  app.post('/internal/tab/new', async (c) => {
-    const { url } = (await c.req.json()) as { url?: string };
-    if (url) validateNavigationUrl(url);
-    const result = await browser.newTab(url);
-    return c.json(result);
-  });
-
-  app.post('/internal/tab/close', async (c) => {
-    const { index } = (await c.req.json()) as { index: number };
-    if (typeof index !== 'number') {
-      return c.json({ error: 'Missing tab index' }, 400);
-    }
-    const result = await browser.closeTab(index);
-    return c.json(result);
-  });
-
-  app.post('/internal/tab/switch', async (c) => {
-    const { index } = (await c.req.json()) as { index: number };
-    if (typeof index !== 'number') {
-      return c.json({ error: 'Missing tab index' }, 400);
-    }
-    const result = await browser.switchTab(index);
-    return c.json(result);
-  });
-
-  // MCP endpoint — Streamable HTTP transport for tool discovery & execution
-  // Auth via MCP_AUTH_TOKEN env var (injected by takopack secretRef at deploy time)
+  // MCP endpoint — the sole public API surface.
+  // All browser, display, and process tools are exposed here.
+  let mcpHandler: ((request: Request) => Promise<Response>) | null = null;
   app.post('/mcp', async (c) => {
-    const { createBrowserMcpServer, createMcpRequestHandler } = await import('./mcp.js');
-    const mcpServer = createBrowserMcpServer(browser);
-    const authToken = process.env.MCP_AUTH_TOKEN || undefined;
-    const handler = createMcpRequestHandler(mcpServer, authToken);
-    return handler(c.req.raw);
+    if (!mcpHandler) {
+      const { createBrowserMcpServer, createMcpRequestHandler } = await import('./mcp.js');
+      const mcpServer = createBrowserMcpServer({
+        browser,
+        display: process.env.DISPLAY ? display : undefined,
+        processes: process.env.DISPLAY ? processes : undefined,
+      });
+      mcpHandler = createMcpRequestHandler(mcpServer, process.env.MCP_AUTH_TOKEN || undefined);
+    }
+    return mcpHandler(c.req.raw);
   });
 
   app.onError((err, c) => {
@@ -150,19 +48,25 @@ export function createBrowserServiceApp(options: BrowserServiceOptions = {}) {
     return c.json({ error: err.message }, 500);
   });
 
-  return { app, browser, logger };
+  return { app, browser, processes, logger };
 }
 
 export function startBrowserService(options: BrowserServiceOptions = {}) {
   const port = options.port ?? parseInt(process.env.PORT ?? '8080', 10);
   const shutdownGraceMs = options.shutdownGraceMs ?? parseInt(process.env.SHUTDOWN_GRACE_MS ?? '15000', 10);
-  const { app, browser, logger } = createBrowserServiceApp(options);
+  const { app, browser, processes, logger } = createBrowserServiceApp(options);
   const server = serve({ fetch: app.fetch, port }, () => {
     logger.info(`[browserd] Listening on port ${port}`);
   });
 
+  // Attach WebSocket-to-VNC proxy for GUI remote access
+  if (process.env.DISPLAY) {
+    createVncProxy(server, logger);
+  }
+
   async function shutdown(signal: string): Promise<void> {
     logger.info(`[browserd] Received ${signal}, shutting down`);
+    processes.killAll();
     await browser.close();
     server.close(() => {
       logger.info('[browserd] Server closed');
@@ -174,12 +78,8 @@ export function startBrowserService(options: BrowserServiceOptions = {}) {
     }, shutdownGraceMs).unref();
   }
 
-  process.once('SIGTERM', () => {
-    void shutdown('SIGTERM');
-  });
-  process.once('SIGINT', () => {
-    void shutdown('SIGINT');
-  });
+  process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
+  process.once('SIGINT', () => { void shutdown('SIGINT'); });
 
   return { app, browser, server, logger };
 }

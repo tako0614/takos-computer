@@ -15,6 +15,12 @@ compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolut
 [observability]
 enabled = true
 
+# Import HTML/CSS as text strings for GUI assets
+[[rules]]
+type = "Text"
+globs = ["**/*.html", "**/*.css"]
+fallthrough = true
+
 # Container DO binding
 [[durable_objects.bindings]]
 name = "BROWSER_CONTAINER"
@@ -33,6 +39,11 @@ image_build_context = ".."
 instance_type = "standard-2"
 max_instances = 25
 
+# KV for GUI session index
+[[kv_namespaces]]
+binding = "SESSION_INDEX"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
 # R2 for browser checkpoints (Phase 3 — declared ahead)
 [[r2_buckets]]
 binding = "BROWSER_CHECKPOINTS"
@@ -50,6 +61,10 @@ workers_dev = true
 [[env.staging.durable_objects.bindings]]
 name = "BROWSER_CONTAINER"
 class_name = "BrowserSessionContainer"
+
+[[env.staging.kv_namespaces]]
+binding = "SESSION_INDEX"
+id = "REPLACE_WITH_STAGING_KV_NAMESPACE_ID"
 
 [[env.staging.containers]]
 class_name = "BrowserSessionContainer"

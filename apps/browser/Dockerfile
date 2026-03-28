@@ -36,8 +36,11 @@ RUN node build.mjs
 # Production stage — Playwright base image with Chromium pre-installed
 FROM mcr.microsoft.com/playwright:v1.58.2-noble
 
-# Install Node.js (Playwright image has it, but ensure correct version)
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && \
+# Install VNC stack, window manager, display interaction, and common tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates xvfb x11vnc openbox xterm \
+    xdotool scrot xclip x11-xserver-utils \
+    curl jq fonts-liberation && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
@@ -61,6 +64,10 @@ COPY --from=builder /workspace/apps/browser/dist ./apps/browser/dist
 
 WORKDIR /workspace/apps/browser
 
+# Copy entrypoint script
+COPY apps/browser/entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
 # Run as non-root for security
 RUN groupadd -r browser && useradd -r -g browser -m browser && \
     chown -R browser:browser /workspace && \
@@ -69,7 +76,8 @@ USER browser
 
 ENV NODE_ENV=production
 ENV PORT=8080
+ENV DISPLAY=:99
 
 EXPOSE 8080
 
-CMD ["node", "dist/index.js"]
+CMD ["./entrypoint.sh"]
