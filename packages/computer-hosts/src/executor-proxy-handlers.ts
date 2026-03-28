@@ -6,10 +6,13 @@
  * Control RPC is forwarded to the main takos worker via TAKOS_CONTROL.
  */
 
+import { createLogger } from '@takos-computer/common';
 import type { DurableObjectNamespace, R2Bucket } from './cf-types';
 import type { D1RawOptions } from './d1-raw';
 import { executeD1RawStatement } from './d1-raw';
 import { validateD1ProxySql } from './sql-validation';
+
+const logger = createLogger({ name: 'executor-proxy' });
 import {
   ok,
   err,
@@ -100,7 +103,7 @@ export async function handleDbProxy(path: string, body: Record<string, unknown>,
         return err(`Unknown DB proxy path: ${path}`, 404);
     }
   } catch (e: unknown) {
-    console.error(`DB proxy error on ${path}`, e);
+    logger.error(`DB proxy error on ${path}`, e);
     const classified = classifyProxyError(e);
     return err(classified.message, classified.status);
   }
@@ -180,7 +183,7 @@ export async function handleR2Proxy(path: string, prefix: string, body: Record<s
         return err(`Unknown R2 proxy path: ${path}`, 404);
     }
   } catch (e: unknown) {
-    console.error(`R2 proxy error on ${path}`, e);
+    logger.error(`R2 proxy error on ${path}`, e);
     return err(classifyProxyError(e).message, classifyProxyError(e).status);
   }
 }
@@ -218,7 +221,7 @@ export async function handleNotifierProxy(path: string, body: Record<string, unk
     }
     return err(`Unknown notifier proxy path: ${path}`, 404);
   } catch (e: unknown) {
-    console.error(`Notifier proxy error on ${path}`, e);
+    logger.error(`Notifier proxy error on ${path}`, e);
     return err(classifyProxyError(e).message, classifyProxyError(e).status);
   }
 }
@@ -249,7 +252,7 @@ export async function handleVectorizeProxy(path: string, body: Record<string, un
         return err(`Unknown vectorize proxy path: ${path}`, 404);
     }
   } catch (e: unknown) {
-    console.error(`Vectorize proxy error on ${path}`, e);
+    logger.error(`Vectorize proxy error on ${path}`, e);
     return err(classifyProxyError(e).message, classifyProxyError(e).status);
   }
 }
@@ -263,7 +266,7 @@ export async function handleAiProxy(path: string, body: Record<string, unknown>,
     }
     return err(`Unknown AI proxy path: ${path}`, 404);
   } catch (e: unknown) {
-    console.error(`AI proxy error on ${path}`, e);
+    logger.error(`AI proxy error on ${path}`, e);
     return err(classifyProxyError(e).message, classifyProxyError(e).status);
   }
 }
@@ -282,7 +285,7 @@ async function forwardProxy(label: string, fetcher: Fetcher, body: Record<string
     }));
     return new Response(res.body, { status: res.status, headers: res.headers });
   } catch (e: unknown) {
-    console.error(`${label} proxy error`, e);
+    logger.error(`${label} proxy error`, e);
     return err(classifyProxyError(e).message, classifyProxyError(e).status);
   }
 }
@@ -320,7 +323,7 @@ export async function handleQueueProxy(path: string, body: Record<string, unknow
         return err(`Unknown queue proxy path: ${path}`, 404);
     }
   } catch (e: unknown) {
-    console.error(`Queue proxy error on ${path}`, e);
+    logger.error(`Queue proxy error on ${path}`, e);
     return err(classifyProxyError(e).message, classifyProxyError(e).status);
   }
 }
