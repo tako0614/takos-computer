@@ -1,5 +1,5 @@
 apiVersion: takos.dev/v1alpha1
-kind: Package
+kind: App
 metadata:
   name: takos-computer
 spec:
@@ -21,113 +21,55 @@ spec:
       - runs:read
       - runs:write
       - repos:read
----
-apiVersion: takos.dev/v1alpha1
-kind: Workload
-metadata:
-  name: browser
-spec:
-  type: container
-  pluginConfig:
-    dockerfile: packages/browser-service/Dockerfile
-    port: 8080
-    instanceType: standard-2
-    maxInstances: 25
----
-apiVersion: takos.dev/v1alpha1
-kind: Workload
-metadata:
-  name: executor
-spec:
-  type: container
-  pluginConfig:
-    dockerfile: packages/executor-service/Dockerfile
-    port: 8080
-    instanceType: basic
-    maxInstances: 100
----
-apiVersion: takos.dev/v1alpha1
-kind: Workload
-metadata:
-  name: browser-host
-spec:
-  type: worker
-  pluginConfig:
-    config: deploy/wrangler.browser-host.toml
----
-apiVersion: takos.dev/v1alpha1
-kind: Workload
-metadata:
-  name: executor-host
-spec:
-  type: worker
-  pluginConfig:
-    config: deploy/wrangler.executor-host.toml
----
-apiVersion: takos.dev/v1alpha1
-kind: Resource
-metadata:
-  name: mcp-auth-secret
-spec:
-  type: secretRef
-  binding: MCP_AUTH_TOKEN
-  generate: true
----
-apiVersion: takos.dev/v1alpha1
-kind: Binding
-metadata:
-  name: mcp-secret-to-browser
-spec:
-  from: mcp-auth-secret
-  to: browser-host
-  mount:
-    as: MCP_AUTH_TOKEN
-    type: secretRef
----
-apiVersion: takos.dev/v1alpha1
-kind: Binding
-metadata:
-  name: executor-control
-spec:
-  from: executor-host
-  to: takos-control
-  mount:
-    as: TAKOS_CONTROL
-    type: service
----
-apiVersion: takos.dev/v1alpha1
-kind: Endpoint
-metadata:
-  name: browser-api
-spec:
-  protocol: http
-  targetRef: browser-host
-  path: /session
----
-apiVersion: takos.dev/v1alpha1
-kind: Endpoint
-metadata:
-  name: browser-mcp
-spec:
-  protocol: http
-  targetRef: browser-host
-  path: /mcp
----
-apiVersion: takos.dev/v1alpha1
-kind: Endpoint
-metadata:
-  name: executor-api
-spec:
-  protocol: http
-  targetRef: executor-host
-  path: /dispatch
----
-apiVersion: takos.dev/v1alpha1
-kind: McpServer
-metadata:
-  name: takos-computer
-spec:
-  endpointRef: browser-mcp
-  name: takos-computer
-  transport: streamable-http
-  authSecretRef: mcp-auth-secret
+  resources:
+    mcp-auth-secret:
+      type: secretRef
+      binding: MCP_AUTH_TOKEN
+      generate: true
+  services:
+    browser-host:
+      type: worker
+      containers:
+        - name: browser
+          dockerfile: packages/browser-service/Dockerfile
+          port: 8080
+          instanceType: standard-2
+          maxInstances: 25
+      build:
+        fromWorkflow:
+          path: .takos/workflows/deploy.yml
+          job: build-browser-host
+          artifact: browser-host
+          artifactPath: dist/browser-host.js
+    executor-host:
+      type: worker
+      containers:
+        - name: executor
+          dockerfile: packages/executor-service/Dockerfile
+          port: 8080
+          instanceType: basic
+          maxInstances: 100
+      build:
+        fromWorkflow:
+          path: .takos/workflows/deploy.yml
+          job: build-executor-host
+          artifact: executor-host
+          artifactPath: dist/executor-host.js
+      bindings:
+        services:
+          - takos-control
+  routes:
+    - name: browser-api
+      service: browser-host
+      path: /session
+    - name: browser-mcp
+      service: browser-host
+      path: /mcp
+    - name: executor-api
+      service: executor-host
+      path: /dispatch
+  mcpServers:
+    - name: takos-computer
+      route: browser-mcp
+      transport: streamable-http
+      authSecretRef: mcp-auth-secret
