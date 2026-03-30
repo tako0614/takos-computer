@@ -49,9 +49,15 @@ spec:
     - name: browser-gui
       target: browser-host
       path: /gui
+    - name: browser-api
+      target: browser-host
+      path: /api
     - name: browser-session
       target: browser-host
       path: /session
+    - name: browser-mcp
+      target: browser-host
+      path: /mcp
     - name: executor-api
       target: executor-host
       path: /dispatch
