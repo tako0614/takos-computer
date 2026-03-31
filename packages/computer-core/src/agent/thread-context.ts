@@ -1,13 +1,13 @@
-import type { Env, DbEnv, AiEnv } from '../../shared/types';
+import type { Env, DbEnv, AiEnv } from '../../shared/types.ts';
 
 type ThreadContextEnv = DbEnv & AiEnv;
-import { getDb, accounts, threads, messages } from '../../infra/db';
+import { getDb, accounts, threads, messages } from '../../infra/db.ts';
 import { eq, and, gt, inArray, desc, asc } from 'drizzle-orm';
-import { now, toIsoString } from '../../shared/utils';
-import { createLLMClient, getProviderFromModel } from './llm';
-import { DEFAULT_MODEL_ID } from './model-catalog';
-import type { AgentMessage } from './types';
-import { logWarn } from '../../shared/utils/logger';
+import { now, toIsoString } from '../../shared/utils.ts';
+import { createLLMClient, getProviderFromModel } from './llm.ts';
+import { DEFAULT_MODEL_ID } from './model-catalog.ts';
+import type { AgentMessage } from './types.ts';
+import { logWarn } from '../../shared/utils/logger.ts';
 
 const EMBEDDING_MODEL = '@cf/baai/bge-base-en-v1.5';
 

@@ -7,12 +7,13 @@
  * - app_*      — GUI application process management
  */
 
+import { Buffer } from 'node:buffer';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
-import type { BrowserManager } from './browser-manager.js';
-import type { DisplayManager } from './display-manager.js';
-import type { ProcessManager } from './process-manager.js';
+import type { BrowserManager } from './browser-manager.ts';
+import type { DisplayManager } from './display-manager.ts';
+import type { ProcessManager } from './process-manager.ts';
 
 export interface McpServerDeps {
   browser: BrowserManager;
@@ -40,7 +41,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
       viewport_width: z.number().optional().describe('Viewport width in pixels (default: 1280)'),
       viewport_height: z.number().optional().describe('Viewport height in pixels (default: 720)'),
     },
-    async ({ url, viewport_width, viewport_height }) => {
+    async ({ url, viewport_width, viewport_height }: { url?: string; viewport_width?: number; viewport_height?: number }) => {
       const result = await browser.bootstrap({
         url,
         viewport: {
@@ -59,7 +60,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
       url: z.string().describe('URL to navigate to'),
       wait_until: z.enum(['load', 'domcontentloaded', 'networkidle', 'commit']).optional(),
     },
-    async ({ url, wait_until }) => {
+    async ({ url, wait_until }: { url: string; wait_until?: 'load' | 'domcontentloaded' | 'networkidle' | 'commit' }) => {
       const result = await browser.goto({ url, waitUntil: wait_until });
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     },
@@ -77,7 +78,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
       direction: z.enum(['up', 'down', 'left', 'right']).optional(),
       amount: z.number().optional().describe('Scroll amount in pixels'),
     },
-    async (args) => {
+    async (args: { action: string; selector?: string; text?: string; key?: string; value?: string; direction?: 'up' | 'down' | 'left' | 'right'; amount?: number }) => {
       const result = await browser.action({
         type: args.action,
         selector: args.selector,
@@ -86,7 +87,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
         value: args.value,
         direction: args.direction,
         amount: args.amount,
-      });
+      } as Parameters<typeof browser.action>[0]);
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     },
   );
@@ -109,7 +110,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
       selector: z.string().optional().describe('CSS selector'),
       evaluate: z.string().optional().describe('JavaScript expression to evaluate'),
     },
-    async ({ selector, evaluate }) => {
+    async ({ selector, evaluate }: { selector?: string; evaluate?: string }) => {
       const result = await browser.extract({ selector, evaluate });
       return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
     },
@@ -147,7 +148,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
     server.tool('display_screenshot',
       'Capture the entire X11 display as an image. Use this to see what is on screen across all GUI apps.',
       { format: z.enum(['png', 'jpeg']).optional().describe('Image format (default: png)') },
-      async ({ format }) => {
+      async ({ format }: { format?: 'png' | 'jpeg' }) => {
         const buf = await display.screenshot({ format: format ?? 'png' });
         const mimeType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
         return { content: [{ type: 'image', data: Buffer.from(buf).toString('base64'), mimeType }] };
@@ -162,7 +163,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
         button: z.enum(['left', 'middle', 'right']).optional().describe('Mouse button (default: left)'),
         clicks: z.number().optional().describe('Number of clicks (2 = double-click, 3 = triple-click, default: 1)'),
       },
-      async ({ x, y, button, clicks }) => {
+      async ({ x, y, button, clicks }: { x: number; y: number; button?: string; clicks?: number }) => {
         await display.mouseClick(x, y, mapBtn(button), clicks ?? 1);
         return text(`Clicked at (${x}, ${y})`);
       },
@@ -174,7 +175,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
         x: z.number().describe('X pixel coordinate'),
         y: z.number().describe('Y pixel coordinate'),
       },
-      async ({ x, y }) => {
+      async ({ x, y }: { x: number; y: number }) => {
         await display.mouseMove(x, y);
         return text(`Moved to (${x}, ${y})`);
       },
@@ -189,7 +190,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
         to_y: z.number().describe('End Y coordinate'),
         button: z.enum(['left', 'middle', 'right']).optional().describe('Mouse button (default: left)'),
       },
-      async ({ from_x, from_y, to_x, to_y, button }) => {
+      async ({ from_x, from_y, to_x, to_y, button }: { from_x: number; from_y: number; to_x: number; to_y: number; button?: string }) => {
         await display.drag(from_x, from_y, to_x, to_y, mapBtn(button));
         return text(`Dragged (${from_x},${from_y}) -> (${to_x},${to_y})`);
       },
@@ -203,7 +204,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
         x: z.number().optional().describe('X coordinate to scroll at (optional)'),
         y: z.number().optional().describe('Y coordinate to scroll at (optional)'),
       },
-      async ({ direction, amount, x, y }) => {
+      async ({ direction, amount, x, y }: { direction: 'up' | 'down' | 'left' | 'right'; amount?: number; x?: number; y?: number }) => {
         await display.scroll(direction, amount ?? 3, x, y);
         return text(`Scrolled ${direction} ${amount ?? 3} steps`);
       },
@@ -212,7 +213,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
     server.tool('display_type',
       'Type text into the currently focused window. Click a text field first, then use this to enter text.',
       { text: z.string().describe('Text to type') },
-      async ({ text: t }) => {
+      async ({ text: t }: { text: string }) => {
         await display.keyType(t);
         return text(`Typed "${t}"`);
       },
@@ -221,7 +222,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
     server.tool('display_key',
       'Press a key or key combination. Examples: "Return", "Tab", "Escape", "BackSpace", "ctrl+a", "ctrl+c", "ctrl+v", "alt+F4", "shift+ctrl+s", "super"',
       { key: z.string().describe('Key name or combo in xdotool format') },
-      async ({ key }) => {
+      async ({ key }: { key: string }) => {
         await display.keyPress(key);
         return text(`Pressed ${key}`);
       },
@@ -239,7 +240,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
     server.tool('display_clipboard_set',
       'Set the clipboard contents. Use display_key with "ctrl+v" afterwards to paste.',
       { text: z.string().describe('Text to put on the clipboard') },
-      async ({ text: t }) => {
+      async ({ text: t }: { text: string }) => {
         await display.setClipboard(t);
         return text('Clipboard set');
       },
@@ -272,13 +273,13 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
     server.tool('display_find_window',
       'Find windows whose title contains a search string.',
       { name: z.string().describe('Substring to search for in window titles') },
-      async ({ name }) => json({ windows: await display.findWindowByName(name) }),
+      async ({ name }: { name: string }) => json({ windows: await display.findWindowByName(name) }),
     );
 
     server.tool('display_focus_window',
       'Bring a window to the front and give it keyboard focus.',
       { window_id: z.number().describe('X11 window ID (from display_windows or display_find_window)') },
-      async ({ window_id }) => {
+      async ({ window_id }: { window_id: number }) => {
         await display.focusWindow(window_id);
         return text(`Focused window ${window_id}`);
       },
@@ -290,13 +291,13 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
         name: z.string().describe('Substring to search for in window titles'),
         timeout_ms: z.number().optional().describe('Max wait time in milliseconds (default: 10000)'),
       },
-      async ({ name, timeout_ms }) => json(await display.waitForWindow(name, timeout_ms ?? 10000)),
+      async ({ name, timeout_ms }: { name: string; timeout_ms?: number }) => json(await display.waitForWindow(name, timeout_ms ?? 10000)),
     );
 
     server.tool('display_wait_for_screen_change',
       'Wait until the screen content visually changes (compares screenshots). Useful after triggering an action.',
       { timeout_ms: z.number().optional().describe('Max wait time in milliseconds (default: 10000)') },
-      async ({ timeout_ms }) => {
+      async ({ timeout_ms }: { timeout_ms?: number }) => {
         const changed = await display.waitForScreenChange(timeout_ms ?? 10000);
         return text(changed ? 'Screen changed' : 'Timed out — no change detected');
       },
@@ -317,7 +318,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
         command: z.string().describe('Executable name or path (e.g. "xterm", "firefox", "python3")'),
         args: z.array(z.string()).optional().describe('Command-line arguments'),
       },
-      async ({ command, args }) => json2(processes.launch({ command, args })),
+      async ({ command, args }: { command: string; args?: string[] }) => json2(processes.launch({ command, args })),
     );
 
     server.tool('app_list',
@@ -332,7 +333,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
         pid: z.number().describe('Process ID'),
         tail: z.number().optional().describe('Only return the last N lines (default: all)'),
       },
-      async ({ pid, tail }) => {
+      async ({ pid, tail }: { pid: number; tail?: number }) => {
         const out = processes.getOutput(pid, tail);
         if (!out) return text(`Process ${pid} not found`);
         return json2(out);
@@ -342,7 +343,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
     server.tool('app_kill',
       'Stop a running application. Sends SIGTERM, then SIGKILL after 3 seconds if still alive.',
       { pid: z.number().describe('Process ID to kill') },
-      async ({ pid }) => {
+      async ({ pid }: { pid: number }) => {
         const killed = processes.kill(pid);
         return text(killed ? `Killed ${pid}` : `Process ${pid} not found`);
       },
@@ -354,7 +355,7 @@ export function createBrowserMcpServer(arg: BrowserManager | McpServerDeps): Mcp
         pid: z.number().describe('Process ID'),
         timeout_ms: z.number().optional().describe('Max wait time in ms (default: 30000)'),
       },
-      async ({ pid, timeout_ms }) => {
+      async ({ pid, timeout_ms }: { pid: number; timeout_ms?: number }) => {
         const code = await processes.waitForExit(pid, timeout_ms ?? 30000);
         return json2({ pid, exitCode: code, timedOut: code === null });
       },

@@ -1,4 +1,4 @@
-import type { AgentMessage, AgentTool } from './types';
+import type { AgentMessage, AgentTool } from './types.ts';
 import {
   createProvider,
   getProviderFromModel,
@@ -7,7 +7,7 @@ import {
   type ModelProvider,
   type LLMProvider,
   type LLMResponse,
-} from './providers';
+} from './providers/index.ts';
 
 export type { ModelConfig, ModelProvider, LLMProvider, LLMResponse };
 export { getProviderFromModel };

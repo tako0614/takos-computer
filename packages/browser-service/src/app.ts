@@ -1,10 +1,9 @@
 import { Hono } from 'hono';
-import { serve } from '@hono/node-server';
 import { createLogger } from '@takos-computer/common/logger';
-import { BrowserManager } from './browser-manager.js';
-import { DisplayManager } from './display-manager.js';
-import { ProcessManager } from './process-manager.js';
-import { createVncProxy } from './vnc-proxy.js';
+import { BrowserManager } from './browser-manager.ts';
+import { DisplayManager } from './display-manager.ts';
+import { ProcessManager } from './process-manager.ts';
+import { createVncProxy } from './vnc-proxy.ts';
 
 export type BrowserServiceOptions = {
   port?: number;
@@ -24,7 +23,7 @@ export function createBrowserServiceApp(options: BrowserServiceOptions = {}) {
     status: 'ok',
     service: options.serviceName ?? 'browserd',
     browser_alive: browser.isAlive(),
-    display: Boolean(process.env.DISPLAY),
+    display: Boolean(Deno.env.get('DISPLAY')),
   }));
 
   // MCP endpoint — the sole public API surface.
@@ -32,13 +31,13 @@ export function createBrowserServiceApp(options: BrowserServiceOptions = {}) {
   let mcpHandler: ((request: Request) => Promise<Response>) | null = null;
   app.post('/mcp', async (c) => {
     if (!mcpHandler) {
-      const { createBrowserMcpServer, createMcpRequestHandler } = await import('./mcp.js');
+      const { createBrowserMcpServer, createMcpRequestHandler } = await import('./mcp.ts');
       const mcpServer = createBrowserMcpServer({
         browser,
-        display: process.env.DISPLAY ? display : undefined,
-        processes: process.env.DISPLAY ? processes : undefined,
+        display: Deno.env.get('DISPLAY') ? display : undefined,
+        processes: Deno.env.get('DISPLAY') ? processes : undefined,
       });
-      mcpHandler = createMcpRequestHandler(mcpServer, process.env.MCP_AUTH_TOKEN || undefined);
+      mcpHandler = createMcpRequestHandler(mcpServer, Deno.env.get('MCP_AUTH_TOKEN') || undefined);
     }
     return mcpHandler(c.req.raw);
   });
@@ -52,34 +51,38 @@ export function createBrowserServiceApp(options: BrowserServiceOptions = {}) {
 }
 
 export function startBrowserService(options: BrowserServiceOptions = {}) {
-  const port = options.port ?? parseInt(process.env.PORT ?? '8080', 10);
-  const shutdownGraceMs = options.shutdownGraceMs ?? parseInt(process.env.SHUTDOWN_GRACE_MS ?? '15000', 10);
+  const port = options.port ?? parseInt(Deno.env.get('PORT') ?? '8080', 10);
+  const shutdownGraceMs = options.shutdownGraceMs ?? parseInt(Deno.env.get('SHUTDOWN_GRACE_MS') ?? '15000', 10);
   const { app, browser, processes, logger } = createBrowserServiceApp(options);
-  const server = serve({ fetch: app.fetch, port }, () => {
-    logger.info(`[browserd] Listening on port ${port}`);
-  });
 
-  // Attach WebSocket-to-VNC proxy for GUI remote access
-  if (process.env.DISPLAY) {
-    createVncProxy(server, logger);
-  }
+  const abortController = new AbortController();
+  const server = Deno.serve({ port, signal: abortController.signal }, app.fetch);
+  logger.info(`[browserd] Listening on port ${port}`);
+
+  // TODO: VNC proxy needs Deno WebSocket upgrade support
+  // if (Deno.env.get('DISPLAY')) {
+  //   createVncProxy(server, logger);
+  // }
 
   async function shutdown(signal: string): Promise<void> {
     logger.info(`[browserd] Received ${signal}, shutting down`);
     processes.killAll();
     await browser.close();
-    server.close(() => {
-      logger.info('[browserd] Server closed');
-      process.exit(0);
-    });
-    setTimeout(() => {
-      logger.warn(`[browserd] Force exit after ${shutdownGraceMs}ms`);
-      process.exit(1);
-    }, shutdownGraceMs).unref();
+    abortController.abort();
+    await server.finished;
+    logger.info('[browserd] Server closed');
+    Deno.exit(0);
   }
 
-  process.once('SIGTERM', () => { void shutdown('SIGTERM'); });
-  process.once('SIGINT', () => { void shutdown('SIGINT'); });
+  const forceExit = () => {
+    setTimeout(() => {
+      logger.warn(`[browserd] Force exit after ${shutdownGraceMs}ms`);
+      Deno.exit(1);
+    }, shutdownGraceMs);
+  };
+
+  Deno.addSignalListener('SIGTERM', () => { forceExit(); void shutdown('SIGTERM'); });
+  Deno.addSignalListener('SIGINT', () => { forceExit(); void shutdown('SIGINT'); });
 
   return { app, browser, server, logger };
 }

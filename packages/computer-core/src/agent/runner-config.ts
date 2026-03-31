@@ -1,14 +1,14 @@
-import type { AgentConfig } from './types';
-import type { Env } from '../../shared/types';
-import { BUILTIN_TOOLS } from '../../tools/builtin';
-import { SYSTEM_PROMPTS } from './prompts';
-import { logWarn } from '../../shared/utils/logger';
+import type { AgentConfig } from './types.ts';
+import type { Env } from '../../shared/types.ts';
+import { BUILTIN_TOOLS } from '../../tools/builtin.ts';
+import { SYSTEM_PROMPTS } from './prompts.ts';
+import { logWarn } from '../../shared/utils/logger.ts';
 import {
   AGENT_ITERATION_TIMEOUT_MS,
   AGENT_TOTAL_TIMEOUT_MS,
   AGENT_TOOL_EXECUTION_TIMEOUT_MS,
   AGENT_LANGGRAPH_TIMEOUT_MS,
-} from '../../shared/config/timeouts';
+} from '../../shared/config/timeouts.ts';
 
 const DEFAULT_MAX_ITERATIONS = 10000;
 const DEFAULT_TEMPERATURE = 0.5;

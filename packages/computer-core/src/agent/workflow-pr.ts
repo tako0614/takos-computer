@@ -1,6 +1,6 @@
-import type { WorkflowContext } from './workflow-types';
-import { generateId, now } from '../../shared/utils';
-import { getDb, pullRequests, sessions, accounts, runs, branches } from '../../infra/db';
+import type { WorkflowContext } from './workflow-types.ts';
+import { generateId, now } from '../../shared/utils.ts';
+import { getDb, pullRequests, sessions, accounts, runs, branches } from '../../infra/db.ts';
 import { eq, and, sql } from 'drizzle-orm';
 
 // ── PR helpers ──────────────────────────────────────────────────────────

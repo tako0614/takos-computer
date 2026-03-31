@@ -1,4 +1,4 @@
-import type { AgentMessage } from './types';
+import type { AgentMessage } from './types.ts';
 
 export const PRODUCT_HINTS = ['takos', 'yurucommu', 'roadtome'] as const;
 export type ProductHint = typeof PRODUCT_HINTS[number];

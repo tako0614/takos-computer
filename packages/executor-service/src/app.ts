@@ -1,4 +1,3 @@
-import { serve } from '@hono/node-server';
 import { createLogger } from '@takos-computer/common/logger';
 import { executeRunInContainer as sharedExecuteRun } from '@takos-computer/agent-core/run-executor';
 import type { StartPayload } from '@takos-computer/agent-core/run-executor';
@@ -12,7 +11,7 @@ import {
   buildExecutorRuntimeConfig,
   createExecutorApp,
   hasControlRpcConfiguration,
-} from './executor-app.js';
+} from './executor-app.ts';
 
 export type ExecutorServiceOptions = {
   port?: number;
@@ -25,9 +24,9 @@ export type ExecutorServiceOptions = {
 export function createExecutorServiceApp(options: ExecutorServiceOptions = {}) {
   const serviceName = options.serviceName ?? 'takos-executor';
   const logger = createLogger({ service: serviceName });
-  const runtimeConfig = buildExecutorRuntimeConfig(process.env as Record<string, string | undefined>);
+  const runtimeConfig = buildExecutorRuntimeConfig(Deno.env.toObject());
   const concurrency = options.concurrency ?? createConcurrencyGuard(
-    options.maxConcurrentRuns ?? parseInt(process.env.MAX_CONCURRENT_RUNS ?? '5', 10),
+    options.maxConcurrentRuns ?? parseInt(Deno.env.get('MAX_CONCURRENT_RUNS') ?? '5', 10),
   );
   const shutdownController = new AbortController();
 
@@ -52,25 +51,25 @@ export function createExecutorServiceApp(options: ExecutorServiceOptions = {}) {
 }
 
 export function startExecutorService(options: ExecutorServiceOptions = {}) {
-  const port = options.port ?? parseInt(process.env.PORT ?? '8080', 10);
-  const gracePeriodMs = options.shutdownGraceMs ?? parseInt(process.env.SHUTDOWN_GRACE_MS ?? '30000', 10);
+  const port = options.port ?? parseInt(Deno.env.get('PORT') ?? '8080', 10);
+  const gracePeriodMs = options.shutdownGraceMs ?? parseInt(Deno.env.get('SHUTDOWN_GRACE_MS') ?? '30000', 10);
   const { app, logger, concurrency, shutdownController, runtimeConfig } = createExecutorServiceApp(options);
 
-  const server = serve({ fetch: app.fetch, port }, () => {
-    logger.info(`[executor] Listening on port ${port}`);
-    const controlRpcConfiguredAtStartup = hasControlRpcConfiguration(runtimeConfig);
-    logger.info(`[executor] Control RPC configured at startup: ${controlRpcConfiguredAtStartup}`);
-    if (!controlRpcConfiguredAtStartup) {
-      logger.warn('[executor] CONTROL_RPC_BASE_URL env missing at startup; /start will return 503 until configured');
-    }
-  });
+  const abortController = new AbortController();
+  const server = Deno.serve({ port, signal: abortController.signal }, app.fetch);
+  logger.info(`[executor] Listening on port ${port}`);
+  const controlRpcConfiguredAtStartup = hasControlRpcConfiguration(runtimeConfig);
+  logger.info(`[executor] Control RPC configured at startup: ${controlRpcConfiguredAtStartup}`);
+  if (!controlRpcConfiguredAtStartup) {
+    logger.warn('[executor] CONTROL_RPC_BASE_URL env missing at startup; /start will return 503 until configured');
+  }
 
   installGracefulShutdown({
     serviceName: options.serviceName ?? 'takos-executor',
     logger,
     shutdownController,
     concurrency,
-    server,
+    server: { close: (cb?: () => void) => { abortController.abort(); server.finished.then(cb); } },
     gracePeriodMs,
   });
 

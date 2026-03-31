@@ -1,0 +1,13 @@
+{
+  "name": "@takos-computer/executor-service",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "imports": {
+    "hono": "npm:hono@^4.7.0"
+  },
+  "tasks": {
+    "test": "deno test --allow-all src/"
+  }
+}

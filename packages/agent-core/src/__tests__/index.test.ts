@@ -1,20 +1,18 @@
-import { describe, expect, it } from 'vitest';
-import * as agentCore from '../index.js';
+import { assertEquals } from 'jsr:@std/assert';
+import * as agentCore from '../index.ts';
 
-describe('agent-core exports', () => {
-  it('exports executeRunInContainer function', () => {
-    expect(typeof agentCore.executeRunInContainer).toBe('function');
-  });
+Deno.test('agent-core exports - exports executeRunInContainer function', () => {
+  assertEquals(typeof agentCore.executeRunInContainer, 'function');
+});
 
-  it('exports parseStartPayload function', () => {
-    expect(typeof agentCore.parseStartPayload).toBe('function');
-  });
+Deno.test('agent-core exports - exports parseStartPayload function', () => {
+  assertEquals(typeof agentCore.parseStartPayload, 'function');
+});
 
-  it('exports createConcurrencyGuard function', () => {
-    expect(typeof agentCore.createConcurrencyGuard).toBe('function');
-  });
+Deno.test('agent-core exports - exports createConcurrencyGuard function', () => {
+  assertEquals(typeof agentCore.createConcurrencyGuard, 'function');
+});
 
-  it('exports installGracefulShutdown function', () => {
-    expect(typeof agentCore.installGracefulShutdown).toBe('function');
-  });
+Deno.test('agent-core exports - exports installGracefulShutdown function', () => {
+  assertEquals(typeof agentCore.installGracefulShutdown, 'function');
 });

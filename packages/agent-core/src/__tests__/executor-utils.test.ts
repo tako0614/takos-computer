@@ -1,246 +1,266 @@
-import { describe, expect, it } from 'vitest';
+import { assertEquals, assert } from 'jsr:@std/assert';
 import {
   parseStartPayload,
   createConcurrencyGuard,
-} from '../executor-utils.js';
+} from '../executor-utils.ts';
 
 // ---------------------------------------------------------------------------
 // parseStartPayload
 // ---------------------------------------------------------------------------
 
-describe('parseStartPayload', () => {
+Deno.test('parseStartPayload - accepts a valid payload with required fields', () => {
   const validPayload = {
     runId: 'run-123',
     workerId: 'worker-abc',
     controlRpcToken: 'tok_secret',
   };
+  const result = parseStartPayload(validPayload);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.payload.runId, 'run-123');
+    assertEquals(result.payload.serviceId, 'worker-abc');
+    assertEquals(result.payload.workerId, 'worker-abc');
+    assertEquals(result.payload.controlRpcToken, 'tok_secret');
+  }
+});
 
-  it('accepts a valid payload with required fields', () => {
-    const result = parseStartPayload(validPayload);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.payload.runId).toBe('run-123');
-      expect(result.payload.serviceId).toBe('worker-abc');
-      expect(result.payload.workerId).toBe('worker-abc');
-      expect(result.payload.controlRpcToken).toBe('tok_secret');
-    }
+Deno.test('parseStartPayload - accepts serviceId without workerId and normalizes workerId for compatibility', () => {
+  const result = parseStartPayload({
+    runId: 'run-123',
+    serviceId: 'service-abc',
+    controlRpcToken: 'tok_secret',
   });
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.payload.serviceId, 'service-abc');
+    assertEquals(result.payload.workerId, 'service-abc');
+  }
+});
 
-  it('accepts serviceId without workerId and normalizes workerId for compatibility', () => {
-    const result = parseStartPayload({
-      runId: 'run-123',
-      serviceId: 'service-abc',
-      controlRpcToken: 'tok_secret',
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.payload.serviceId).toBe('service-abc');
-      expect(result.payload.workerId).toBe('service-abc');
-    }
+Deno.test('parseStartPayload - accepts optional string fields', () => {
+  const validPayload = {
+    runId: 'run-123',
+    workerId: 'worker-abc',
+    controlRpcToken: 'tok_secret',
+  };
+  const result = parseStartPayload({
+    ...validPayload,
+    model: 'gpt-4',
+    controlRpcBaseUrl: 'https://control.example.com',
   });
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.payload.model, 'gpt-4');
+    assertEquals(result.payload.controlRpcBaseUrl, 'https://control.example.com');
+  }
+});
 
-  it('accepts optional string fields', () => {
-    const result = parseStartPayload({
-      ...validPayload,
-      model: 'gpt-4',
-      controlRpcBaseUrl: 'https://control.example.com',
-    });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.payload.model).toBe('gpt-4');
-      expect(result.payload.controlRpcBaseUrl).toBe('https://control.example.com');
-    }
-  });
+Deno.test('parseStartPayload - returns model as undefined when not provided', () => {
+  const validPayload = {
+    runId: 'run-123',
+    workerId: 'worker-abc',
+    controlRpcToken: 'tok_secret',
+  };
+  const result = parseStartPayload(validPayload);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.payload.model, undefined);
+    assertEquals(result.payload.controlRpcBaseUrl, undefined);
+  }
+});
 
-  it('returns model as undefined when not provided', () => {
-    const result = parseStartPayload(validPayload);
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.payload.model).toBeUndefined();
-      expect(result.payload.controlRpcBaseUrl).toBeUndefined();
-    }
-  });
+Deno.test('parseStartPayload - rejects null body', () => {
+  const result = parseStartPayload(null);
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Request body must be a JSON object');
+  }
+});
 
-  it('rejects null body', () => {
-    const result = parseStartPayload(null);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Request body must be a JSON object');
-    }
-  });
+Deno.test('parseStartPayload - rejects array body', () => {
+  const result = parseStartPayload([1, 2, 3]);
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Request body must be a JSON object');
+  }
+});
 
-  it('rejects array body', () => {
-    const result = parseStartPayload([1, 2, 3]);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Request body must be a JSON object');
-    }
-  });
+Deno.test('parseStartPayload - rejects non-object body', () => {
+  const result = parseStartPayload('string');
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Request body must be a JSON object');
+  }
+});
 
-  it('rejects non-object body', () => {
-    const result = parseStartPayload('string');
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Request body must be a JSON object');
-    }
-  });
+Deno.test('parseStartPayload - rejects number body', () => {
+  const result = parseStartPayload(42);
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Request body must be a JSON object');
+  }
+});
 
-  it('rejects number body', () => {
-    const result = parseStartPayload(42);
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Request body must be a JSON object');
-    }
-  });
+Deno.test('parseStartPayload - rejects missing runId', () => {
+  const result = parseStartPayload({ workerId: 'w', controlRpcToken: 'tok' });
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Missing required field: runId');
+  }
+});
 
-  it('rejects missing runId', () => {
-    const result = parseStartPayload({ workerId: 'w', controlRpcToken: 'tok' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Missing required field: runId');
-    }
-  });
+Deno.test('parseStartPayload - rejects empty runId', () => {
+  const result = parseStartPayload({ runId: '', workerId: 'w', controlRpcToken: 'tok' });
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Missing required field: runId');
+  }
+});
 
-  it('rejects empty runId', () => {
-    const result = parseStartPayload({ runId: '', workerId: 'w', controlRpcToken: 'tok' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Missing required field: runId');
-    }
-  });
+Deno.test('parseStartPayload - rejects non-string runId', () => {
+  const result = parseStartPayload({ runId: 123, workerId: 'w', controlRpcToken: 'tok' });
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Missing required field: runId');
+  }
+});
 
-  it('rejects non-string runId', () => {
-    const result = parseStartPayload({ runId: 123, workerId: 'w', controlRpcToken: 'tok' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Missing required field: runId');
-    }
-  });
+Deno.test('parseStartPayload - rejects missing workerId', () => {
+  const result = parseStartPayload({ runId: 'r', controlRpcToken: 'tok' });
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Missing required field: serviceId or workerId');
+  }
+});
 
-  it('rejects missing workerId', () => {
-    const result = parseStartPayload({ runId: 'r', controlRpcToken: 'tok' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Missing required field: serviceId or workerId');
-    }
-  });
+Deno.test('parseStartPayload - rejects empty workerId', () => {
+  const result = parseStartPayload({ runId: 'r', workerId: '', controlRpcToken: 'tok' });
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Missing required field: serviceId or workerId');
+  }
+});
 
-  it('rejects empty workerId', () => {
-    const result = parseStartPayload({ runId: 'r', workerId: '', controlRpcToken: 'tok' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Missing required field: serviceId or workerId');
-    }
-  });
+Deno.test('parseStartPayload - rejects missing controlRpcToken', () => {
+  const result = parseStartPayload({ runId: 'r', workerId: 'w' });
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Missing required field: controlRpcToken');
+  }
+});
 
-  it('rejects missing controlRpcToken', () => {
-    const result = parseStartPayload({ runId: 'r', workerId: 'w' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Missing required field: controlRpcToken');
-    }
-  });
+Deno.test('parseStartPayload - rejects empty controlRpcToken', () => {
+  const result = parseStartPayload({ runId: 'r', workerId: 'w', controlRpcToken: '' });
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'Missing required field: controlRpcToken');
+  }
+});
 
-  it('rejects empty controlRpcToken', () => {
-    const result = parseStartPayload({ runId: 'r', workerId: 'w', controlRpcToken: '' });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('Missing required field: controlRpcToken');
-    }
-  });
+Deno.test('parseStartPayload - rejects non-string model', () => {
+  const validPayload = {
+    runId: 'run-123',
+    workerId: 'worker-abc',
+    controlRpcToken: 'tok_secret',
+  };
+  const result = parseStartPayload({ ...validPayload, model: 123 });
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'model must be a string when provided');
+  }
+});
 
-  it('rejects non-string model', () => {
-    const result = parseStartPayload({ ...validPayload, model: 123 });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('model must be a string when provided');
-    }
-  });
+Deno.test('parseStartPayload - rejects non-string controlRpcBaseUrl', () => {
+  const validPayload = {
+    runId: 'run-123',
+    workerId: 'worker-abc',
+    controlRpcToken: 'tok_secret',
+  };
+  const result = parseStartPayload({ ...validPayload, controlRpcBaseUrl: true });
+  assertEquals(result.ok, false);
+  if (!result.ok) {
+    assertEquals(result.error, 'controlRpcBaseUrl must be a string when provided');
+  }
+});
 
-  it('rejects non-string controlRpcBaseUrl', () => {
-    const result = parseStartPayload({ ...validPayload, controlRpcBaseUrl: true });
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toBe('controlRpcBaseUrl must be a string when provided');
-    }
-  });
-
-  it('ignores extra unknown fields', () => {
-    const result = parseStartPayload({ ...validPayload, extra: 'field', another: 42 });
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.payload.runId).toBe('run-123');
-    }
-  });
+Deno.test('parseStartPayload - ignores extra unknown fields', () => {
+  const validPayload = {
+    runId: 'run-123',
+    workerId: 'worker-abc',
+    controlRpcToken: 'tok_secret',
+  };
+  const result = parseStartPayload({ ...validPayload, extra: 'field', another: 42 });
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.payload.runId, 'run-123');
+  }
 });
 
 // ---------------------------------------------------------------------------
 // createConcurrencyGuard
 // ---------------------------------------------------------------------------
 
-describe('createConcurrencyGuard', () => {
-  it('creates a guard with correct max', () => {
-    const guard = createConcurrencyGuard(3);
-    expect(guard.maxConcurrentRuns).toBe(3);
-    expect(guard.activeRuns).toBe(0);
-    expect(guard.available).toBe(3);
-  });
+Deno.test('createConcurrencyGuard - creates a guard with correct max', () => {
+  const guard = createConcurrencyGuard(3);
+  assertEquals(guard.maxConcurrentRuns, 3);
+  assertEquals(guard.activeRuns, 0);
+  assertEquals(guard.available, 3);
+});
 
-  it('tryAcquire increments active runs', () => {
-    const guard = createConcurrencyGuard(2);
-    expect(guard.tryAcquire()).toBe(true);
-    expect(guard.activeRuns).toBe(1);
-    expect(guard.available).toBe(1);
-  });
+Deno.test('createConcurrencyGuard - tryAcquire increments active runs', () => {
+  const guard = createConcurrencyGuard(2);
+  assertEquals(guard.tryAcquire(), true);
+  assertEquals(guard.activeRuns, 1);
+  assertEquals(guard.available, 1);
+});
 
-  it('tryAcquire returns false when at capacity', () => {
-    const guard = createConcurrencyGuard(2);
-    expect(guard.tryAcquire()).toBe(true);
-    expect(guard.tryAcquire()).toBe(true);
-    expect(guard.tryAcquire()).toBe(false);
-    expect(guard.activeRuns).toBe(2);
-    expect(guard.available).toBe(0);
-  });
+Deno.test('createConcurrencyGuard - tryAcquire returns false when at capacity', () => {
+  const guard = createConcurrencyGuard(2);
+  assertEquals(guard.tryAcquire(), true);
+  assertEquals(guard.tryAcquire(), true);
+  assertEquals(guard.tryAcquire(), false);
+  assertEquals(guard.activeRuns, 2);
+  assertEquals(guard.available, 0);
+});
 
-  it('release decrements active runs', () => {
-    const guard = createConcurrencyGuard(2);
-    guard.tryAcquire();
+Deno.test('createConcurrencyGuard - release decrements active runs', () => {
+  const guard = createConcurrencyGuard(2);
+  guard.tryAcquire();
+  guard.tryAcquire();
+  guard.release();
+  assertEquals(guard.activeRuns, 1);
+  assertEquals(guard.available, 1);
+});
+
+Deno.test('createConcurrencyGuard - release clamps at 0 (does not go negative)', () => {
+  const guard = createConcurrencyGuard(1);
+  guard.release();
+  assertEquals(guard.activeRuns, 0);
+  assertEquals(guard.available, 1);
+});
+
+Deno.test('createConcurrencyGuard - allows acquire after release frees capacity', () => {
+  const guard = createConcurrencyGuard(1);
+  guard.tryAcquire();
+  assertEquals(guard.tryAcquire(), false);
+  guard.release();
+  assertEquals(guard.tryAcquire(), true);
+  assertEquals(guard.activeRuns, 1);
+});
+
+Deno.test('createConcurrencyGuard - works with maxConcurrentRuns of 0', () => {
+  const guard = createConcurrencyGuard(0);
+  assertEquals(guard.maxConcurrentRuns, 0);
+  assertEquals(guard.available, 0);
+  assertEquals(guard.tryAcquire(), false);
+});
+
+Deno.test('createConcurrencyGuard - handles many acquire/release cycles', () => {
+  const guard = createConcurrencyGuard(3);
+  for (let i = 0; i < 100; i++) {
     guard.tryAcquire();
     guard.release();
-    expect(guard.activeRuns).toBe(1);
-    expect(guard.available).toBe(1);
-  });
-
-  it('release clamps at 0 (does not go negative)', () => {
-    const guard = createConcurrencyGuard(1);
-    guard.release();
-    expect(guard.activeRuns).toBe(0);
-    expect(guard.available).toBe(1);
-  });
-
-  it('allows acquire after release frees capacity', () => {
-    const guard = createConcurrencyGuard(1);
-    guard.tryAcquire();
-    expect(guard.tryAcquire()).toBe(false);
-    guard.release();
-    expect(guard.tryAcquire()).toBe(true);
-    expect(guard.activeRuns).toBe(1);
-  });
-
-  it('works with maxConcurrentRuns of 0', () => {
-    const guard = createConcurrencyGuard(0);
-    expect(guard.maxConcurrentRuns).toBe(0);
-    expect(guard.available).toBe(0);
-    expect(guard.tryAcquire()).toBe(false);
-  });
-
-  it('handles many acquire/release cycles', () => {
-    const guard = createConcurrencyGuard(3);
-    for (let i = 0; i < 100; i++) {
-      guard.tryAcquire();
-      guard.release();
-    }
-    expect(guard.activeRuns).toBe(0);
-    expect(guard.available).toBe(3);
-  });
+  }
+  assertEquals(guard.activeRuns, 0);
+  assertEquals(guard.available, 3);
 });

@@ -5,11 +5,11 @@
  * extracted from D1CheckpointSaver to separate recovery concerns from I/O.
  */
 
-import { getDb, lgCheckpoints, lgWrites } from '../../infra/db';
+import { getDb, lgCheckpoints, lgWrites } from '../../infra/db.ts';
 import { eq, and, desc } from 'drizzle-orm';
-import { InternalError } from '../../shared/utils/error-response';
-import { logError, logInfo } from '../../shared/utils/logger';
-import type { SqlDatabaseBinding } from '../../shared/types/bindings';
+import { InternalError } from '../../shared/utils/error-response.ts';
+import { logError, logInfo } from '../../shared/utils/logger.ts';
+import type { SqlDatabaseBinding } from '../../shared/types/bindings.ts';
 
 // ── Types ────────────────────────────────────────────────────────────────
 

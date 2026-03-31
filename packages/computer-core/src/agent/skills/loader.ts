@@ -1,22 +1,22 @@
-import type { AgentConfig, AgentMessage, AgentEvent } from '../types';
-import type { ToolExecutorLike } from '../../../tools/executor';
-import { getDb, runs, threads } from '../../../infra/db';
+import type { AgentConfig, AgentMessage, AgentEvent } from '../types.ts';
+import type { ToolExecutorLike } from '../../../tools/executor.ts';
+import { getDb, runs, threads } from '../../../infra/db.ts';
 import { eq } from 'drizzle-orm';
-import { listLocalizedOfficialSkills, resolveSkillLocale } from '../official-skills';
-import { listEnabledCustomSkillContext } from '../../../source/skills';
-import { listMcpServers } from '../../../platform/mcp';
-import { getWorkspaceLocale } from '../../../identity/locale';
-import { getDelegationPacketFromRunInput, isDelegationLocale } from '../delegation';
-import { listSkillTemplates } from '../skill-templates';
-import { logError, logWarn } from '../../../shared/utils/logger';
-import type { SqlDatabaseBinding } from '../../../shared/types/bindings';
+import { listLocalizedOfficialSkills, resolveSkillLocale } from '../official-skills.ts';
+import { listEnabledCustomSkillContext } from '../../../source/skills.ts';
+import { listMcpServers } from '../../../platform/mcp.ts';
+import { getWorkspaceLocale } from '../../../identity/locale.ts';
+import { getDelegationPacketFromRunInput, isDelegationLocale } from '../delegation.ts';
+import { listSkillTemplates } from '../skill-templates.ts';
+import { logError, logWarn } from '../../../shared/utils/logger.ts';
+import type { SqlDatabaseBinding } from '../../../shared/types/bindings.ts';
 import type {
   SkillCatalogEntry,
   SkillContext,
   SkillSelection,
   SkillResolutionContext,
-} from './types';
-import { resolveSkillPlan } from './activation';
+} from './types.ts';
+import { resolveSkillPlan } from './activation.ts';
 
 // Skill loading limits - balanced for security and usability
 const MAX_TOTAL_INSTRUCTIONS_SIZE = 1_000_000; // 1MB total for selected detailed skill instructions

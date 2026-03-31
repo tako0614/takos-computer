@@ -14,7 +14,7 @@
 // =============================================================================
 export {
   generateId,
-} from './id.js';
+} from './id.ts';
 
 // =============================================================================
 // Validation Utilities
@@ -22,12 +22,12 @@ export {
 export {
   isLocalhost,
   isPrivateIP,
-} from './validation.js';
+} from './validation.ts';
 
 // =============================================================================
 // Structured Logging
 // =============================================================================
-export { createLogger, type Logger, type LogLevel } from './logger.js';
+export { createLogger, type Logger, type LogLevel } from './logger.ts';
 
 // =============================================================================
 // Cloudflare Workers type shims (for Node.js environments)
@@ -59,7 +59,7 @@ export type {
   QueueSendOptions,
   Fetcher,
   KVNamespace,
-} from './cf-types.js';
+} from './cf-types.ts';
 
 // =============================================================================
 // Error Handling
@@ -94,4 +94,4 @@ export {
   // Types
   type ErrorResponse,
   type ValidationErrorDetail,
-} from './errors.js';
+} from './errors.ts';

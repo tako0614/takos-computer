@@ -17,7 +17,7 @@ type ExecutorLogger = {
 };
 
 type ExecutorEnv = Record<string, string | undefined>;
-const defaultExecutorEnv: ExecutorEnv = process.env as ExecutorEnv;
+const defaultExecutorEnv: ExecutorEnv = Deno.env.toObject() as ExecutorEnv;
 
 export type ExecutorRuntimeConfig = RunExecutorRuntimeConfig;
 

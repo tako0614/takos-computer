@@ -8,4 +8,4 @@
  *   - Model catalog, thread context, tool policy
  */
 
-export * from './agent/index';
+export * from './agent/index.ts';

@@ -14,13 +14,13 @@
  *     all tool work flows through the ToolExecutionWorker.
  */
 
-import type { Env } from '../../shared/types';
-import type { SqlDatabaseBinding, ObjectStoreBinding } from '../../shared/types/bindings';
-import type { AgentContext } from './types';
-import { AgentRunner, type AgentRunnerIo } from './runner';
-import { AbstractAgentWorker } from '../../multi-agent/base-worker';
-import type { AgentWorkerConfig, AgentMessage } from '../../multi-agent/types';
-import { logError, logInfo } from '../../shared/utils/logger';
+import type { Env } from '../../shared/types.ts';
+import type { SqlDatabaseBinding, ObjectStoreBinding } from '../../shared/types/bindings.ts';
+import type { AgentContext } from './types.ts';
+import { AgentRunner, type AgentRunnerIo } from './runner.ts';
+import { AbstractAgentWorker } from '../../multi-agent/base-worker.ts';
+import type { AgentWorkerConfig, AgentMessage } from '../../multi-agent/types.ts';
+import { logError, logInfo } from '../../shared/utils/logger.ts';
 
 // ── Input / Output contracts ────────────────────────────────────────
 

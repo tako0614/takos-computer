@@ -1,4 +1,4 @@
-import type { Env } from '../../shared/types';
+import type { Env } from '../../shared/types.ts';
 
 // ── Public types ────────────────────────────────────────────────────────
 

@@ -1,0 +1,7 @@
+{
+  "version": "1.0.0",
+  "tasks": {
+    "start": "deno run --allow-all src/index.ts",
+    "compile": "deno compile --allow-all --output takos-browser src/index.ts"
+  }
+}

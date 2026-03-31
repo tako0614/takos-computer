@@ -5,8 +5,8 @@ import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, readFileSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 
-import type { ExecutionContext } from '../types.js';
-import { ExpressionError } from './expression-types.js';
+import type { ExecutionContext } from '../types.ts';
+import { ExpressionError } from './expression-types.ts';
 
 // ---------------------------------------------------------------------------
 // File-system / glob helpers

@@ -4,8 +4,8 @@
  * Extracted from takos/packages/control/src/application/tools/executor.ts.
  */
 
-import type { ToolCall, ToolResult, ToolDefinition } from './types';
-import type { ToolObserver } from '../memory-graph/types';
+import type { ToolCall, ToolResult, ToolDefinition } from './types.ts';
+import type { ToolObserver } from '../memory-graph/types.ts';
 
 export interface ToolExecutorLike {
   execute(toolCall: ToolCall): Promise<ToolResult>;

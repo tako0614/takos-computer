@@ -2,7 +2,7 @@
  * Type definitions for the BrowserSession container host.
  */
 
-import type { DurableObjectNamespace, R2Bucket } from './cf-types';
+import type { DurableObjectNamespace, R2Bucket } from './cf-types.ts';
 
 export interface KVNamespace {
   get(key: string, options?: { type?: 'text' }): Promise<string | null>;

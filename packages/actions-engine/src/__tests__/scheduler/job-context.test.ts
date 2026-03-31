@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { assertEquals, assertNotEquals } from 'jsr:@std/assert';
 
-import type { ExecutionContext, JobResult } from '../../types.js';
-import { buildJobExecutionContext, buildNeedsContext } from '../../scheduler/job-context.js';
+import type { ExecutionContext, JobResult } from '../../types.ts';
+import { buildJobExecutionContext, buildNeedsContext } from '../../scheduler/job-context.ts';
 
 function createBaseContext(): ExecutionContext {
   return {
@@ -62,58 +62,56 @@ function createJobResult(overrides: Partial<JobResult> = {}): JobResult {
   };
 }
 
-describe('job-context helpers', () => {
-  it('builds needs context from dependency results and clones outputs', () => {
-    const setupOutputs = { token: 'abc' };
-    const results = new Map<string, JobResult>([
-      ['setup', createJobResult({ id: 'setup', outputs: setupOutputs, conclusion: 'success' })],
-      ['test', createJobResult({ id: 'test', outputs: {}, conclusion: 'failure' })],
-      ['lint', createJobResult({ id: 'lint', outputs: {}, conclusion: 'skipped' })],
-    ]);
+Deno.test('job-context - builds needs context from dependency results and clones outputs', () => {
+  const setupOutputs = { token: 'abc' };
+  const results = new Map<string, JobResult>([
+    ['setup', createJobResult({ id: 'setup', outputs: setupOutputs, conclusion: 'success' })],
+    ['test', createJobResult({ id: 'test', outputs: {}, conclusion: 'failure' })],
+    ['lint', createJobResult({ id: 'lint', outputs: {}, conclusion: 'skipped' })],
+  ]);
 
-    const needsContext = buildNeedsContext(['setup', 'test', 'lint', 'missing'], results);
+  const needsContext = buildNeedsContext(['setup', 'test', 'lint', 'missing'], results);
 
-    expect(needsContext).toEqual({
-      setup: { outputs: { token: 'abc' }, result: 'success' },
-      test: { outputs: {}, result: 'failure' },
-      lint: { outputs: {}, result: 'skipped' },
-    });
-    expect(needsContext.setup.outputs).not.toBe(setupOutputs);
+  assertEquals(needsContext, {
+    setup: { outputs: { token: 'abc' }, result: 'success' },
+    test: { outputs: {}, result: 'failure' },
+    lint: { outputs: {}, result: 'skipped' },
   });
+  assertNotEquals(needsContext.setup.outputs, setupOutputs);
+});
 
-  it('defaults unknown dependency conclusion to success', () => {
-    const results = new Map<string, JobResult>([
-      ['setup', createJobResult({ id: 'setup', outputs: {}, conclusion: undefined })],
-    ]);
+Deno.test('job-context - defaults unknown dependency conclusion to success', () => {
+  const results = new Map<string, JobResult>([
+    ['setup', createJobResult({ id: 'setup', outputs: {}, conclusion: undefined })],
+  ]);
 
-    const needsContext = buildNeedsContext(['setup'], results);
-    expect(needsContext.setup.result).toBe('success');
+  const needsContext = buildNeedsContext(['setup'], results);
+  assertEquals(needsContext.setup.result, 'success');
+});
+
+Deno.test('job-context - builds job execution context with merged env and fresh steps/job status', () => {
+  const baseContext = createBaseContext();
+  const needsContext = {
+    setup: {
+      outputs: { token: 'abc' },
+      result: 'success' as const,
+    },
+  };
+
+  const jobContext = buildJobExecutionContext(baseContext, needsContext, [
+    baseContext.env,
+    { WORKFLOW_ONLY: 'wf', SHARED: 'workflow' },
+    { JOB_ONLY: 'job', SHARED: 'job' },
+  ]);
+
+  assertEquals(jobContext.env, {
+    BASE: 'base',
+    SHARED: 'job',
+    WORKFLOW_ONLY: 'wf',
+    JOB_ONLY: 'job',
   });
-
-  it('builds job execution context with merged env and fresh steps/job status', () => {
-    const baseContext = createBaseContext();
-    const needsContext = {
-      setup: {
-        outputs: { token: 'abc' },
-        result: 'success' as const,
-      },
-    };
-
-    const jobContext = buildJobExecutionContext(baseContext, needsContext, [
-      baseContext.env,
-      { WORKFLOW_ONLY: 'wf', SHARED: 'workflow' },
-      { JOB_ONLY: 'job', SHARED: 'job' },
-    ]);
-
-    expect(jobContext.env).toEqual({
-      BASE: 'base',
-      SHARED: 'job',
-      WORKFLOW_ONLY: 'wf',
-      JOB_ONLY: 'job',
-    });
-    expect(jobContext.needs).toEqual(needsContext);
-    expect(jobContext.job.status).toBe('success');
-    expect(jobContext.steps).toEqual({});
-    expect(jobContext.steps).not.toBe(baseContext.steps);
-  });
+  assertEquals(jobContext.needs, needsContext);
+  assertEquals(jobContext.job.status, 'success');
+  assertEquals(jobContext.steps, {});
+  assertNotEquals(jobContext.steps, baseContext.steps);
 });

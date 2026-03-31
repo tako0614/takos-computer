@@ -1,2 +1,2 @@
-export * from '../types';
-export * from './bindings';
+export * from '../types.ts';
+export * from './bindings.ts';

@@ -5,14 +5,14 @@
  * and failure handling. Extracted from run-executor.ts.
  */
 
-import type { ControlRpcClient } from './control-rpc.js';
+import type { ControlRpcClient } from './control-rpc.ts';
 import type {
   StartPayload,
   RunStatus,
   RunExecutorRuntimeConfig,
   RunExecutorExecutionEnv,
   ExecutorLogger,
-} from './run-executor-types.js';
+} from './run-executor-types.ts';
 
 // ---------------------------------------------------------------------------
 // No-LLM fallback

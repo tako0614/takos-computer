@@ -5,7 +5,7 @@
  * The full implementation should query the workspace/space settings
  * to determine the preferred model for a given space.
  */
-import type { SqlDatabaseBinding } from '../shared/types/bindings';
+import type { SqlDatabaseBinding } from '../shared/types/bindings.ts';
 
 export async function resolveRunModel(
   _db: SqlDatabaseBinding,

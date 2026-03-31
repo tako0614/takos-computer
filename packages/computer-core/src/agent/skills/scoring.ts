@@ -1,16 +1,16 @@
-import type { SkillCategory } from '../skill-contracts';
+import type { SkillCategory } from '../skill-contracts.ts';
 import type {
   SkillContext,
   SkillSelection,
   SkillResolutionContext,
-} from './types';
+} from './types.ts';
 import {
   CONVERSATION_WINDOW,
   MESSAGE_RECENCY_WEIGHTS,
   MAX_SELECTED_SKILLS_PER_RUN,
-} from './types';
-import { cloneExecutionContract } from './availability';
-import { getDelegationPacketFromRunInput } from '../delegation';
+} from './types.ts';
+import { cloneExecutionContract } from './availability.ts';
+import { getDelegationPacketFromRunInput } from '../delegation.ts';
 
 function tokenize(text: string): string[] {
   return text

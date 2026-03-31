@@ -3,6 +3,7 @@
  * Manages a Playwright persistent context (Chromium) with tab tracking.
  */
 
+import { Buffer } from 'node:buffer';
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import { createLogger } from '@takos-computer/common/logger';
 
@@ -156,7 +157,7 @@ export class BrowserManager {
 
     logger.info('Launching persistent browser context', { profileDir: PROFILE_DIR, viewport });
 
-    const useHeaded = Boolean(process.env.DISPLAY);
+    const useHeaded = Boolean(Deno.env.get('DISPLAY'));
     this.context = await chromium.launchPersistentContext(PROFILE_DIR, {
       headless: !useHeaded,
       args: [

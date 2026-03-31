@@ -9,7 +9,7 @@
  * Verification uses constant-time comparison to prevent timing attacks.
  */
 
-import { constantTimeEqual } from './crypto-utils';
+import { constantTimeEqual } from './crypto-utils.ts';
 
 /**
  * Token entry stored in the internal map.

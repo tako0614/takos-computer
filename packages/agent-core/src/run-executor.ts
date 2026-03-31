@@ -11,8 +11,8 @@
  * - run-executor-run-io.ts   — ControlRpc RunIo adapter
  */
 
-import { ControlRpcClient, createStaticControlRpcTokenSource } from './control-rpc.js';
-import { createControlRpcRunIo } from './run-executor-run-io.js';
+import { ControlRpcClient, createStaticControlRpcTokenSource } from './control-rpc.ts';
+import { createControlRpcRunIo } from './run-executor-run-io.ts';
 import {
   runNoLlmFastPath,
   isNoLlmFallbackAllowed,
@@ -21,18 +21,18 @@ import {
   fetchCurrentRunStatus,
   markRunFailedFromExecutor,
   fetchApiKeys,
-} from './run-executor-helpers.js';
+} from './run-executor-helpers.ts';
 import {
   DEFAULT_MAX_HEARTBEAT_FAILURES,
   HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
   ABORT_SETTLE_GRACE_MS,
   shouldResetRunToQueuedOnContainerError,
-} from './run-executor-types.js';
+} from './run-executor-types.ts';
 import type {
   StartPayload,
   RunExecutorOptions,
-} from './run-executor-types.js';
+} from './run-executor-types.ts';
 
 // ---------------------------------------------------------------------------
 // Re-export all public types and utilities from sub-modules so that existing
@@ -46,8 +46,8 @@ export type {
   ExecutorLogger,
   RunExecutorExecutionEnv,
   RunExecutorRuntimeConfig,
-} from './run-executor-types.js';
-export { shouldResetRunToQueuedOnContainerError } from './run-executor-types.js';
+} from './run-executor-types.ts';
+export { shouldResetRunToQueuedOnContainerError } from './run-executor-types.ts';
 
 // ---------------------------------------------------------------------------
 // Main executor
@@ -206,7 +206,7 @@ export async function executeRunInContainer(
         abortController.abort(new Error('Timeout'));
         reject(new Error(`Run ${runId} exceeded maximum duration of ${maxRunDurationMs}ms`));
       }, maxRunDurationMs);
-      timer.unref();
+      Deno.unrefTimer(timer);
 
       // Also abort on signal (e.g., heartbeat failure)
       abortController.signal.addEventListener('abort', () => {

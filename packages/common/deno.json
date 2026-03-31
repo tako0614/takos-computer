@@ -1,0 +1,19 @@
+{
+  "name": "@takos-computer/common",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./id": "./src/id.ts",
+    "./validation": "./src/validation.ts",
+    "./errors": "./src/errors.ts",
+    "./middleware/hono": "./src/middleware/hono.ts",
+    "./logger": "./src/logger.ts",
+    "./cf-types": "./src/cf-types.ts"
+  },
+  "imports": {
+    "hono": "npm:hono@^4.7.0"
+  },
+  "tasks": {
+    "test": "deno test --allow-all src/"
+  }
+}

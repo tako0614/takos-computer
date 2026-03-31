@@ -1,7 +1,7 @@
 /**
  * Snapshot manager stub.
  */
-import type { SnapshotTree } from './types';
+import type { SnapshotTree } from './types.ts';
 
 export class SnapshotManager {
   constructor(_env: unknown, _spaceId: string) {}

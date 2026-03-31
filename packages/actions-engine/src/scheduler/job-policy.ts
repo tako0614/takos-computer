@@ -6,7 +6,7 @@ import type {
   JobResult,
   Step,
   StepResult,
-} from '../types.js';
+} from '../types.ts';
 
 export interface JobExecutionState {
   failed: boolean;

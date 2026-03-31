@@ -1,16 +1,16 @@
-import type { AgentMessage } from './types';
+import type { AgentMessage } from './types.ts';
 import type {
   TaskStep,
   TaskPlan,
   WorkflowContext,
   WorkflowResult,
-} from './workflow-types';
-import { VALID_PLAN_TYPES, extractJsonFromLLMResponse } from './workflow-types';
-import { createLLMClient } from './llm';
-import { generateId } from '../../shared/utils';
-import { createPullRequest, mergePullRequest } from './workflow-pr';
-import { executeReview } from './workflow-review';
-import { logError } from '../../shared/utils/logger';
+} from './workflow-types.ts';
+import { VALID_PLAN_TYPES, extractJsonFromLLMResponse } from './workflow-types.ts';
+import { createLLMClient } from './llm.ts';
+import { generateId } from '../../shared/utils.ts';
+import { createPullRequest, mergePullRequest } from './workflow-pr.ts';
+import { executeReview } from './workflow-review.ts';
+import { logError } from '../../shared/utils/logger.ts';
 
 // ── Re-exports ──────────────────────────────────────────────────────────
 
@@ -21,10 +21,10 @@ export type {
   WorkflowResult,
   ReviewResult,
   ReviewIssue,
-} from './workflow-types';
-export { executeReview } from './workflow-review';
-export { createPullRequest, mergePullRequest } from './workflow-pr';
-export { startWorkflowSession, commitWorkflowSession } from './workflow-session';
+} from './workflow-types.ts';
+export { executeReview } from './workflow-review.ts';
+export { createPullRequest, mergePullRequest } from './workflow-pr.ts';
+export { startWorkflowSession, commitWorkflowSession } from './workflow-session.ts';
 
 // ── Prompts ─────────────────────────────────────────────────────────────
 
@@ -160,7 +160,7 @@ export async function executeCodeChangeWorkflow(
       prStep.result = prId;
     }
 
-    let reviewResult: import('./workflow-types').ReviewResult | undefined;
+    let reviewResult: import('./workflow-types.ts').ReviewResult | undefined;
     if (plan.needsReview && prId) {
       const reviewStep: TaskStep = {
         id: generateId(),

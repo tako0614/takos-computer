@@ -7,6 +7,7 @@
  * (the same job as websockify, but in-process).
  */
 
+import { Buffer } from 'node:buffer';
 import { WebSocketServer, type WebSocket as WsWebSocket } from 'ws';
 import net from 'node:net';
 import type http from 'node:http';
@@ -31,7 +32,7 @@ export function createVncProxy(server: http.Server, logger: Logger): void {
       return;
     }
 
-    wss.handleUpgrade(request, socket, head, (ws) => {
+    wss.handleUpgrade(request, socket, head, (ws: WsWebSocket) => {
       bridgeToVnc(ws, logger);
     });
   });
@@ -82,7 +83,7 @@ function bridgeToVnc(ws: WsWebSocket, logger: Logger): void {
     vnc.end();
   });
 
-  ws.on('error', (err) => {
+  ws.on('error', (err: Error) => {
     logger.warn('[vnc-proxy] WebSocket error', { error: String(err) });
     vnc.end();
   });

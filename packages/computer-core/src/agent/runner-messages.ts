@@ -5,27 +5,27 @@
  * message-related helpers extracted from runner.ts.
  */
 
-import type { RunStatus, Env } from '../../shared/types';
-import type { AgentMessage, ToolCall } from './types';
-import { getDb, runs, threads, messages } from '../../infra/db';
+import type { RunStatus, Env } from '../../shared/types.ts';
+import type { AgentMessage, ToolCall } from './types.ts';
+import { getDb, runs, threads, messages } from '../../infra/db.ts';
 import { and, eq, sql, desc } from 'drizzle-orm';
-import { resolveHistoryTokenBudget } from './model-catalog';
-import { estimateTokens } from './prompt-budget';
-import { readMessageFromR2 } from '../../offload/messages';
-import { buildThreadContextSystemMessage, queryRelevantThreadMessages } from './thread-context';
-import { logError, logInfo, logWarn } from '../../shared/utils/logger';
+import { resolveHistoryTokenBudget } from './model-catalog.ts';
+import { estimateTokens } from './prompt-budget.ts';
+import { readMessageFromR2 } from '../../offload/messages.ts';
+import { buildThreadContextSystemMessage, queryRelevantThreadMessages } from './thread-context.ts';
+import { logError, logInfo, logWarn } from '../../shared/utils/logger.ts';
 import {
   THREAD_RETRIEVAL_TOP_K,
   THREAD_RETRIEVAL_MIN_SCORE,
   THREAD_CONTEXT_MAX_CHARS,
-} from '../../shared/config/limits';
-import { safeJsonParseOrDefault } from '../../shared/utils';
+} from '../../shared/config/limits.ts';
+import { safeJsonParseOrDefault } from '../../shared/utils.ts';
 import {
   buildDelegationSystemMessage,
   buildDelegationUserMessage,
   getDelegationPacketFromRunInput,
-} from './delegation';
-import type { SqlDatabaseBinding } from '../../shared/types/bindings';
+} from './delegation.ts';
+import type { SqlDatabaseBinding } from '../../shared/types/bindings.ts';
 
 // ── Run status persistence ──────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 /**
  * Job scheduler event types and listener definitions
  */
-import type { Job, JobResult } from '../types.js';
+import type { Job, JobResult } from '../types.ts';
 
 /**
  * Job scheduler event types

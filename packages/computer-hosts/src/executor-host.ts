@@ -14,19 +14,19 @@
 import {
   HostContainerInternals,
   HostContainerRuntime,
-} from './container-runtime';
+} from './container-runtime.ts';
 import {
   dispatchAgentExecutorStart,
   forwardAgentExecutorDispatch,
   resolveAgentExecutorServiceId,
   type AgentExecutorDispatchPayload,
   type AgentExecutorControlConfig,
-} from './executor-dispatch';
+} from './executor-dispatch.ts';
 import {
   buildAgentExecutorContainerEnvVars,
   buildAgentExecutorProxyConfig,
-} from './executor-proxy-config';
-import { constantTimeEqual } from './crypto-utils';
+} from './executor-proxy-config.ts';
+import { constantTimeEqual } from './crypto-utils.ts';
 import {
   ok,
   err,
@@ -35,17 +35,17 @@ import {
   getProxyUsageSnapshot,
   isControlRpcPath,
   forwardToControlPlane,
-} from './executor-utils';
+} from './executor-utils.ts';
 import type {
   AgentExecutorEnv,
   ProxyTokenInfo,
   Env,
-} from './executor-utils';
+} from './executor-utils.ts';
 import {
   getRequiredProxyCapability,
   validateProxyResourceAccess,
   claimsMatchRequestBody,
-} from './executor-auth';
+} from './executor-auth.ts';
 import {
   handleDbProxy,
   handleR2Proxy,
@@ -56,7 +56,7 @@ import {
   handleRuntimeProxy,
   handleBrowserProxy,
   handleQueueProxy,
-} from './executor-proxy-handlers';
+} from './executor-proxy-handlers.ts';
 
 // ---------------------------------------------------------------------------
 // Re-exports
@@ -81,7 +81,7 @@ export class TakosAgentExecutorContainer extends HostContainerRuntime<Env> {
     this.envVars = buildAgentExecutorContainerEnvVars(env);
   }
 
-  async dispatchStart(body: AgentExecutorDispatchPayload): Promise<import('./executor-dispatch').AgentExecutorDispatchResult> {
+  async dispatchStart(body: AgentExecutorDispatchPayload): Promise<import('./executor-dispatch.ts').AgentExecutorDispatchResult> {
     const serviceId = resolveAgentExecutorServiceId(body);
     if (!serviceId) {
       return {

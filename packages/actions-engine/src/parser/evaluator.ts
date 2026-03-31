@@ -1,7 +1,7 @@
 /**
  * Expression parser and evaluator (recursive-descent)
  */
-import type { ExecutionContext } from '../types.js';
+import type { ExecutionContext } from '../types.ts';
 import {
   ExpressionError,
   BLOCKED_PROPERTY_KEYS,
@@ -10,7 +10,7 @@ import {
   MAX_PARSE_ACCESS_DEPTH,
   type Token,
   type TokenType,
-} from './expression-types.js';
+} from './expression-types.ts';
 import {
   fnContains,
   fnStartsWith,
@@ -24,7 +24,7 @@ import {
   fnAlways,
   fnCancelled,
   fnFailure,
-} from './functions.js';
+} from './functions.ts';
 
 /**
  * Simple expression parser and evaluator

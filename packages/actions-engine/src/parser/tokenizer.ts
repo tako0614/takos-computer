@@ -1,7 +1,7 @@
 /**
  * Expression tokenizer / lexer
  */
-import { ExpressionError, type Token } from './expression-types.js';
+import { ExpressionError, type Token } from './expression-types.ts';
 
 /** Two-character operator lookup: first char -> second char -> operator string */
 const TWO_CHAR_OPERATORS: Record<string, Record<string, string>> = {

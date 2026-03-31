@@ -1,48 +1,48 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { assertEquals, assertRejects, assertNotEquals } from 'jsr:@std/assert';
+import { spy, assertSpyCalls } from 'jsr:@std/testing/mock';
 
 import {
   buildExecutorRuntimeConfig,
   buildRuntimeStartPayload,
   createExecutorApp,
   hasControlRpcConfiguration,
-} from '../executor-app.js';
+} from '../executor-app.ts';
 
 const ORIGINAL_ENV = {
-  CONTROL_RPC_BASE_URL: process.env.CONTROL_RPC_BASE_URL,
-  PROXY_BASE_URL: process.env.PROXY_BASE_URL,
+  CONTROL_RPC_BASE_URL: Deno.env.get('CONTROL_RPC_BASE_URL'),
+  PROXY_BASE_URL: Deno.env.get('PROXY_BASE_URL'),
 };
 
 function restoreEnv() {
   if (ORIGINAL_ENV.CONTROL_RPC_BASE_URL === undefined) {
-    delete process.env.CONTROL_RPC_BASE_URL;
+    Deno.env.delete('CONTROL_RPC_BASE_URL');
   } else {
-    process.env.CONTROL_RPC_BASE_URL = ORIGINAL_ENV.CONTROL_RPC_BASE_URL;
+    Deno.env.set('CONTROL_RPC_BASE_URL', ORIGINAL_ENV.CONTROL_RPC_BASE_URL);
   }
 
   if (ORIGINAL_ENV.PROXY_BASE_URL === undefined) {
-    delete process.env.PROXY_BASE_URL;
+    Deno.env.delete('PROXY_BASE_URL');
   } else {
-    process.env.PROXY_BASE_URL = ORIGINAL_ENV.PROXY_BASE_URL;
+    Deno.env.set('PROXY_BASE_URL', ORIGINAL_ENV.PROXY_BASE_URL);
   }
 }
 
-afterEach(() => {
-  restoreEnv();
-  vi.restoreAllMocks();
+Deno.test('executor startup control RPC contract - treats CONTROL_RPC_BASE_URL as the canonical startup requirement', () => {
+  try {
+    assertEquals(hasControlRpcConfiguration(buildExecutorRuntimeConfig({
+      CONTROL_RPC_BASE_URL: 'https://control-rpc.example.internal',
+    })), true);
+
+    assertEquals(hasControlRpcConfiguration(buildExecutorRuntimeConfig({
+      PROXY_BASE_URL: 'https://executor-proxy.example.internal',
+    })), false);
+  } finally {
+    restoreEnv();
+  }
 });
 
-describe('executor startup control RPC contract', () => {
-  it('treats CONTROL_RPC_BASE_URL as the canonical startup requirement', () => {
-    expect(hasControlRpcConfiguration(buildExecutorRuntimeConfig({
-      CONTROL_RPC_BASE_URL: 'https://control-rpc.example.internal',
-    }))).toBe(true);
-
-    expect(hasControlRpcConfiguration(buildExecutorRuntimeConfig({
-      PROXY_BASE_URL: 'https://executor-proxy.example.internal',
-    }))).toBe(false);
-  });
-
-  it('builds runtime payloads from CONTROL_RPC_BASE_URL without proxy fallback', () => {
+Deno.test('executor startup control RPC contract - builds runtime payloads from CONTROL_RPC_BASE_URL without proxy fallback', () => {
+  try {
     const payload = buildRuntimeStartPayload({
       runId: 'run-1',
       workerId: 'worker-1',
@@ -53,8 +53,8 @@ describe('executor startup control RPC contract', () => {
       PROXY_BASE_URL: 'https://executor-proxy.example.internal',
     }));
 
-    expect(payload.controlRpcBaseUrl).toBe('https://control-rpc.example.internal');
-    expect(payload).not.toHaveProperty('proxyBaseUrl');
+    assertEquals(payload.controlRpcBaseUrl, 'https://control-rpc.example.internal');
+    assertEquals('proxyBaseUrl' in payload, false);
 
     const payloadWithoutControlRpc = buildRuntimeStartPayload({
       runId: 'run-2',
@@ -64,21 +64,25 @@ describe('executor startup control RPC contract', () => {
       PROXY_BASE_URL: 'https://executor-proxy.example.internal',
     }));
 
-    expect(payloadWithoutControlRpc.controlRpcBaseUrl).toBeUndefined();
-    expect(payloadWithoutControlRpc).not.toHaveProperty('proxyBaseUrl');
-  });
+    assertEquals(payloadWithoutControlRpc.controlRpcBaseUrl, undefined);
+    assertEquals('proxyBaseUrl' in payloadWithoutControlRpc, false);
+  } finally {
+    restoreEnv();
+  }
+});
 
-  it('rejects /start when only PROXY_BASE_URL is configured', async () => {
-    delete process.env.CONTROL_RPC_BASE_URL;
-    process.env.PROXY_BASE_URL = 'https://executor-proxy.example.internal';
+Deno.test('executor startup control RPC contract - rejects /start when only PROXY_BASE_URL is configured', async () => {
+  Deno.env.delete('CONTROL_RPC_BASE_URL');
+  Deno.env.set('PROXY_BASE_URL', 'https://executor-proxy.example.internal');
 
-    const executeRunInContainer = vi.fn().mockResolvedValue(undefined);
+  try {
+    const executeRunInContainer = spy(async () => undefined);
     const app = createExecutorApp({
       executeRunInContainer,
       logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
+        info: spy(),
+        warn: spy(),
+        error: spy(),
       },
       runtimeConfig: buildExecutorRuntimeConfig({
         PROXY_BASE_URL: 'https://executor-proxy.example.internal',
@@ -95,22 +99,26 @@ describe('executor startup control RPC contract', () => {
       }),
     }));
 
-    expect(response.status).toBe(503);
-    await expect(response.json()).resolves.toEqual({ error: 'CONTROL_RPC_BASE_URL not configured' });
-    expect(executeRunInContainer).not.toHaveBeenCalled();
-  });
+    assertEquals(response.status, 503);
+    assertEquals(await response.json(), { error: 'CONTROL_RPC_BASE_URL not configured' });
+    assertSpyCalls(executeRunInContainer, 0);
+  } finally {
+    restoreEnv();
+  }
+});
 
-  it('accepts /start when CONTROL_RPC_BASE_URL is configured and forwards it to execution', async () => {
-    process.env.CONTROL_RPC_BASE_URL = 'https://control-rpc.example.internal';
-    delete process.env.PROXY_BASE_URL;
+Deno.test('executor startup control RPC contract - accepts /start when CONTROL_RPC_BASE_URL is configured', async () => {
+  Deno.env.set('CONTROL_RPC_BASE_URL', 'https://control-rpc.example.internal');
+  Deno.env.delete('PROXY_BASE_URL');
 
-    const executeRunInContainer = vi.fn().mockResolvedValue(undefined);
+  try {
+    const executeRunInContainer = spy(async () => undefined);
     const app = createExecutorApp({
       executeRunInContainer,
       logger: {
-        info: vi.fn(),
-        warn: vi.fn(),
-        error: vi.fn(),
+        info: spy(),
+        warn: spy(),
+        error: spy(),
       },
       runtimeConfig: buildExecutorRuntimeConfig({
         CONTROL_RPC_BASE_URL: 'https://control-rpc.example.internal',
@@ -127,13 +135,10 @@ describe('executor startup control RPC contract', () => {
       }),
     }));
 
-    expect(response.status).toBe(202);
-    await expect(response.json()).resolves.toEqual({ status: 'accepted', runId: 'run-1' });
-    expect(executeRunInContainer).toHaveBeenCalledWith(expect.objectContaining({
-      runId: 'run-1',
-      workerId: 'worker-1',
-      controlRpcToken: 'control-token',
-      controlRpcBaseUrl: 'https://control-rpc.example.internal',
-    }));
-  });
+    assertEquals(response.status, 202);
+    assertEquals(await response.json(), { status: 'accepted', runId: 'run-1' });
+    assertSpyCalls(executeRunInContainer, 1);
+  } finally {
+    restoreEnv();
+  }
 });

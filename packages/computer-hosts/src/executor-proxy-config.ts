@@ -1,4 +1,4 @@
-import type { AgentExecutorControlConfig } from './executor-dispatch';
+import type { AgentExecutorControlConfig } from './executor-dispatch.ts';
 
 export interface AgentExecutorProxyConfigEnv {
   CONTROL_RPC_BASE_URL?: string;

@@ -1,7 +1,7 @@
 /**
  * MCP server listing stub.
  */
-import type { SqlDatabaseBinding } from '../shared/types/bindings';
+import type { SqlDatabaseBinding } from '../shared/types/bindings.ts';
 
 export interface McpServer {
   id: string;

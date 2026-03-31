@@ -15,17 +15,17 @@ import {
   type ChannelVersions,
 } from '@langchain/langgraph-checkpoint';
 import type { RunnableConfig } from '@langchain/core/runnables';
-import { BadRequestError, InternalError } from '../../shared/utils/error-response';
-import { getDb, lgCheckpoints, lgWrites } from '../../infra/db';
+import { BadRequestError, InternalError } from '../../shared/utils/error-response.ts';
+import { getDb, lgCheckpoints, lgWrites } from '../../infra/db.ts';
 import { eq, and, lt, desc } from 'drizzle-orm';
-import { toIsoString } from '../../shared/utils';
-import { logError, logWarn } from '../../shared/utils/logger';
-import type { SqlDatabaseBinding } from '../../shared/types/bindings';
+import { toIsoString } from '../../shared/utils.ts';
+import { logError, logWarn } from '../../shared/utils/logger.ts';
+import type { SqlDatabaseBinding } from '../../shared/types/bindings.ts';
 import {
   deleteThread as deleteThreadImpl,
   recoverCorruptedCheckpoint as recoverCorruptedCheckpointImpl,
   type RecoveryResult,
-} from './langgraph-checkpointer-recovery';
+} from './langgraph-checkpointer-recovery.ts';
 
 // ── Internal helpers ─────────────────────────────────────────────────────
 

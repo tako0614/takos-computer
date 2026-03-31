@@ -7,39 +7,39 @@
  *   simple-loop / execute-run
  */
 
-import type { RunStatus, Env } from '../../shared/types';
-import type { ObjectStoreBinding, SqlDatabaseBinding } from '../../shared/types/bindings';
-import type { AgentContext, AgentConfig, AgentEvent, AgentMessage } from './types';
-import type { ToolExecutorLike } from '../../tools/executor';
-import { LLMClient, createLLMClient, getProviderFromModel, type ModelProvider } from './llm';
-import { RunCancelledError } from './run-lifecycle';
-import type { SkillCatalogEntry, SkillSelection, SkillContext } from './skills';
-import { getAgentConfig } from './runner-config';
-import { DEFAULT_MODEL_ID } from './model-catalog';
-import type { RunTerminalPayload } from '../../run-notifier-types';
-import { logError, logWarn } from '../../shared/utils/logger';
-import { AppError } from '../../shared/utils/error-response';
+import type { RunStatus, Env } from '../../shared/types.ts';
+import type { ObjectStoreBinding, SqlDatabaseBinding } from '../../shared/types/bindings.ts';
+import type { AgentContext, AgentConfig, AgentEvent, AgentMessage } from './types.ts';
+import type { ToolExecutorLike } from '../../tools/executor.ts';
+import { LLMClient, createLLMClient, getProviderFromModel, type ModelProvider } from './llm.ts';
+import { RunCancelledError } from './run-lifecycle.ts';
+import type { SkillCatalogEntry, SkillSelection, SkillContext } from './skills.ts';
+import { getAgentConfig } from './runner-config.ts';
+import { DEFAULT_MODEL_ID } from './model-catalog.ts';
+import type { RunTerminalPayload } from '../../run-notifier-types.ts';
+import { logError, logWarn } from '../../shared/utils/logger.ts';
+import { AppError } from '../../shared/utils/error-response.ts';
 import {
   handleSuccessfulRunCompletion,
   handleCancelledRun,
   handleFailedRun,
   type RunLifecycleDeps,
-} from './run-lifecycle';
+} from './run-lifecycle.ts';
 
 // Extracted modules
-import type { ToolExecution } from './runner-types';
-import { sanitizeErrorMessage, enqueuePostRunJobs } from './runner-types';
-import { autoCloseSession as autoCloseSessionImpl } from './session-closer';
-import type { AgentMemoryRuntime } from '../../memory-graph/runtime';
+import type { ToolExecution } from './runner-types.ts';
+import { sanitizeErrorMessage, enqueuePostRunJobs } from './runner-types.ts';
+import { autoCloseSession as autoCloseSessionImpl } from './session-closer.ts';
+import type { AgentMemoryRuntime } from '../../memory-graph/runtime.ts';
 
-export type { AgentRunnerIo } from './runner-io';
-export { executeRun } from './execute-run';
+export type { AgentRunnerIo } from './runner-io.ts';
+export { executeRun } from './execute-run.ts';
 
-import { type EventEmitterState, createEventEmitterState, emitEventImpl, buildTerminalEventPayloadImpl } from './runner-events';
-import { normalizeRunStatus } from './runner-messages';
-import type { AgentRunnerIo } from './runner-io';
-import { prepareRunExecution } from './runner-setup';
-import { executeRunEngine } from './runner-engine';
+import { type EventEmitterState, createEventEmitterState, emitEventImpl, buildTerminalEventPayloadImpl } from './runner-events.ts';
+import { normalizeRunStatus } from './runner-messages.ts';
+import type { AgentRunnerIo } from './runner-io.ts';
+import { prepareRunExecution } from './runner-setup.ts';
+import { executeRunEngine } from './runner-engine.ts';
 
 // ── AgentRunner class ──────────────────────────────────────────────
 
@@ -250,7 +250,7 @@ export class AgentRunner {
     return this.runIo.getRunRecord({ runId: this.context.runId });
   }
 
-  private async resolveSkillPlan(history: AgentMessage[]): Promise<import('./skills').SkillLoadResult> {
+  private async resolveSkillPlan(history: AgentMessage[]): Promise<import('./skills.ts').SkillLoadResult> {
     return this.runIo.resolveSkillPlan({
       runId: this.context.runId,
       threadId: this.context.threadId,

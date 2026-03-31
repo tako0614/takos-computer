@@ -2,9 +2,9 @@
  * Workflow schema validation using Zod
  */
 import { z } from 'zod';
-import { buildDependencyGraph, detectCycle, DependencyError } from '../scheduler/dependency.js';
-import type { Workflow, WorkflowDiagnostic } from '../types.js';
-import { normalizeNeedsInput } from '../scheduler/job-context.js';
+import { buildDependencyGraph, detectCycle, DependencyError } from '../scheduler/dependency.ts';
+import type { Workflow, WorkflowDiagnostic } from '../types.ts';
+import { normalizeNeedsInput } from '../scheduler/job-context.ts';
 
 // =============================================================================
 // Zod Schemas

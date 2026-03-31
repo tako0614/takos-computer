@@ -11,7 +11,7 @@ export type {
   SkillSelection,
   SkillResolutionContext,
   ResolvedSkillPlan,
-} from './types';
+} from './types.ts';
 
 // Availability
 export {
@@ -19,23 +19,23 @@ export {
   toSkillCatalogEntry,
   evaluateSkillAvailability,
   applySkillAvailability,
-} from './availability';
+} from './availability.ts';
 
 // Scoring
-export { selectRelevantSkills } from './scoring';
+export { selectRelevantSkills } from './scoring.ts';
 
 // Activation and prompt building
 export {
   activateSelectedSkills,
   buildSkillEnhancedPrompt,
   resolveSkillPlan,
-} from './activation';
+} from './activation.ts';
 
 // Loader (async, DB-dependent)
-export type { SkillLoadResult } from './loader';
+export type { SkillLoadResult } from './loader.ts';
 export {
   loadEquippedSkills,
   buildSkillResolutionContext,
   resolveSkillPlanForRun,
   emitSkillLoadOutcome,
-} from './loader';
+} from './loader.ts';

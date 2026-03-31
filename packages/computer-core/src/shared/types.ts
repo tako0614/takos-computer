@@ -35,12 +35,12 @@ export type MessageRole = 'user' | 'assistant' | 'system' | 'tool';
 export type RunStatus = 'pending' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export interface DbEnv {
-  DB: import('./types/bindings').SqlDatabaseBinding;
+  DB: import('./types/bindings.ts').SqlDatabaseBinding;
 }
 
 export interface AiEnv {
-  VECTORIZE?: import('./types/bindings').VectorIndexBinding;
-  AI?: import('./types/bindings').AiBinding;
+  VECTORIZE?: import('./types/bindings.ts').VectorIndexBinding;
+  AI?: import('./types/bindings.ts').AiBinding;
   OPENAI_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;
   GOOGLE_API_KEY?: string;
@@ -54,21 +54,21 @@ export interface AiEnv {
  * Here we keep only the fields that appear in the copied agent code.
  */
 export interface Env {
-  DB: import('./types/bindings').SqlDatabaseBinding;
+  DB: import('./types/bindings.ts').SqlDatabaseBinding;
   OPENAI_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;
   GOOGLE_API_KEY?: string;
   SERPER_API_KEY?: string;
-  AI?: import('./types/bindings').AiBinding;
-  VECTORIZE?: import('./types/bindings').VectorIndexBinding;
-  TAKOS_OFFLOAD?: import('./types/bindings').ObjectStoreBinding;
-  GIT_OBJECTS?: import('./types/bindings').ObjectStoreBinding;
+  AI?: import('./types/bindings.ts').AiBinding;
+  VECTORIZE?: import('./types/bindings.ts').VectorIndexBinding;
+  TAKOS_OFFLOAD?: import('./types/bindings.ts').ObjectStoreBinding;
+  GIT_OBJECTS?: import('./types/bindings.ts').ObjectStoreBinding;
   RUNTIME_HOST?: { fetch(request: Request): Promise<Response> };
   EXECUTOR_HOST?: { fetch(request: Request): Promise<Response> };
   BROWSER_HOST?: { fetch(request: Request): Promise<Response> };
-  RUN_NOTIFIER?: import('./types/bindings').DurableNamespaceBinding;
-  RUN_QUEUE?: import('./types/bindings').QueueBinding;
-  INDEX_QUEUE?: import('./types/bindings').QueueBinding;
+  RUN_NOTIFIER?: import('./types/bindings.ts').DurableNamespaceBinding;
+  RUN_QUEUE?: import('./types/bindings.ts').QueueBinding;
+  INDEX_QUEUE?: import('./types/bindings.ts').QueueBinding;
   MAX_AGENT_ITERATIONS?: string;
   AGENT_TEMPERATURE?: string;
   AGENT_RATE_LIMIT?: string;

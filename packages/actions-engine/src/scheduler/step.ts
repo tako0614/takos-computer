@@ -10,23 +10,23 @@ import type {
   StepResult,
   ExecutionContext,
   ActionResolver,
-} from '../types.js';
-import { parseGitHubEnvFile } from '../context.js';
+} from '../types.ts';
+import { parseGitHubEnvFile } from '../context.ts';
 import {
   evaluateCondition,
   interpolateString,
   interpolateObject,
-} from '../parser/expression.js';
+} from '../parser/expression.ts';
 
 import type {
   StepRunnerOptions,
   StepRunMetadata,
   ShellExecutor,
   StepCommandFiles,
-} from './step-types.js';
-import { resolvePlatformDefaultShell } from './shell-executor.js';
-import { defaultShellExecutor } from './shell-executor.js';
-import { defaultActionResolver } from './action-resolver.js';
+} from './step-types.ts';
+import { resolvePlatformDefaultShell } from './shell-executor.ts';
+import { defaultShellExecutor } from './shell-executor.ts';
+import { defaultActionResolver } from './action-resolver.ts';
 
 // Re-export types and values so that existing consumers importing from
 // './step.js' continue to work without changes.
@@ -36,7 +36,7 @@ export type {
   ShellExecutor,
   ShellExecutorOptions,
   ShellExecutorResult,
-} from './step-types.js';
+} from './step-types.ts';
 
 const SIMPLE_OUTPUT_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -270,7 +270,7 @@ export class StepRunner {
     const pathContent = await this.readCommandFile(commandFiles.path);
     const appendedPaths = this.parsePathFile(pathContent);
     if (appendedPaths.length > 0) {
-      const basePath = sharedEnv.PATH ?? shellEnv.PATH ?? process.env.PATH ?? '';
+      const basePath = sharedEnv.PATH ?? shellEnv.PATH ?? Deno.env.get('PATH') ?? '';
       const prefix = appendedPaths.join(pathDelimiter);
       sharedEnv.PATH = basePath.length > 0 ? `${prefix}${pathDelimiter}${basePath}` : prefix;
     }

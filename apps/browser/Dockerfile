@@ -1,66 +1,32 @@
-# Build stage — uses monorepo root as Docker context
-ARG PNPM_VERSION=9.15.4
-FROM node:20-slim AS builder
-
-# Install pnpm
-ARG PNPM_VERSION
-RUN npm install -g pnpm@${PNPM_VERSION}
-
+FROM denoland/deno:2 AS builder
 WORKDIR /workspace
 
-# Copy workspace manifests and lockfile
-COPY package.json ./
-COPY .npmrc ./
-COPY tsconfig.base.json ./
-COPY pnpm-workspace.yaml ./
-COPY pnpm-lock.yaml ./
+# Copy workspace config and lockfile
+COPY deno.json deno.lock* ./
 
-# Copy required packages (source only — esbuild bundles from src)
-COPY packages/common ./packages/common
-COPY packages/browser-service ./packages/browser-service
+# Copy required packages
+COPY packages/common/ ./packages/common/
+COPY packages/browser-service/ ./packages/browser-service/
+COPY apps/browser/ ./apps/browser/
 
-# Copy takos-browser wrapper
-COPY apps/browser/package.json ./apps/browser/
-COPY apps/browser/tsconfig.json ./apps/browser/
-COPY apps/browser/build.mjs ./apps/browser/
-COPY apps/browser/src/index.ts ./apps/browser/src/
-COPY scripts/build-container.mjs ./scripts/
+# Cache dependencies
+RUN deno cache apps/browser/src/index.ts
 
-# Install all dependencies
-RUN pnpm install --frozen-lockfile
-
-# Bundle takos-browser (esbuild bundles @takos-computer/common from source directly)
-WORKDIR /workspace/apps/browser
-RUN node build.mjs
-
-# Production stage — Playwright base image with Chromium pre-installed
+# Production stage -- Playwright base image with Chromium pre-installed
 FROM mcr.microsoft.com/playwright:v1.58.2-noble
 
-# Install VNC stack, window manager, display interaction, and common tools
+# Install VNC stack, window manager, display interaction, common tools, and Deno
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates xvfb x11vnc openbox xterm \
     xdotool scrot xclip x11-xserver-utils \
-    curl jq fonts-liberation && \
+    curl jq fonts-liberation unzip && \
+    curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace
 
-# Copy pnpm workspace config for production dep install
-COPY package.json ./
-COPY .npmrc ./
-COPY pnpm-workspace.yaml ./
-COPY pnpm-lock.yaml ./
-COPY --from=builder /workspace/packages/common ./packages/common
-COPY --from=builder /workspace/packages/browser-service ./packages/browser-service
-COPY apps/browser/package.json ./apps/browser/
-
-# Install only production runtime deps (express, playwright-core)
-ARG PNPM_VERSION
-RUN npm install -g pnpm@${PNPM_VERSION} && \
-    pnpm install --frozen-lockfile --prod --filter @takos-computer/browser...
-
-# Copy bundled output
-COPY --from=builder /workspace/apps/browser/dist ./apps/browser/dist
+COPY --from=builder /workspace /workspace
+COPY --from=builder /root/.cache/deno /root/.cache/deno
 
 WORKDIR /workspace/apps/browser
 
@@ -74,7 +40,6 @@ RUN groupadd -r browser && useradd -r -g browser -m browser && \
     mkdir -p /tmp/browser-profile && chown -R browser:browser /tmp/browser-profile
 USER browser
 
-ENV NODE_ENV=production
 ENV PORT=8080
 ENV DISPLAY=:99
 

@@ -7,7 +7,7 @@
  * - createGracefulShutdown: wires up SIGTERM/SIGINT handlers with drain logic
  */
 
-import type { StartPayload } from './run-executor.js';
+import type { StartPayload } from './run-executor.ts';
 
 // ---------------------------------------------------------------------------
 // Payload parsing
@@ -170,25 +170,26 @@ export function installGracefulShutdown(options: GracefulShutdownOptions): () =>
     const waitForDrain = setInterval(() => {
       if (concurrency.activeRuns <= 0) {
         clearInterval(waitForDrain);
-        process.exit(0);
+        Deno.exit(0);
       }
     }, 500);
-    waitForDrain.unref();
-    setTimeout(() => {
+    Deno.unrefTimer(waitForDrain);
+    const forceExitTimer = setTimeout(() => {
       logger.warn(`[${tag}] Force exit after ${gracePeriodMs}ms (${concurrency.activeRuns} runs still active)`);
-      process.exit(1);
-    }, gracePeriodMs).unref();
+      Deno.exit(1);
+    }, gracePeriodMs);
+    Deno.unrefTimer(forceExitTimer);
   }
 
   const onSigterm = () => shutdown('SIGTERM');
   const onSigint = () => shutdown('SIGINT');
 
-  process.once('SIGTERM', onSigterm);
-  process.once('SIGINT', onSigint);
+  Deno.addSignalListener('SIGTERM', onSigterm);
+  Deno.addSignalListener('SIGINT', onSigint);
 
   // Return cleanup function
   return () => {
-    process.removeListener('SIGTERM', onSigterm);
-    process.removeListener('SIGINT', onSigint);
+    Deno.removeSignalListener('SIGTERM', onSigterm);
+    Deno.removeSignalListener('SIGINT', onSigint);
   };
 }

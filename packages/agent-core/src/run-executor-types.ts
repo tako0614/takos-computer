@@ -68,7 +68,7 @@ export interface RunExecutorOptions {
   executeRun: ExecuteRunFn;
   /**
    * Runtime-supplied execution config. Host entry points assemble this from
-   * their environment so the shared executor does not read process.env.
+   * their environment so the shared executor does not read Deno.env.
    */
   runtimeConfig?: RunExecutorRuntimeConfig;
 }

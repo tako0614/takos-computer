@@ -5,18 +5,18 @@
  * loop, or the no-LLM fallback, plus the top-level engine dispatcher.
  */
 
-import type { RunStatus, Env } from '../../shared/types';
-import type { SqlDatabaseBinding } from '../../shared/types/bindings';
-import type { AgentContext, AgentConfig, AgentEvent, AgentMessage } from './types';
-import type { ToolExecutorLike } from '../../tools/executor';
-import type { LLMClient, ModelProvider } from './llm';
-import type { SkillCatalogEntry, SkillSelection, SkillContext } from './skills';
-import type { ToolExecution } from './runner-types';
-import type { RunTerminalPayload } from '../../run-notifier-types';
-import type { AgentMemoryRuntime } from '../../memory-graph/runtime';
-import { runLangGraphRunner } from './langgraph-runner';
-import { runWithSimpleLoop, runWithoutLLM } from './simple-loop';
-import { AuthenticationError, InternalError } from '../../shared/utils/error-response';
+import type { RunStatus, Env } from '../../shared/types.ts';
+import type { SqlDatabaseBinding } from '../../shared/types/bindings.ts';
+import type { AgentContext, AgentConfig, AgentEvent, AgentMessage } from './types.ts';
+import type { ToolExecutorLike } from '../../tools/executor.ts';
+import type { LLMClient, ModelProvider } from './llm.ts';
+import type { SkillCatalogEntry, SkillSelection, SkillContext } from './skills.ts';
+import type { ToolExecution } from './runner-types.ts';
+import type { RunTerminalPayload } from '../../run-notifier-types.ts';
+import type { AgentMemoryRuntime } from '../../memory-graph/runtime.ts';
+import { runLangGraphRunner } from './langgraph-runner.ts';
+import { runWithSimpleLoop, runWithoutLLM } from './simple-loop.ts';
+import { AuthenticationError, InternalError } from '../../shared/utils/error-response.ts';
 
 // ── Shared deps passed from AgentRunner ──────────────────────────────
 

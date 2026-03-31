@@ -2,9 +2,10 @@
  * Shell command execution
  */
 import { spawn } from 'node:child_process';
+import { Buffer } from "node:buffer";
 
-import type { Step } from '../types.js';
-import type { ShellExecutor, ShellExecutorOptions, ShellExecutorResult } from './step-types.js';
+import type { Step } from '../types.ts';
+import type { ShellExecutor, ShellExecutorOptions, ShellExecutorResult } from './step-types.ts';
 
 export function resolvePlatformDefaultShell(): Step['shell'] {
   return process.platform === 'win32' ? 'pwsh' : 'bash';
@@ -84,8 +85,8 @@ export const defaultShellExecutor: ShellExecutor = async (
       'NODE_ENV', 'CI',
     ];
     for (const key of ALLOWED_HOST_VARS) {
-      if (process.env[key]) {
-        safeHostEnv[key] = process.env[key]!;
+      if (Deno.env.get(key)) {
+        safeHostEnv[key] = Deno.env.get(key)!;
       }
     }
 

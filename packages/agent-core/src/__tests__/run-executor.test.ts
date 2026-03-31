@@ -1,146 +1,193 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { shouldResetRunToQueuedOnContainerError } from '../run-executor.js';
-import type { RunStatus } from '../run-executor.js';
+import { assertEquals, assertRejects, assertStringIncludes } from 'jsr:@std/assert';
+import { spy, assertSpyCalls } from 'jsr:@std/testing/mock';
+import { shouldResetRunToQueuedOnContainerError } from '../run-executor.ts';
+import type { RunStatus } from '../run-executor.ts';
 
 // ---------------------------------------------------------------------------
 // shouldResetRunToQueuedOnContainerError
 // ---------------------------------------------------------------------------
 
-describe('shouldResetRunToQueuedOnContainerError', () => {
-  it('returns true for "running" status', () => {
-    expect(shouldResetRunToQueuedOnContainerError('running')).toBe(true);
-  });
+Deno.test('shouldResetRunToQueuedOnContainerError - returns true for "running" status', () => {
+  assertEquals(shouldResetRunToQueuedOnContainerError('running'), true);
+});
 
-  it('returns false for "completed" status', () => {
-    expect(shouldResetRunToQueuedOnContainerError('completed')).toBe(false);
-  });
+Deno.test('shouldResetRunToQueuedOnContainerError - returns false for "completed" status', () => {
+  assertEquals(shouldResetRunToQueuedOnContainerError('completed'), false);
+});
 
-  it('returns false for "failed" status', () => {
-    expect(shouldResetRunToQueuedOnContainerError('failed')).toBe(false);
-  });
+Deno.test('shouldResetRunToQueuedOnContainerError - returns false for "failed" status', () => {
+  assertEquals(shouldResetRunToQueuedOnContainerError('failed'), false);
+});
 
-  it('returns false for "cancelled" status', () => {
-    expect(shouldResetRunToQueuedOnContainerError('cancelled')).toBe(false);
-  });
+Deno.test('shouldResetRunToQueuedOnContainerError - returns false for "cancelled" status', () => {
+  assertEquals(shouldResetRunToQueuedOnContainerError('cancelled'), false);
+});
 
-  it('returns false for "pending" status', () => {
-    expect(shouldResetRunToQueuedOnContainerError('pending')).toBe(false);
-  });
+Deno.test('shouldResetRunToQueuedOnContainerError - returns false for "pending" status', () => {
+  assertEquals(shouldResetRunToQueuedOnContainerError('pending'), false);
+});
 
-  it('returns false for "queued" status', () => {
-    expect(shouldResetRunToQueuedOnContainerError('queued')).toBe(false);
-  });
+Deno.test('shouldResetRunToQueuedOnContainerError - returns false for "queued" status', () => {
+  assertEquals(shouldResetRunToQueuedOnContainerError('queued'), false);
+});
 
-  it('returns false for null', () => {
-    expect(shouldResetRunToQueuedOnContainerError(null)).toBe(false);
-  });
+Deno.test('shouldResetRunToQueuedOnContainerError - returns false for null', () => {
+  assertEquals(shouldResetRunToQueuedOnContainerError(null), false);
+});
 
-  it('returns false for undefined', () => {
-    expect(shouldResetRunToQueuedOnContainerError(undefined)).toBe(false);
-  });
+Deno.test('shouldResetRunToQueuedOnContainerError - returns false for undefined', () => {
+  assertEquals(shouldResetRunToQueuedOnContainerError(undefined), false);
 });
 
 // ---------------------------------------------------------------------------
 // executeRunInContainer - integration-style tests with mocked fetch
 // ---------------------------------------------------------------------------
 
-describe('executeRunInContainer', () => {
-  let fetchSpy: any;
-
-  beforeEach(() => {
-    fetchSpy = vi.fn();
-    vi.stubGlobal('fetch', fetchSpy);
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  const mockLogger = {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
+function createMockLogger() {
+  return {
+    info: spy(),
+    warn: spy(),
+    error: spy(),
   };
+}
 
-  function mockFetchSequence(responses: Array<{ path: string; body: unknown; status?: number }>) {
-    let callIndex = 0;
-    fetchSpy.mockImplementation(async (input: unknown) => {
-      const url = typeof input === 'string' ? input : (input as Request).url;
-      const expectedResponse = responses[callIndex];
-      callIndex++;
-      if (!expectedResponse) {
-        return new Response(JSON.stringify({}), { status: 200 });
-      }
-      return new Response(
+function mockFetchSequence(
+  fetchSpy: { calls: Array<{ args: unknown[] }> },
+  responses: Array<{ path: string; body: unknown; status?: number }>,
+) {
+  let callIndex = 0;
+  return (input: unknown) => {
+    const expectedResponse = responses[callIndex];
+    callIndex++;
+    if (!expectedResponse) {
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    }
+    return Promise.resolve(
+      new Response(
         JSON.stringify(expectedResponse.body),
         { status: expectedResponse.status ?? 200 },
-      );
-    });
+      ),
+    );
+  };
+}
+
+Deno.test('executeRunInContainer - throws when controlRpcToken is missing', async () => {
+  const mockLogger = createMockLogger();
+  const originalFetch = globalThis.fetch;
+  const fetchSpy = spy();
+  globalThis.fetch = fetchSpy as unknown as typeof fetch;
+  try {
+    const { executeRunInContainer } = await import('../run-executor.ts');
+    await assertRejects(
+      () =>
+        executeRunInContainer(
+          { runId: 'r-1', workerId: 'w-1' },
+          {
+            serviceName: 'test',
+            logger: mockLogger,
+            executeRun: spy(),
+          },
+        ),
+      Error,
+      'Missing control RPC token',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
   }
+});
 
-  it('throws when controlRpcToken is missing', async () => {
-    const { executeRunInContainer } = await import('../run-executor.js');
-    await expect(
-      executeRunInContainer(
-        { runId: 'r-1', workerId: 'w-1' },
-        {
-          serviceName: 'test',
-          logger: mockLogger,
-          executeRun: vi.fn(),
-        },
-      ),
-    ).rejects.toThrow('Missing control RPC token');
-  });
+Deno.test('executeRunInContainer - throws when controlRpcBaseUrl is missing', async () => {
+  const mockLogger = createMockLogger();
+  const originalFetch = globalThis.fetch;
+  const fetchSpy = spy();
+  globalThis.fetch = fetchSpy as unknown as typeof fetch;
+  try {
+    const { executeRunInContainer } = await import('../run-executor.ts');
+    await assertRejects(
+      () =>
+        executeRunInContainer(
+          { runId: 'r-1', workerId: 'w-1', controlRpcToken: 'tok' },
+          {
+            serviceName: 'test',
+            logger: mockLogger,
+            executeRun: spy(),
+          },
+        ),
+      Error,
+      'Missing CONTROL_RPC_BASE_URL',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
-  it('throws when controlRpcBaseUrl is missing', async () => {
-    const { executeRunInContainer } = await import('../run-executor.js');
-    await expect(
-      executeRunInContainer(
-        { runId: 'r-1', workerId: 'w-1', controlRpcToken: 'tok' },
-        {
-          serviceName: 'test',
-          logger: mockLogger,
-          executeRun: vi.fn(),
-        },
-      ),
-    ).rejects.toThrow('Missing CONTROL_RPC_BASE_URL');
-  });
+Deno.test('executeRunInContainer - resets run and throws when no API keys are available', async () => {
+  const mockLogger = createMockLogger();
+  const originalFetch = globalThis.fetch;
+  let callIndex = 0;
+  const responses = [
+    { path: '/rpc/control/api-keys', body: { openai: null, anthropic: null, google: null } },
+    { path: '/rpc/control/run-reset', body: {} },
+  ];
+  globalThis.fetch = ((_input: unknown) => {
+    const expectedResponse = responses[callIndex];
+    callIndex++;
+    if (!expectedResponse) {
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(expectedResponse.body), { status: expectedResponse.status ?? 200 }),
+    );
+  }) as typeof fetch;
+  try {
+    const { executeRunInContainer } = await import('../run-executor.ts');
+    await assertRejects(
+      () =>
+        executeRunInContainer(
+          {
+            runId: 'r-1',
+            workerId: 'w-1',
+            controlRpcToken: 'tok',
+            controlRpcBaseUrl: 'https://control.example.com',
+          },
+          {
+            serviceName: 'test',
+            logger: mockLogger,
+            executeRun: spy(),
+          },
+        ),
+      Error,
+      'No LLM API keys available',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
-  it('resets run and throws when no API keys are available', async () => {
-    const { executeRunInContainer } = await import('../run-executor.js');
-
-    // Mock: fetchApiKeys returns no keys
-    mockFetchSequence([
-      { path: '/rpc/control/api-keys', body: { openai: null, anthropic: null, google: null } },
-      { path: '/rpc/control/run-reset', body: {} },
-    ]);
-
-    await expect(
-      executeRunInContainer(
-        {
-          runId: 'r-1',
-          workerId: 'w-1',
-          controlRpcToken: 'tok',
-          controlRpcBaseUrl: 'https://control.example.com',
-        },
-        {
-          serviceName: 'test',
-          logger: mockLogger,
-          executeRun: vi.fn(),
-        },
-      ),
-    ).rejects.toThrow('No LLM API keys available');
-  });
-
-  it('invokes no-LLM fast path when allowNoLlmFallback is true', async () => {
-    const { executeRunInContainer } = await import('../run-executor.js');
-
-    mockFetchSequence([
-      { path: '/rpc/control/api-keys', body: { openai: null, anthropic: null, google: null } },
-      { path: '/rpc/control/run-context', body: { lastUserMessage: 'hello' } },
-      { path: '/rpc/control/no-llm-complete', body: {} },
-    ]);
-
+Deno.test('executeRunInContainer - invokes no-LLM fast path when allowNoLlmFallback is true', async () => {
+  const mockLogger = createMockLogger();
+  const originalFetch = globalThis.fetch;
+  let callIndex = 0;
+  const fetchCalls: string[] = [];
+  const responses = [
+    { path: '/rpc/control/api-keys', body: { openai: null, anthropic: null, google: null } },
+    { path: '/rpc/control/run-context', body: { lastUserMessage: 'hello' } },
+    { path: '/rpc/control/no-llm-complete', body: {} },
+  ];
+  globalThis.fetch = ((input: unknown) => {
+    const url = typeof input === 'string' ? input : (input as Request).url;
+    fetchCalls.push(url);
+    const expectedResponse = responses[callIndex];
+    callIndex++;
+    if (!expectedResponse) {
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(expectedResponse.body), { status: expectedResponse.status ?? 200 }),
+    );
+  }) as typeof fetch;
+  try {
+    const { executeRunInContainer } = await import('../run-executor.ts');
     await executeRunInContainer(
       {
         runId: 'r-1',
@@ -151,7 +198,7 @@ describe('executeRunInContainer', () => {
       {
         serviceName: 'test',
         logger: mockLogger,
-        executeRun: vi.fn(),
+        executeRun: spy(),
         runtimeConfig: {
           allowNoLlmFallback: true,
         },
@@ -159,20 +206,34 @@ describe('executeRunInContainer', () => {
     );
 
     // Should have called no-llm-complete
-    const urls = fetchSpy.mock.calls.map((c: any) => c[0] as string);
-    expect(urls.some((u: string) => u.includes('/rpc/control/no-llm-complete'))).toBe(true);
-  });
+    assertEquals(fetchCalls.some((u: string) => u.includes('/rpc/control/no-llm-complete')), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
-  it('calls executeRun and records billing on success', async () => {
-    const { executeRunInContainer } = await import('../run-executor.js');
+Deno.test('executeRunInContainer - calls executeRun and records billing on success', async () => {
+  const mockLogger = createMockLogger();
+  const originalFetch = globalThis.fetch;
+  let callIndex = 0;
+  const responses = [
+    { path: '/rpc/control/api-keys', body: { openai: 'sk-test', anthropic: null, google: null } },
+    { path: '/rpc/control/billing-run-usage', body: {} },
+  ];
+  globalThis.fetch = ((_input: unknown) => {
+    const expectedResponse = responses[callIndex];
+    callIndex++;
+    if (!expectedResponse) {
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(expectedResponse.body), { status: expectedResponse.status ?? 200 }),
+    );
+  }) as typeof fetch;
 
-    const executeRun = vi.fn().mockResolvedValue(undefined);
-
-    mockFetchSequence([
-      { path: '/rpc/control/api-keys', body: { openai: 'sk-test', anthropic: null, google: null } },
-      { path: '/rpc/control/billing-run-usage', body: {} },
-    ]);
-
+  const executeRun = spy(async () => undefined);
+  try {
+    const { executeRunInContainer } = await import('../run-executor.ts');
     await executeRunInContainer(
       {
         runId: 'r-1',
@@ -190,24 +251,42 @@ describe('executeRunInContainer', () => {
       },
     );
 
-    expect(executeRun).toHaveBeenCalledTimes(1);
-    const [env, apiKey, runId, model] = executeRun.mock.calls[0];
-    expect(env.OPENAI_API_KEY).toBe('sk-test');
-    expect(apiKey).toBe('sk-test');
-    expect(runId).toBe('r-1');
-  });
+    assertSpyCalls(executeRun, 1);
+    const [env, apiKey, runId] = executeRun.calls[0].args;
+    assertEquals((env as Record<string, string>).OPENAI_API_KEY, 'sk-test');
+    assertEquals(apiKey, 'sk-test');
+    assertEquals(runId, 'r-1');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
-  it('resets run when executeRun fails and status is running', async () => {
-    const { executeRunInContainer } = await import('../run-executor.js');
+Deno.test('executeRunInContainer - resets run when executeRun fails and status is running', async () => {
+  const mockLogger = createMockLogger();
+  const originalFetch = globalThis.fetch;
+  let callIndex = 0;
+  const fetchCalls: string[] = [];
+  const responses = [
+    { path: '/rpc/control/api-keys', body: { openai: 'sk-test', anthropic: null, google: null } },
+    { path: '/rpc/control/run-status', body: { status: 'running' } },
+    { path: '/rpc/control/run-reset', body: {} },
+  ];
+  globalThis.fetch = ((input: unknown) => {
+    const url = typeof input === 'string' ? input : (input as Request).url;
+    fetchCalls.push(url);
+    const expectedResponse = responses[callIndex];
+    callIndex++;
+    if (!expectedResponse) {
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(expectedResponse.body), { status: expectedResponse.status ?? 200 }),
+    );
+  }) as typeof fetch;
 
-    const executeRun = vi.fn().mockRejectedValue(new Error('Agent crash'));
-
-    mockFetchSequence([
-      { path: '/rpc/control/api-keys', body: { openai: 'sk-test', anthropic: null, google: null } },
-      { path: '/rpc/control/run-status', body: { status: 'running' } },
-      { path: '/rpc/control/run-reset', body: {} },
-    ]);
-
+  const executeRun = spy(async () => { throw new Error('Agent crash'); });
+  try {
+    const { executeRunInContainer } = await import('../run-executor.ts');
     await executeRunInContainer(
       {
         runId: 'r-1',
@@ -226,20 +305,37 @@ describe('executeRunInContainer', () => {
     );
 
     // run-reset should have been called
-    const urls = fetchSpy.mock.calls.map((c: any) => c[0] as string);
-    expect(urls.some((u: string) => u.includes('/rpc/control/run-reset'))).toBe(true);
-  });
+    assertEquals(fetchCalls.some((u: string) => u.includes('/rpc/control/run-reset')), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
-  it('preserves terminal status when executeRun fails', async () => {
-    const { executeRunInContainer } = await import('../run-executor.js');
+Deno.test('executeRunInContainer - preserves terminal status when executeRun fails', async () => {
+  const mockLogger = createMockLogger();
+  const originalFetch = globalThis.fetch;
+  let callIndex = 0;
+  const fetchCalls: string[] = [];
+  const responses = [
+    { path: '/rpc/control/api-keys', body: { openai: 'sk-test', anthropic: null, google: null } },
+    { path: '/rpc/control/run-status', body: { status: 'completed' } },
+  ];
+  globalThis.fetch = ((input: unknown) => {
+    const url = typeof input === 'string' ? input : (input as Request).url;
+    fetchCalls.push(url);
+    const expectedResponse = responses[callIndex];
+    callIndex++;
+    if (!expectedResponse) {
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(expectedResponse.body), { status: expectedResponse.status ?? 200 }),
+    );
+  }) as typeof fetch;
 
-    const executeRun = vi.fn().mockRejectedValue(new Error('Agent crash'));
-
-    mockFetchSequence([
-      { path: '/rpc/control/api-keys', body: { openai: 'sk-test', anthropic: null, google: null } },
-      { path: '/rpc/control/run-status', body: { status: 'completed' } },
-    ]);
-
+  const executeRun = spy(async () => { throw new Error('Agent crash'); });
+  try {
+    const { executeRunInContainer } = await import('../run-executor.ts');
     await executeRunInContainer(
       {
         runId: 'r-1',
@@ -258,32 +354,42 @@ describe('executeRunInContainer', () => {
     );
 
     // run-reset should NOT have been called
-    const urls = fetchSpy.mock.calls.map((c: any) => c[0] as string);
-    expect(urls.some((u: string) => u.includes('/rpc/control/run-reset'))).toBe(false);
-    expect(mockLogger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('Preserving run r-1 status completed'),
+    assertEquals(fetchCalls.some((u: string) => u.includes('/rpc/control/run-reset')), false);
+    // Check that logger.warn was called with the preserving message
+    const warnCalls = mockLogger.warn.calls.map((c: { args: unknown[] }) => c.args[0] as string);
+    assertEquals(warnCalls.some((msg: string) => msg.includes('Preserving run r-1 status completed')), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test('executeRunInContainer - resets run when fetchApiKeys fails', async () => {
+  const mockLogger = createMockLogger();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (() => {
+    return Promise.reject(new Error('Network error'));
+  }) as typeof fetch;
+  try {
+    const { executeRunInContainer } = await import('../run-executor.ts');
+    await assertRejects(
+      () =>
+        executeRunInContainer(
+          {
+            runId: 'r-1',
+            workerId: 'w-1',
+            controlRpcToken: 'tok',
+            controlRpcBaseUrl: 'https://control.example.com',
+          },
+          {
+            serviceName: 'test',
+            logger: mockLogger,
+            executeRun: spy(),
+          },
+        ),
+      Error,
+      'Network error',
     );
-  });
-
-  it('resets run when fetchApiKeys fails', async () => {
-    const { executeRunInContainer } = await import('../run-executor.js');
-
-    fetchSpy.mockRejectedValue(new Error('Network error'));
-
-    await expect(
-      executeRunInContainer(
-        {
-          runId: 'r-1',
-          workerId: 'w-1',
-          controlRpcToken: 'tok',
-          controlRpcBaseUrl: 'https://control.example.com',
-        },
-        {
-          serviceName: 'test',
-          logger: mockLogger,
-          executeRun: vi.fn(),
-        },
-      ),
-    ).rejects.toThrow('Network error');
-  });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
