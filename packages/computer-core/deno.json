@@ -1,0 +1,19 @@
+{
+  "name": "@takos-computer/computer-core",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent": "./src/agent/index.ts"
+  },
+  "imports": {
+    "@langchain/core": "npm:@langchain/core@^1.1.8",
+    "@langchain/langgraph": "npm:@langchain/langgraph@^1.0.7",
+    "@langchain/langgraph-checkpoint": "npm:@langchain/langgraph-checkpoint@^1.0.0",
+    "@langchain/openai": "npm:@langchain/openai@^1.2.0",
+    "drizzle-orm": "npm:drizzle-orm@^0.45.1",
+    "zod": "npm:zod@^3.25.32"
+  },
+  "tasks": {
+    "test": "deno test --allow-all src/"
+  }
+}

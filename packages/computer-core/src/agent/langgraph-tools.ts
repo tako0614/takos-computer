@@ -8,9 +8,9 @@
 import { z } from 'zod';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import type { BaseMessage } from '@langchain/core/messages';
-import { AppError } from '../../shared/utils/error-response';
-import type { ToolExecutorLike } from '../../tools/executor';
-import type { ToolDefinition, ToolParameter } from '../../tools/types';
+import { AppError } from '../../shared/utils/error-response.ts';
+import type { ToolExecutorLike } from '../../tools/executor.ts';
+import type { ToolDefinition, ToolParameter } from '../../tools/types.ts';
 
 // ── Shared helpers ──────────────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ export interface CreateAgentOptions {
   systemPrompt: string;
   tools: ToolDefinition[];
   toolExecutor: ToolExecutorLike;
-  db?: import('../../shared/types/bindings').SqlDatabaseBinding;
+  db?: import('../../shared/types/bindings.ts').SqlDatabaseBinding;
   maxIterations?: number;
   abortSignal?: AbortSignal;
 }

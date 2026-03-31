@@ -5,9 +5,9 @@
  * Here we provide the interface and a minimal pass-through to the backend.
  */
 
-import type { D1Database } from '../shared/types/bindings';
-import type { Env } from '../shared/types';
-import type { ActivationResult, Claim, Evidence, ToolObserver } from './types';
+import type { D1Database } from '../shared/types/bindings.ts';
+import type { Env } from '../shared/types.ts';
+import type { ActivationResult, Claim, Evidence, ToolObserver } from './types.ts';
 
 const EMPTY_ACTIVATION: ActivationResult = { bundles: [], segment: '', hasContent: false };
 

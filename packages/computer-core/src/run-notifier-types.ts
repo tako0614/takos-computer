@@ -4,7 +4,7 @@
  * Extracted from takos/packages/control/src/application/services/run-notifier/.
  */
 
-import type { RunStatus } from './shared/types';
+import type { RunStatus } from './shared/types.ts';
 
 export type RunTerminalEventType = 'completed' | 'error' | 'cancelled' | 'run.failed';
 export type RunTerminalStatus = 'completed' | 'failed' | 'cancelled';

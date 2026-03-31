@@ -32,4 +32,4 @@ export function generateId(length = 21): string {
 
 // --- JSON parsing ---
 
-export { safeJsonParse, safeJsonParseOrDefault } from './logger';
+export { safeJsonParse, safeJsonParseOrDefault } from './logger.ts';

@@ -13,18 +13,18 @@
 import {
   HostContainerInternals,
   HostContainerRuntime,
-} from './container-runtime';
-import type { DurableObjectNamespace, R2Bucket } from './cf-types';
+} from './container-runtime.ts';
+import type { DurableObjectNamespace, R2Bucket } from './cf-types.ts';
 import { Hono } from 'hono';
-import { generateProxyToken } from './executor-proxy-config';
-import { constantTimeEqual } from './crypto-utils';
+import { generateProxyToken } from './executor-proxy-config.ts';
+import { constantTimeEqual } from './crypto-utils.ts';
 import type {
   BrowserSessionTokenInfo,
   CreateSessionPayload,
   BrowserSessionState,
   KVNamespace,
-} from './browser-session-types';
-import { dashboardHtml, viewerHtml, styleCss } from './gui/assets';
+} from './browser-session-types.ts';
+import { dashboardHtml, viewerHtml, styleCss } from './gui/assets.ts';
 
 // ---------------------------------------------------------------------------
 // Environment types

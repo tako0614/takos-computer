@@ -17,11 +17,11 @@
  *   - `get-available-tools` — return the current tool catalog
  */
 
-import type { ToolExecutorLike } from '../../tools/executor';
-import type { ToolCall, ToolResult, ToolDefinition } from '../../tools/types';
-import { AbstractAgentWorker } from '../../multi-agent/base-worker';
-import type { AgentWorkerConfig, AgentMessage } from '../../multi-agent/types';
-import { logError, logInfo, logWarn } from '../../shared/utils/logger';
+import type { ToolExecutorLike } from '../../tools/executor.ts';
+import type { ToolCall, ToolResult, ToolDefinition } from '../../tools/types.ts';
+import { AbstractAgentWorker } from '../../multi-agent/base-worker.ts';
+import type { AgentWorkerConfig, AgentMessage } from '../../multi-agent/types.ts';
+import { logError, logInfo, logWarn } from '../../shared/utils/logger.ts';
 
 // ── Input / Output contracts ────────────────────────────────────────
 

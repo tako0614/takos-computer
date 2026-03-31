@@ -1,0 +1,28 @@
+{
+  "workspace": [
+    "./apps/browser",
+    "./apps/executor",
+    "./packages/common",
+    "./packages/actions-engine",
+    "./packages/agent-core",
+    "./packages/browser-service",
+    "./packages/cloudflare-compat",
+    "./packages/computer-core",
+    "./packages/computer-agent",
+    "./packages/computer-hosts",
+    "./packages/executor-service",
+    "./scripts"
+  ],
+  "compilerOptions": {
+    "strict": true,
+    "lib": ["deno.window"],
+    "types": ["node"]
+  },
+  "tasks": {
+    "build:all": "echo 'No tsc build needed — Deno runs .ts directly'",
+    "test:all": "deno test --allow-all --parallel",
+    "lint": "deno lint",
+    "fmt": "deno fmt",
+    "fmt:check": "deno fmt --check"
+  }
+}

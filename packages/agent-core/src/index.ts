@@ -12,16 +12,16 @@
  * run-executor and executor-utils entrypoints only.
  */
 
-export { executeRunInContainer } from './run-executor.js';
+export { executeRunInContainer } from './run-executor.ts';
 export type {
   StartPayload,
   RunExecutorExecutionEnv,
   RunExecutorOptions,
   RunExecutorRuntimeConfig,
-} from './run-executor.js';
+} from './run-executor.ts';
 export {
   parseStartPayload,
   createConcurrencyGuard,
   installGracefulShutdown,
-} from './executor-utils.js';
-export type { ParseResult, ConcurrencyGuard, GracefulShutdownOptions } from './executor-utils.js';
+} from './executor-utils.ts';
+export type { ParseResult, ConcurrencyGuard, GracefulShutdownOptions } from './executor-utils.ts';

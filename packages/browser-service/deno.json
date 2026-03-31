@@ -1,0 +1,17 @@
+{
+  "name": "@takos-computer/browser-service",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "imports": {
+    "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1.0.0",
+    "hono": "npm:hono@^4.7.0",
+    "playwright-core": "npm:playwright-core@^1.52.0",
+    "ws": "npm:ws@^8.18.0",
+    "zod": "npm:zod@^3.23.0"
+  },
+  "tasks": {
+    "test": "deno test --allow-all src/"
+  }
+}

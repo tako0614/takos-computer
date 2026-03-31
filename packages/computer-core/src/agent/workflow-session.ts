@@ -1,11 +1,11 @@
-import type { SnapshotTree } from '../../sync/types';
-import type { WorkflowContext, RuntimeSnapshotResponse } from './workflow-types';
-import { SnapshotManager } from '../../sync/snapshot';
-import { generateId, now } from '../../shared/utils';
-import { getDb, sessions, accounts, runs } from '../../infra/db';
+import type { SnapshotTree } from '../../sync/types.ts';
+import type { WorkflowContext, RuntimeSnapshotResponse } from './workflow-types.ts';
+import { SnapshotManager } from '../../sync/snapshot.ts';
+import { generateId, now } from '../../shared/utils.ts';
+import { getDb, sessions, accounts, runs } from '../../infra/db.ts';
 import { eq } from 'drizzle-orm';
-import { callRuntimeRequest } from '../../execution/runtime';
-import { logError } from '../../shared/utils/logger';
+import { callRuntimeRequest } from '../../execution/runtime.ts';
+import { logError } from '../../shared/utils/logger.ts';
 
 // ── Session management ──────────────────────────────────────────────────
 

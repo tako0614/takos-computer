@@ -5,21 +5,21 @@
  * from skill loading and management concerns.
  */
 
-import type { SkillCategory, SkillExecutionContract } from '../skill-contracts';
+import type { SkillCategory, SkillExecutionContract } from '../skill-contracts.ts';
 import type {
   SkillContext,
   SkillSelection,
   SkillResolutionContext,
   ResolvedSkillPlan,
   SkillCatalogEntry,
-} from '../skills';
+} from '../skills.ts';
 import {
   getContextSegments,
   matchesPhrase,
   getCategoryKeywords,
   getOutputModeKeywords,
-} from '../text/tokenizer';
-import { logWarn } from '../../shared/utils/logger';
+} from '../text/tokenizer.ts';
+import { logWarn } from '../../shared/utils/logger.ts';
 
 // ── Constants ───────────────────────────────────────────────────────────
 

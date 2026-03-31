@@ -1,74 +1,28 @@
-# Build stage — uses monorepo root as Docker context
-ARG PNPM_VERSION=9.15.4
-FROM node:20-slim AS builder
-
-# Install pnpm
-ARG PNPM_VERSION
-RUN npm install -g pnpm@${PNPM_VERSION}
-
+FROM denoland/deno:2 AS builder
 WORKDIR /workspace
 
-# Copy workspace manifests and lockfile
-COPY package.json ./
-COPY .npmrc ./
-COPY pnpm-workspace.yaml ./
-COPY pnpm-lock.yaml ./
-COPY tsconfig.base.json ./
+# Copy workspace config and lockfile
+COPY deno.json deno.lock* ./
 
 # Copy required packages
-COPY packages/common ./packages/common
-COPY packages/agent-core ./packages/agent-core
-COPY packages/actions-engine ./packages/actions-engine
-COPY packages/computer-core ./packages/computer-core
-COPY packages/computer-agent ./packages/computer-agent
-COPY packages/executor-service ./packages/executor-service
+COPY packages/common/ ./packages/common/
+COPY packages/agent-core/ ./packages/agent-core/
+COPY packages/actions-engine/ ./packages/actions-engine/
+COPY packages/computer-core/ ./packages/computer-core/
+COPY packages/computer-agent/ ./packages/computer-agent/
+COPY packages/executor-service/ ./packages/executor-service/
+COPY apps/executor/ ./apps/executor/
 
-# Copy takos-executor wrapper
-COPY apps/executor/package.json ./apps/executor/
-COPY apps/executor/tsconfig.json ./apps/executor/
-COPY apps/executor/build.mjs ./apps/executor/
-COPY apps/executor/src/index.ts ./apps/executor/src/
-COPY scripts/build-container.mjs ./scripts/
+# Cache dependencies
+RUN deno cache apps/executor/src/index.ts
 
-# Install all dependencies
-RUN pnpm install --frozen-lockfile
-
-# Build @takos-computer/common first
-WORKDIR /workspace/packages/common
-RUN pnpm run build
-
-# Bundle agent-executor (esbuild resolves the control-agent boundary into a single file)
-WORKDIR /workspace/apps/executor
-RUN node build.mjs
-
-# Builder uses Debian slim for broader build compatibility (native deps).
-# Production uses Alpine for minimal image size — only JS artifacts are copied.
-FROM node:20-alpine
+FROM denoland/deno:alpine-2
+WORKDIR /workspace
 
 RUN apk add --no-cache ca-certificates
 
-WORKDIR /workspace
-
-# Copy pnpm workspace config for production dep install
-COPY package.json ./
-COPY .npmrc ./
-COPY pnpm-workspace.yaml ./
-COPY pnpm-lock.yaml ./
-COPY --from=builder /workspace/packages/common ./packages/common
-COPY --from=builder /workspace/packages/actions-engine ./packages/actions-engine
-COPY --from=builder /workspace/packages/agent-core ./packages/agent-core
-COPY --from=builder /workspace/packages/computer-core ./packages/computer-core
-COPY --from=builder /workspace/packages/computer-agent ./packages/computer-agent
-COPY --from=builder /workspace/packages/executor-service ./packages/executor-service
-COPY --from=builder /workspace/apps/executor/package.json ./apps/executor/
-
-# Install only production runtime deps (langchain, hono)
-ARG PNPM_VERSION
-RUN npm install -g pnpm@${PNPM_VERSION} && \
-    pnpm install --frozen-lockfile --prod --filter @takos-computer/executor...
-
-# Copy bundled output
-COPY --from=builder /workspace/apps/executor/dist ./apps/executor/dist
+COPY --from=builder /workspace /workspace
+COPY --from=builder /root/.cache/deno /root/.cache/deno
 
 WORKDIR /workspace/apps/executor
 
@@ -77,9 +31,8 @@ RUN addgroup -S agent && adduser -S agent -G agent && \
     chown -R agent:agent /workspace
 USER agent
 
-ENV NODE_ENV=production
 ENV PORT=8080
 
 EXPOSE 8080
 
-CMD ["node", "dist/index.js"]
+CMD ["deno", "run", "--allow-all", "src/index.ts"]

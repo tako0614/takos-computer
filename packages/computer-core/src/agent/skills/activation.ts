@@ -1,4 +1,4 @@
-import type { SkillLocale } from '../skill-contracts';
+import type { SkillLocale } from '../skill-contracts.ts';
 import type {
   SkillContext,
   SkillSelection,
@@ -6,17 +6,17 @@ import type {
   SkillCatalogEntry,
   ResolvedSkillPlan,
   SkillAvailabilityContext,
-} from './types';
+} from './types.ts';
 import {
   MAX_SKILL_NAME_LENGTH,
   MAX_SKILL_DESCRIPTION_LENGTH,
   MAX_SKILL_INSTRUCTIONS_LENGTH,
   MAX_SKILL_TRIGGER_LENGTH,
-} from './types';
-import { cloneExecutionContract, toSkillCatalogEntry, applySkillAvailability } from './availability';
-import { selectRelevantSkills } from './scoring';
-import { logWarn } from '../../shared/utils/logger';
-import { sanitizeSkillContent } from '../security/injection-detector';
+} from './types.ts';
+import { cloneExecutionContract, toSkillCatalogEntry, applySkillAvailability } from './availability.ts';
+import { selectRelevantSkills } from './scoring.ts';
+import { logWarn } from '../../shared/utils/logger.ts';
+import { sanitizeSkillContent } from '../security/injection-detector.ts';
 
 export function activateSelectedSkills(
   selectedSkills: SkillSelection[],

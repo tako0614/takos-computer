@@ -1,4 +1,4 @@
-import type { D1PreparedStatement } from './cf-types';
+import type { D1PreparedStatement } from './cf-types.ts';
 
 export type D1RawOptions = { columnNames: true } | { columnNames?: false };
 

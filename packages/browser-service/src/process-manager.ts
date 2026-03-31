@@ -5,6 +5,7 @@
  * Captures stdout/stderr so AI agents can read application output.
  */
 
+import { Buffer } from 'node:buffer';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createLogger } from '@takos-computer/common/logger';
 
@@ -58,9 +59,9 @@ export class ProcessManager {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: cwd ?? '/tmp',
       env: {
-        ...process.env,
+        ...Deno.env.toObject(),
         ...extraEnv,
-        DISPLAY: process.env.DISPLAY ?? ':99',
+        DISPLAY: Deno.env.get('DISPLAY') ?? ':99',
       },
     });
 
@@ -162,11 +163,12 @@ export class ProcessManager {
     logger.info('[process-manager] Killing', { pid, command: entry.command });
     entry.child.kill('SIGTERM');
 
-    setTimeout(() => {
+    const killTimer = setTimeout(() => {
       if (!entry.child.killed) {
         entry.child.kill('SIGKILL');
       }
-    }, 3000).unref();
+    }, 3000);
+    Deno.unrefTimer(killTimer);
 
     return true;
   }
@@ -181,7 +183,7 @@ export class ProcessManager {
       const timer = setTimeout(() => {
         resolve(null);
       }, timeoutMs);
-      timer.unref();
+      Deno.unrefTimer(timer);
 
       entry.child.on('exit', (code) => {
         clearTimeout(timer);

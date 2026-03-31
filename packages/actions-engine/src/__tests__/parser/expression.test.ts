@@ -3,14 +3,14 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { assertEquals, assert, assertThrows } from 'jsr:@std/assert';
 
-import type { ExecutionContext } from '../../types.js';
+import type { ExecutionContext } from '../../types.ts';
 import {
   evaluateExpression,
   ExpressionError,
   interpolateString,
-} from '../../parser/expression.js';
+} from '../../parser/expression.ts';
 
 function createContext(): ExecutionContext {
   return {
@@ -25,127 +25,125 @@ function createContext(): ExecutionContext {
   } as ExecutionContext;
 }
 
-describe('expression resource limits', () => {
-  it('throws ExpressionError when expression size exceeds 64KiB', () => {
-    const context = createContext();
-    const oversized = 'a'.repeat(64 * 1024 + 1);
-    const expr = `\${{ ${oversized} }}`;
+Deno.test('expression resource limits - throws ExpressionError when expression size exceeds 64KiB', () => {
+  const context = createContext();
+  const oversized = 'a'.repeat(64 * 1024 + 1);
+  const expr = `\${{ ${oversized} }}`;
 
-    expect(() => evaluateExpression(expr, context)).toThrowError(ExpressionError);
-    expect(() => evaluateExpression(expr, context)).toThrow(
-      /Expression size limit exceeded/
-    );
-  });
-
-  it('throws ExpressionError when evaluate call count exceeds 10000', () => {
-    const context = createContext();
-    const manyArgs = ',1'.repeat(10_000);
-    const expr = `\${{ format('x'${manyArgs}) }}`;
-
-    expect(() => evaluateExpression(expr, context)).toThrowError(ExpressionError);
-    expect(() => evaluateExpression(expr, context)).toThrow(
-      /Expression evaluate call limit exceeded/
-    );
-  });
-
-  it('throws ExpressionError when parseAccess depth exceeds 128', () => {
-    const context = createContext();
-    const deepAccess = 'github' + '.a'.repeat(129);
-    const expr = `\${{ ${deepAccess} }}`;
-
-    expect(() => evaluateExpression(expr, context)).toThrowError(ExpressionError);
-    expect(() => evaluateExpression(expr, context)).toThrow(
-      /Expression access depth limit exceeded/
-    );
-  });
+  assertThrows(() => evaluateExpression(expr, context), ExpressionError);
+  assertThrows(
+    () => evaluateExpression(expr, context),
+    Error,
+    'Expression size limit exceeded',
+  );
 });
 
-describe('expression property hardening', () => {
-  it('blocks dangerous prototype-chain keys', () => {
-    const context = createContext();
-    const blockedKeys = ['__proto__', 'constructor', 'prototype'];
+Deno.test('expression resource limits - throws ExpressionError when evaluate call count exceeds 10000', () => {
+  const context = createContext();
+  const manyArgs = ',1'.repeat(10_000);
+  const expr = `\${{ format('x'${manyArgs}) }}`;
 
-    for (const key of blockedKeys) {
-      const expr = `\${{ github.${key} }}`;
-      expect(evaluateExpression(expr, context)).toBeUndefined();
-    }
-  });
+  assertThrows(() => evaluateExpression(expr, context), ExpressionError);
+  assertThrows(
+    () => evaluateExpression(expr, context),
+    Error,
+    'Expression evaluate call limit exceeded',
+  );
 });
 
-describe('expression function behavior', () => {
-  it('returns empty string when format template is null', () => {
-    const context = createContext();
-    const expr = "${{ format(null, 'x') }}";
+Deno.test('expression resource limits - throws ExpressionError when parseAccess depth exceeds 128', () => {
+  const context = createContext();
+  const deepAccess = 'github' + '.a'.repeat(129);
+  const expr = `\${{ ${deepAccess} }}`;
 
-    expect(evaluateExpression(expr, context)).toBe('');
-  });
-
-  it('returns empty string when format template is undefined', () => {
-    const context = createContext();
-    const expr = "${{ format(env.NOT_EXISTS, 'x') }}";
-
-    expect(evaluateExpression(expr, context)).toBe('');
-  });
-
-  it('returns SHA-256 hash for a matched file via hashFiles', () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'actions-engine-hash-'));
-    const content = 'hello hash files\n';
-    writeFileSync(join(workspace, 'a.txt'), content);
-
-    try {
-      const context = createContext();
-      context.github.workspace = workspace;
-
-      const expr = "${{ hashFiles('a.txt') }}";
-      const expected = createHash('sha256').update(content).digest('hex');
-
-      expect(evaluateExpression(expr, context)).toBe(expected);
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
-
-  it('supports multiple patterns and exclusions in hashFiles', () => {
-    const workspace = mkdtempSync(join(tmpdir(), 'actions-engine-hash-'));
-    writeFileSync(join(workspace, 'one.txt'), 'one');
-    writeFileSync(join(workspace, 'two.txt'), 'two');
-    writeFileSync(join(workspace, 'skip.txt'), 'skip');
-
-    try {
-      const context = createContext();
-      context.github.workspace = workspace;
-
-      const expr = "${{ hashFiles('*.txt', '!skip.txt') }}";
-      const oneHash = createHash('sha256').update('one').digest('hex');
-      const twoHash = createHash('sha256').update('two').digest('hex');
-      const expected = createHash('sha256')
-        .update(oneHash)
-        .update(twoHash)
-        .digest('hex');
-
-      expect(evaluateExpression(expr, context)).toBe(expected);
-    } finally {
-      rmSync(workspace, { recursive: true, force: true });
-    }
-  });
+  assertThrows(() => evaluateExpression(expr, context), ExpressionError);
+  assertThrows(
+    () => evaluateExpression(expr, context),
+    Error,
+    'Expression access depth limit exceeded',
+  );
 });
 
-describe('expression multiline wrapper support', () => {
-  it('evaluates expressions wrapped with ${{ }} across multiple lines', () => {
+Deno.test('expression property hardening - blocks dangerous prototype-chain keys', () => {
+  const context = createContext();
+  const blockedKeys = ['__proto__', 'constructor', 'prototype'];
+
+  for (const key of blockedKeys) {
+    const expr = `\${{ github.${key} }}`;
+    assertEquals(evaluateExpression(expr, context), undefined);
+  }
+});
+
+Deno.test('expression function behavior - returns empty string when format template is null', () => {
+  const context = createContext();
+  const expr = "${{ format(null, 'x') }}";
+
+  assertEquals(evaluateExpression(expr, context), '');
+});
+
+Deno.test('expression function behavior - returns empty string when format template is undefined', () => {
+  const context = createContext();
+  const expr = "${{ format(env.NOT_EXISTS, 'x') }}";
+
+  assertEquals(evaluateExpression(expr, context), '');
+});
+
+Deno.test('expression function behavior - returns SHA-256 hash for a matched file via hashFiles', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'actions-engine-hash-'));
+  const content = 'hello hash files\n';
+  writeFileSync(join(workspace, 'a.txt'), content);
+
+  try {
     const context = createContext();
-    const expr = `\${{
-      format('{0}-ok', github.actor)
-    }}`;
+    context.github.workspace = workspace;
 
-    expect(evaluateExpression(expr, context)).toBe('tester-ok');
-  });
+    const expr = "${{ hashFiles('a.txt') }}";
+    const expected = createHash('sha256').update(content).digest('hex');
 
-  it('interpolates multiline expression blocks in template strings', () => {
+    assertEquals(evaluateExpression(expr, context), expected);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+Deno.test('expression function behavior - supports multiple patterns and exclusions in hashFiles', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'actions-engine-hash-'));
+  writeFileSync(join(workspace, 'one.txt'), 'one');
+  writeFileSync(join(workspace, 'two.txt'), 'two');
+  writeFileSync(join(workspace, 'skip.txt'), 'skip');
+
+  try {
     const context = createContext();
-    const template = `actor=\${{
-      github.actor
-    }}`;
+    context.github.workspace = workspace;
 
-    expect(interpolateString(template, context)).toBe('actor=tester');
-  });
+    const expr = "${{ hashFiles('*.txt', '!skip.txt') }}";
+    const oneHash = createHash('sha256').update('one').digest('hex');
+    const twoHash = createHash('sha256').update('two').digest('hex');
+    const expected = createHash('sha256')
+      .update(oneHash)
+      .update(twoHash)
+      .digest('hex');
+
+    assertEquals(evaluateExpression(expr, context), expected);
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+Deno.test('expression multiline wrapper support - evaluates expressions wrapped with ${{ }} across multiple lines', () => {
+  const context = createContext();
+  const expr = `\${{
+    format('{0}-ok', github.actor)
+  }}`;
+
+  assertEquals(evaluateExpression(expr, context), 'tester-ok');
+});
+
+Deno.test('expression multiline wrapper support - interpolates multiline expression blocks in template strings', () => {
+  const context = createContext();
+  const template = `actor=\${{
+    github.actor
+  }}`;
+
+  assertEquals(interpolateString(template, context), 'actor=tester');
 });

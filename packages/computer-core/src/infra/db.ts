@@ -8,7 +8,7 @@
  */
 
 import type { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core';
-import type { SqlDatabaseBinding } from '../shared/types/bindings';
+import type { SqlDatabaseBinding } from '../shared/types/bindings.ts';
 
 // Re-export drizzle-orm primitives so files that import them from here still work
 export { eq, and, lt, gt, desc, asc, sql, inArray } from 'drizzle-orm';

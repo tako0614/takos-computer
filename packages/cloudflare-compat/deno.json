@@ -1,0 +1,14 @@
+{
+  "name": "@takos-computer/cloudflare-compat",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "imports": {
+    "@cloudflare/workers-types": "npm:@cloudflare/workers-types@^4.20260118.0",
+    "hono": "npm:hono@^4.11.10"
+  },
+  "tasks": {
+    "test": "deno test --allow-all src/"
+  }
+}

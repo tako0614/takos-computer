@@ -6,44 +6,35 @@
  * aliases (VectorizeQueryResult, D1RawOptions, R2ObjectMetadata) are
  * structurally correct.
  */
-import { describe, expect, it } from 'vitest';
+import { assertEquals, assert } from 'jsr:@std/assert';
 
-// The package is primarily a type re-export surface. We import the module
-// to verify it loads without errors and that runtime-accessible exports exist.
-describe('@takos/cloudflare-compat exports', () => {
-  it('module loads without error', async () => {
-    const mod = await import('../index.js');
-    expect(mod).toBeDefined();
-  });
+Deno.test('@takos/cloudflare-compat exports - module loads without error', async () => {
+  const mod = await import('../index.ts');
+  assert(mod !== undefined);
+});
 
-  // VectorizeQueryResult is the only interface with a runtime presence
-  // (extends VectorizeMatches). We verify the module exports it as a type.
-  it('exports can be imported (type-level verification)', async () => {
-    // If the module has syntax errors or broken re-exports, this import will throw.
-    const mod = await import('../index.js');
-    // The module is primarily types — the runtime export is the module object itself.
-    expect(typeof mod).toBe('object');
-  });
+Deno.test('@takos/cloudflare-compat exports - exports can be imported (type-level verification)', async () => {
+  // If the module has syntax errors or broken re-exports, this import will throw.
+  const mod = await import('../index.ts');
+  // The module is primarily types -- the runtime export is the module object itself.
+  assertEquals(typeof mod, 'object');
 });
 
 // ---------------------------------------------------------------------------
-// Structural type tests — these use type assertions at compile time but also
-// validate runtime shape where possible.
+// Structural type tests
 // ---------------------------------------------------------------------------
 
-describe('D1RawOptions structural contract', () => {
-  it('accepts columnNames: true', () => {
-    const opts: import('../index.js').D1RawOptions = { columnNames: true };
-    expect(opts.columnNames).toBe(true);
-  });
+Deno.test('D1RawOptions structural contract - accepts columnNames: true', () => {
+  const opts: import('../index.ts').D1RawOptions = { columnNames: true };
+  assertEquals(opts.columnNames, true);
+});
 
-  it('accepts columnNames: false', () => {
-    const opts: import('../index.js').D1RawOptions = { columnNames: false };
-    expect(opts.columnNames).toBe(false);
-  });
+Deno.test('D1RawOptions structural contract - accepts columnNames: false', () => {
+  const opts: import('../index.ts').D1RawOptions = { columnNames: false };
+  assertEquals(opts.columnNames, false);
+});
 
-  it('accepts omitted columnNames', () => {
-    const opts: import('../index.js').D1RawOptions = {};
-    expect(opts).toBeDefined();
-  });
+Deno.test('D1RawOptions structural contract - accepts omitted columnNames', () => {
+  const opts: import('../index.ts').D1RawOptions = {};
+  assert(opts !== undefined);
 });

@@ -7,10 +7,10 @@
  */
 
 import { createLogger } from '@takos-computer/common';
-import type { DurableObjectNamespace, R2Bucket } from './cf-types';
-import type { D1RawOptions } from './d1-raw';
-import { executeD1RawStatement } from './d1-raw';
-import { validateD1ProxySql } from './sql-validation';
+import type { DurableObjectNamespace, R2Bucket } from './cf-types.ts';
+import type { D1RawOptions } from './d1-raw.ts';
+import { executeD1RawStatement } from './d1-raw.ts';
+import { validateD1ProxySql } from './sql-validation.ts';
 
 const logger = createLogger({ name: 'executor-proxy' });
 import {
@@ -21,7 +21,7 @@ import {
   decodeBase64ToBytes,
   type AgentExecutorEnv,
   type AiRunBinding,
-} from './executor-utils';
+} from './executor-utils.ts';
 
 type Env = AgentExecutorEnv;
 

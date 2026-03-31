@@ -1,29 +1,29 @@
-import type { Env, RunStatus } from '../../shared/types';
-import type { SqlDatabaseBinding } from '../../shared/types/bindings';
-import type { ToolExecutorLike } from '../../tools/executor';
-import type { AgentContext, AgentConfig, AgentEvent, AgentMessage } from './types';
-import type { ToolExecution } from './runner-types';
-import type { LLMClient, ModelProvider } from './llm';
+import type { Env, RunStatus } from '../../shared/types.ts';
+import type { SqlDatabaseBinding } from '../../shared/types/bindings.ts';
+import type { ToolExecutorLike } from '../../tools/executor.ts';
+import type { AgentContext, AgentConfig, AgentEvent, AgentMessage } from './types.ts';
+import type { ToolExecution } from './runner-types.ts';
+import type { LLMClient, ModelProvider } from './llm.ts';
 import {
   buildSkillEnhancedPrompt,
   type ResolvedSkillPlan,
   type SkillCatalogEntry,
   type SkillSelection,
   type SkillContext,
-} from './skills';
+} from './skills.ts';
 import {
   createLangGraphAgent,
   runLangGraph,
   dbMessagesToLangChain,
   langChainMessageToDb,
   type LangGraphEvent,
-} from './langgraph-agent';
-import { getTimeoutConfig } from './runner-config';
-import { RunCancelledError } from './run-lifecycle';
-import { withTimeout } from '../../shared/utils/with-timeout';
-import { buildTerminalPayload, type RunTerminalPayload } from '../../run-notifier-types';
-import { runWithSimpleLoop, runWithoutLLM } from './simple-loop';
-import type { AgentMemoryRuntime } from '../../memory-graph/runtime';
+} from './langgraph-agent.ts';
+import { getTimeoutConfig } from './runner-config.ts';
+import { RunCancelledError } from './run-lifecycle.ts';
+import { withTimeout } from '../../shared/utils/with-timeout.ts';
+import { buildTerminalPayload, type RunTerminalPayload } from '../../run-notifier-types.ts';
+import { runWithSimpleLoop, runWithoutLLM } from './simple-loop.ts';
+import type { AgentMemoryRuntime } from '../../memory-graph/runtime.ts';
 
 type ToolExecutionRecord = {
   name: string;

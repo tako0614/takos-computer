@@ -6,7 +6,7 @@
  * to keep the large type surface isolated.
  */
 
-import type { ControlRpcClient } from './control-rpc.js';
+import type { ControlRpcClient } from './control-rpc.ts';
 
 export function createControlRpcRunIo(
   controlRpc: ControlRpcClient,

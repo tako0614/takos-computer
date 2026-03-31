@@ -5,7 +5,7 @@
  * tool-worker.ts, and delegation-coordinator.ts.
  */
 
-import type { AgentWorkerConfig, AgentMessage } from './types';
+import type { AgentWorkerConfig, AgentMessage } from './types.ts';
 
 export type AgentWorkerStatus = 'idle' | 'initializing' | 'ready' | 'executing' | 'error' | 'shutdown';
 

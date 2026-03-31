@@ -17,21 +17,21 @@
  * split across delegation-operations.ts and delegation-strategies.ts.
  */
 
-import { AbstractAgentWorker } from '../../multi-agent/base-worker';
+import { AbstractAgentWorker } from '../../multi-agent/base-worker.ts';
 import type {
   AgentWorkerConfig,
   AgentMessage as CoordinatorMessage,
-} from '../../multi-agent/types';
-import type { Env } from '../../shared/types';
-import type { D1Database } from '../../shared/types/bindings';
-import { logInfo, logWarn } from '../../shared/utils/logger';
+} from '../../multi-agent/types.ts';
+import type { Env } from '../../shared/types.ts';
+import type { D1Database } from '../../shared/types/bindings.ts';
+import { logInfo, logWarn } from '../../shared/utils/logger.ts';
 
 import {
   buildDelegationPacket,
-} from './delegation';
-import { createThreadRun, type CreateThreadRunResult } from '../../execution/run-creation';
-import { createThread, updateThreadStatus } from '../../threads/threads';
-import { resolveRunModel } from '../../runs/create-thread-run-validation';
+} from './delegation.ts';
+import { createThreadRun, type CreateThreadRunResult } from '../../execution/run-creation.ts';
+import { createThread, updateThreadStatus } from '../../threads/threads.ts';
+import { resolveRunModel } from '../../runs/create-thread-run-validation.ts';
 
 // Re-export public types so existing consumers keep working
 export type {
@@ -39,7 +39,7 @@ export type {
   DelegationInput,
   DelegationTaskResult,
   DelegationOutput,
-} from './delegation-types';
+} from './delegation-types.ts';
 
 import type {
   DelegationTask,
@@ -47,14 +47,14 @@ import type {
   DelegationTaskResult,
   DelegationOutput,
   SpawnedTask,
-} from './delegation-types';
+} from './delegation-types.ts';
 
 import {
   DEFAULT_WAIT_TIMEOUT_MS,
   MAX_WAIT_TIMEOUT_MS,
   WAIT_POLL_INTERVAL_MS,
   TERMINAL_STATUSES,
-} from './delegation-types';
+} from './delegation-types.ts';
 
 // ---------------------------------------------------------------------------
 // Context type
@@ -196,7 +196,7 @@ async function waitForTask(
   const deadline = Date.now() + effectiveTimeout;
 
   // Import DB utilities lazily to avoid circular deps
-  const { getDb, runs } = await import('../../infra/db');
+  const { getDb, runs } = await import('../../infra/db.ts');
   const { eq } = await import('drizzle-orm');
 
   const db = getDb(ctx.db);

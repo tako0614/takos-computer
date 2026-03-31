@@ -4,16 +4,16 @@
  */
 
 // Re-export all types
-export * from './types.js';
+export * from './types.ts';
 
 // Re-export context module
-export * from './context.js';
+export * from './context.ts';
 
 // Re-export parser module
-export { parseWorkflow } from './parser/workflow.js';
-export { evaluateCondition, interpolateString } from './parser/expression.js';
-export { validateWorkflow, type ValidationResult } from './parser/validator.js';
+export { parseWorkflow } from './parser/workflow.ts';
+export { evaluateCondition, interpolateString } from './parser/expression.ts';
+export { validateWorkflow, type ValidationResult } from './parser/validator.ts';
 
 // Re-export scheduler module
-export { createExecutionPlan } from './scheduler/job.js';
+export { createExecutionPlan } from './scheduler/job.ts';
 

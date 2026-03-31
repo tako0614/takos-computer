@@ -5,8 +5,8 @@
  * skill scoring, matching, and context extraction.
  */
 
-import type { SkillCategory } from '../skill-contracts';
-import { getDelegationPacketFromRunInput } from '../delegation';
+import type { SkillCategory } from '../skill-contracts.ts';
+import { getDelegationPacketFromRunInput } from '../delegation.ts';
 
 // ── Configuration ───────────────────────────────────────────────────────
 

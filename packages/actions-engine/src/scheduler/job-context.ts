@@ -5,7 +5,7 @@ import type {
   ExecutionContext,
   JobResult,
   StepResult,
-} from '../types.js';
+} from '../types.ts';
 
 type NeedsResult = ExecutionContext['needs'][string]['result'];
 

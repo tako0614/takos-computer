@@ -5,9 +5,9 @@
  * environment (DB queries, tool execution, event emission, etc.).
  */
 
-import type { RunStatus } from '../../shared/types';
-import type { AgentMessage } from './types';
-import type { SkillLoadResult } from './skills';
+import type { RunStatus } from '../../shared/types.ts';
+import type { AgentMessage } from './types.ts';
+import type { SkillLoadResult } from './skills.ts';
 
 export interface AgentRunnerIo {
   getRunBootstrap(input: {
@@ -57,25 +57,25 @@ export interface AgentRunnerIo {
     history: AgentMessage[];
     availableToolNames: string[];
   }): Promise<SkillLoadResult>;
-  getMemoryActivation(input: { spaceId: string }): Promise<import('../../memory-graph/types').ActivationResult>;
+  getMemoryActivation(input: { spaceId: string }): Promise<import('../../memory-graph/types.ts').ActivationResult>;
   finalizeMemoryOverlay(input: {
     runId: string;
     spaceId: string;
-    claims: import('../../memory-graph/types').Claim[];
-    evidence: import('../../memory-graph/types').Evidence[];
+    claims: import('../../memory-graph/types.ts').Claim[];
+    evidence: import('../../memory-graph/types.ts').Evidence[];
   }): Promise<void>;
   getToolCatalog(input: { runId: string }): Promise<{
-    tools: import('../../tools/types').ToolDefinition[];
+    tools: import('../../tools/types.ts').ToolDefinition[];
     mcpFailedServers: string[];
   }>;
   executeTool(input: {
     runId: string;
-    toolCall: import('../../tools/types').ToolCall;
-  }): Promise<import('../../tools/types').ToolResult>;
+    toolCall: import('../../tools/types.ts').ToolCall;
+  }): Promise<import('../../tools/types.ts').ToolResult>;
   cleanupToolExecutor(input: { runId: string }): Promise<void>;
   emitRunEvent(input: {
     runId: string;
-    type: import('./types').AgentEvent['type'];
+    type: import('./types.ts').AgentEvent['type'];
     data: Record<string, unknown>;
     sequence: number;
     skipDb?: boolean;

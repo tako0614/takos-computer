@@ -1,0 +1,12 @@
+{
+  "name": "@takos-computer/agent-core",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./run-executor": "./src/run-executor.ts",
+    "./executor-utils": "./src/executor-utils.ts"
+  },
+  "tasks": {
+    "test": "deno test --allow-all src/"
+  }
+}

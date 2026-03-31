@@ -40,4 +40,4 @@ export {
   buildSkillResolutionContext,
   resolveSkillPlanForRun,
   emitSkillLoadOutcome,
-} from './skills/index';
+} from './skills/index.ts';

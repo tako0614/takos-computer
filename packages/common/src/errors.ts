@@ -9,7 +9,7 @@
  * - details: Optional field-level or additional details
  */
 
-import type { Logger } from './logger.js';
+import type { Logger } from './logger.ts';
 
 /**
  * Standard error codes for consistent client handling

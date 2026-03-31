@@ -8,14 +8,14 @@
  *   - evaluator.ts         -- ExpressionEvaluator class (parser + eval)
  *   - functions.ts         -- built-in function implementations & FS helpers
  */
-import type { ExecutionContext } from '../types.js';
+import type { ExecutionContext } from '../types.ts';
 
-import { ExpressionError, MAX_EXPRESSION_SIZE } from './expression-types.js';
-import { tokenize } from './tokenizer.js';
-import { ExpressionEvaluator } from './evaluator.js';
+import { ExpressionError, MAX_EXPRESSION_SIZE } from './expression-types.ts';
+import { tokenize } from './tokenizer.ts';
+import { ExpressionEvaluator } from './evaluator.ts';
 
 // Re-export for downstream consumers
-export { ExpressionError } from './expression-types.js';
+export { ExpressionError } from './expression-types.ts';
 
 /**
  * Extract expression content from ${{ }} wrapper.

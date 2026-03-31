@@ -1,6 +1,6 @@
-import type { ToolObserver } from '../../memory-graph/types';
-import type { ToolCall, ToolDefinition, ToolResult } from '../../tools/types';
-import type { ToolExecutorLike } from '../../tools/executor';
+import type { ToolObserver } from '../../memory-graph/types.ts';
+import type { ToolCall, ToolDefinition, ToolResult } from '../../tools/types.ts';
+import type { ToolExecutorLike } from '../../tools/executor.ts';
 
 type RemoteToolCatalog = {
   tools: ToolDefinition[];

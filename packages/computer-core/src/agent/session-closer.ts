@@ -6,15 +6,15 @@
  * memory usage and phase-aware rollback for error recovery.
  */
 
-import type { Env } from '../../shared/types';
-import type { AgentContext, AgentEvent } from './types';
-import { SnapshotManager } from '../../sync/snapshot';
-import { generateId } from '../../shared/utils';
-import { getDb, sessions, accounts, accountMetadata, files, runs } from '../../infra/db';
+import type { Env } from '../../shared/types.ts';
+import type { AgentContext, AgentEvent } from './types.ts';
+import { SnapshotManager } from '../../sync/snapshot.ts';
+import { generateId } from '../../shared/utils.ts';
+import { getDb, sessions, accounts, accountMetadata, files, runs } from '../../infra/db.ts';
 import { and, eq, inArray } from 'drizzle-orm';
-import { callRuntimeRequest } from '../../execution/runtime';
-import { logError, logWarn } from '../../shared/utils/logger';
-import type { SqlDatabaseBinding } from '../../shared/types/bindings';
+import { callRuntimeRequest } from '../../execution/runtime.ts';
+import { logError, logWarn } from '../../shared/utils/logger.ts';
+import type { SqlDatabaseBinding } from '../../shared/types/bindings.ts';
 
 const AUTO_CLOSE_SNAPSHOT_TIMEOUT_MS = 10000;
 

@@ -1,12 +1,12 @@
-import type { AgentMessage } from './types';
-import type { WorkflowContext, ReviewResult } from './workflow-types';
-import { extractJsonFromLLMResponse } from './workflow-types';
-import { createLLMClient } from './llm';
-import { generateId, now } from '../../shared/utils';
-import { getDb, pullRequests, prReviews } from '../../infra/db';
+import type { AgentMessage } from './types.ts';
+import type { WorkflowContext, ReviewResult } from './workflow-types.ts';
+import { extractJsonFromLLMResponse } from './workflow-types.ts';
+import { createLLMClient } from './llm.ts';
+import { generateId, now } from '../../shared/utils.ts';
+import { getDb, pullRequests, prReviews } from '../../infra/db.ts';
 import { eq } from 'drizzle-orm';
-import { buildPRDiffText } from '../../pull-requests/ai-review';
-import { logError } from '../../shared/utils/logger';
+import { buildPRDiffText } from '../../pull-requests/ai-review.ts';
+import { logError } from '../../shared/utils/logger.ts';
 
 // ── Prompts ─────────────────────────────────────────────────────────────
 

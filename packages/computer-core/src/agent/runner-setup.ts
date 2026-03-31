@@ -4,23 +4,23 @@
  * Extracted from runner.ts to keep the main class focused on orchestration.
  */
 
-import type { RunStatus, Env } from '../../shared/types';
-import type { SqlDatabaseBinding } from '../../shared/types/bindings';
-import type { AgentContext, AgentConfig, AgentEvent, AgentMessage, ToolCall } from './types';
-import type { ToolExecutorLike } from '../../tools/executor';
-import type { ToolDefinition } from '../../tools/types';
-import type { Claim, Evidence } from '../../memory-graph/types';
-import type { AgentRunnerIo } from './runner-io';
-import type { SkillCatalogEntry, SkillSelection, SkillContext } from './skills';
-import { emitSkillLoadOutcome } from './skills';
-import { buildToolCatalogContent } from './prompts';
-import { buildBudgetedSystemPrompt, LANE_PRIORITY, LANE_MAX_TOKENS, type PromptLane } from './prompt-budget';
-import { RemoteToolExecutor } from './remote-tool-executor';
-import { AgentMemoryRuntime } from '../../memory-graph/runtime';
-import type { AgentMemoryBackend } from '../../memory-graph/runtime';
-import { safeJsonParseOrDefault } from '../../shared/utils';
-import { logWarn } from '../../shared/utils/logger';
-import { getDelegationPacketFromRunInput } from './delegation';
+import type { RunStatus, Env } from '../../shared/types.ts';
+import type { SqlDatabaseBinding } from '../../shared/types/bindings.ts';
+import type { AgentContext, AgentConfig, AgentEvent, AgentMessage, ToolCall } from './types.ts';
+import type { ToolExecutorLike } from '../../tools/executor.ts';
+import type { ToolDefinition } from '../../tools/types.ts';
+import type { Claim, Evidence } from '../../memory-graph/types.ts';
+import type { AgentRunnerIo } from './runner-io.ts';
+import type { SkillCatalogEntry, SkillSelection, SkillContext } from './skills.ts';
+import { emitSkillLoadOutcome } from './skills.ts';
+import { buildToolCatalogContent } from './prompts.ts';
+import { buildBudgetedSystemPrompt, LANE_PRIORITY, LANE_MAX_TOKENS, type PromptLane } from './prompt-budget.ts';
+import { RemoteToolExecutor } from './remote-tool-executor.ts';
+import { AgentMemoryRuntime } from '../../memory-graph/runtime.ts';
+import type { AgentMemoryBackend } from '../../memory-graph/runtime.ts';
+import { safeJsonParseOrDefault } from '../../shared/utils.ts';
+import { logWarn } from '../../shared/utils/logger.ts';
+import { getDelegationPacketFromRunInput } from './delegation.ts';
 
 // ── Shared state bucket passed from AgentRunner ──────────────────────
 
@@ -30,9 +30,9 @@ export interface RunnerState {
   context: AgentContext;
   config: AgentConfig;
   aiModel: string;
-  modelProvider: import('./llm').ModelProvider;
+  modelProvider: import('./llm.ts').ModelProvider;
   openAiKey: string | undefined;
-  llmClient: import('./llm').LLMClient | undefined;
+  llmClient: import('./llm.ts').LLMClient | undefined;
   toolExecutor: ToolExecutorLike | undefined;
   skillLocale: 'ja' | 'en';
   availableSkills: SkillCatalogEntry[];
@@ -119,7 +119,7 @@ export async function prepareRunExecution(
     emitEvent: (type: AgentEvent['type'], data: Record<string, unknown>) => Promise<void>;
     getConversationHistory: () => Promise<AgentMessage[]>;
     getRunRecord: () => Promise<{ status: RunStatus | null; input: string | null; parentRunId: string | null }>;
-    resolveSkillPlan: (history: AgentMessage[]) => Promise<import('./skills').SkillLoadResult>;
+    resolveSkillPlan: (history: AgentMessage[]) => Promise<import('./skills.ts').SkillLoadResult>;
   },
 ): Promise<{
   engine: 'langgraph' | 'simple' | 'none';

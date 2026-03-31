@@ -1,7 +1,7 @@
 /**
  * Type definitions for step execution
  */
-import type { Step, ActionResolver } from '../types.js';
+import type { Step, ActionResolver } from '../types.ts';
 
 /**
  * Step runner options

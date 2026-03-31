@@ -6,6 +6,7 @@
  * the entire X11 display — any GUI app visible on the screen.
  */
 
+import { Buffer } from 'node:buffer';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readFile, unlink } from 'node:fs/promises';
@@ -49,17 +50,17 @@ export interface WindowInfo {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const DISPLAY = () => process.env.DISPLAY ?? ':99';
+const DISPLAY = () => Deno.env.get('DISPLAY') ?? ':99';
 
 function xdotool(...args: string[]): Promise<{ stdout: string; stderr: string }> {
   return execAsync('xdotool', args, {
-    env: { ...process.env, DISPLAY: DISPLAY() },
+    env: { ...Deno.env.toObject(), DISPLAY: DISPLAY() },
     timeout: 10000,
   });
 }
 
-function xEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, DISPLAY: DISPLAY() };
+function xEnv(): Record<string, string> {
+  return { ...Deno.env.toObject(), DISPLAY: DISPLAY() };
 }
 
 function randomId(): string {

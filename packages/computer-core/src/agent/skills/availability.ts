@@ -1,10 +1,10 @@
-import type { SkillExecutionContract } from '../skill-contracts';
+import type { SkillExecutionContract } from '../skill-contracts.ts';
 import type {
   SkillAvailabilityContext,
   SkillCatalogEntry,
   SkillContext,
-} from './types';
-import { DEFAULT_EXECUTION_CONTRACT } from './types';
+} from './types.ts';
+import { DEFAULT_EXECUTION_CONTRACT } from './types.ts';
 
 export function cloneExecutionContract(contract?: Partial<SkillExecutionContract> | null): SkillExecutionContract {
   return {

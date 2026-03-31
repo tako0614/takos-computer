@@ -4,9 +4,9 @@ import type {
   SkillLocale,
   SkillSource,
   CustomSkillMetadata,
-} from '../skill-contracts';
+} from '../skill-contracts.ts';
 
-export type { SkillSource, SkillCategory } from '../skill-contracts';
+export type { SkillSource, SkillCategory } from '../skill-contracts.ts';
 export type SkillAvailabilityStatus = 'available' | 'warning' | 'unavailable';
 
 export interface SkillAvailabilityContext {

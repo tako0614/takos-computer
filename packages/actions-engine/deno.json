@@ -1,0 +1,14 @@
+{
+  "name": "@takos-computer/actions-engine",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "imports": {
+    "yaml": "npm:yaml@^2.4.0",
+    "zod": "npm:zod@^3.23.0"
+  },
+  "tasks": {
+    "test": "deno test --allow-all src/"
+  }
+}

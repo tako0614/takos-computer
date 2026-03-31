@@ -5,28 +5,28 @@
  * when no LLM API key is configured.
  */
 
-import type { AgentMessage, AgentConfig, AgentEvent } from './types';
-import type { RunTerminalPayload } from '../../run-notifier-types';
-import type { LLMClient } from './llm';
-import type { ToolExecutorLike } from '../../tools/executor';
-import type { ToolExecution } from './runner-types';
-import type { Env } from '../../shared/types';
-import type { RunStatus } from '../../shared/types';
-import type { AgentMemoryRuntime } from '../../memory-graph/runtime';
+import type { AgentMessage, AgentConfig, AgentEvent } from './types.ts';
+import type { RunTerminalPayload } from '../../run-notifier-types.ts';
+import type { LLMClient } from './llm.ts';
+import type { ToolExecutorLike } from '../../tools/executor.ts';
+import type { ToolExecution } from './runner-types.ts';
+import type { Env } from '../../shared/types.ts';
+import type { RunStatus } from '../../shared/types.ts';
+import type { AgentMemoryRuntime } from '../../memory-graph/runtime.ts';
 import type {
   SkillCatalogEntry,
   SkillSelection,
   SkillContext,
-} from './skills';
-import { buildSkillEnhancedPrompt } from './skills';
-import { getTimeoutConfig } from './runner-config';
-import { withTimeout } from '../../shared/utils/with-timeout';
+} from './skills.ts';
+import { buildSkillEnhancedPrompt } from './skills.ts';
+import { getTimeoutConfig } from './runner-config.ts';
+import { withTimeout } from '../../shared/utils/with-timeout.ts';
 import {
   anySignal,
   addToolExecution,
   redactSensitiveArgs,
   MAX_TOTAL_TOOL_CALLS,
-} from './runner-types';
+} from './runner-types.ts';
 
 export interface SimpleLoopDeps {
   env: Env;

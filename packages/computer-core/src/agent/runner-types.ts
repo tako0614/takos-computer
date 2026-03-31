@@ -2,11 +2,11 @@
  * Internal types and constants for the Agent Runner module.
  */
 
-import type { Env } from '../../shared/types';
-import { INDEX_QUEUE_MESSAGE_VERSION } from '../../shared/types';
-import { generateId } from '../../shared/utils';
-import { logWarn } from '../../shared/utils/logger';
-import { MAX_TOTAL_TOOL_CALLS_PER_RUN, MAX_TOOL_EXECUTIONS_HISTORY } from '../../shared/config/limits';
+import type { Env } from '../../shared/types.ts';
+import { INDEX_QUEUE_MESSAGE_VERSION } from '../../shared/types.ts';
+import { generateId } from '../../shared/utils.ts';
+import { logWarn } from '../../shared/utils/logger.ts';
+import { MAX_TOTAL_TOOL_CALLS_PER_RUN, MAX_TOOL_EXECUTIONS_HISTORY } from '../../shared/config/limits.ts';
 
 export const MAX_TOTAL_TOOL_CALLS = MAX_TOTAL_TOOL_CALLS_PER_RUN;
 

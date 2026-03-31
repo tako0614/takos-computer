@@ -8,24 +8,24 @@ import type {
   ExecutionPlan,
   ExecutionContext,
   Conclusion,
-} from '../types.js';
-import { evaluateCondition } from '../parser/expression.js';
+} from '../types.ts';
+import { evaluateCondition } from '../parser/expression.ts';
 import {
   buildDependencyGraph,
   groupIntoPhases,
   type DependencyGraph,
-} from './dependency.js';
-import { StepRunner, type StepRunnerOptions } from './step.js';
+} from './dependency.ts';
+import { StepRunner, type StepRunnerOptions } from './step.ts';
 import {
   createListenerRegistry,
   type ListenerRegistry,
-} from './listener-registry.js';
+} from './listener-registry.ts';
 import {
   buildNeedsContext,
   buildJobExecutionContext,
   buildStepsContext,
   normalizeNeedsInput,
-} from './job-context.js';
+} from './job-context.ts';
 import {
   type JobExecutionState,
   createCompletedJobResult,
@@ -33,13 +33,13 @@ import {
   classifyStepControl,
   finalizeJobResult,
   getDependencySkipReason,
-} from './job-policy.js';
+} from './job-policy.ts';
 import type {
   JobSchedulerEvent,
   JobSchedulerListener,
-} from './job-events.js';
+} from './job-events.ts';
 
-export type { JobSchedulerEvent, JobSchedulerListener } from './job-events.js';
+export type { JobSchedulerEvent, JobSchedulerListener } from './job-events.ts';
 
 /**
  * Job scheduler options

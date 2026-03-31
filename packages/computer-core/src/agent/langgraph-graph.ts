@@ -13,21 +13,21 @@ import {
   messagesStateReducer,
 } from '@langchain/langgraph/web';
 import { ChatOpenAI } from '@langchain/openai';
-import { ServiceUnavailableError } from '../../shared/utils/error-response';
+import { ServiceUnavailableError } from '../../shared/utils/error-response.ts';
 import {
   BaseMessage,
   AIMessage,
   SystemMessage,
   ToolMessage,
 } from '@langchain/core/messages';
-import type { ToolDefinition } from '../../tools/types';
-import type { ToolExecutorLike } from '../../tools/executor';
-import { DEFAULT_MODEL_ID } from './model-catalog';
-import { estimateTokens } from './prompt-budget';
-import { withTimeout } from '../../shared/utils/with-timeout';
-import { logWarn } from '../../shared/utils/logger';
-import type { SqlDatabaseBinding } from '../../shared/types/bindings';
-import { D1CheckpointSaver } from './langgraph-checkpointer';
+import type { ToolDefinition } from '../../tools/types.ts';
+import type { ToolExecutorLike } from '../../tools/executor.ts';
+import { DEFAULT_MODEL_ID } from './model-catalog.ts';
+import { estimateTokens } from './prompt-budget.ts';
+import { withTimeout } from '../../shared/utils/with-timeout.ts';
+import { logWarn } from '../../shared/utils/logger.ts';
+import type { SqlDatabaseBinding } from '../../shared/types/bindings.ts';
+import { D1CheckpointSaver } from './langgraph-checkpointer.ts';
 import {
   extractMessageText,
   stringifyToolResult,
@@ -35,8 +35,8 @@ import {
   generateToolCallId,
   throwIfAborted,
   type CreateAgentOptions,
-} from './langgraph-tools';
-import { anySignal } from './runner-types';
+} from './langgraph-tools.ts';
+import { anySignal } from './runner-types.ts';
 
 // ── Message limits for Workers memory safety (128MB heap) ───────────────
 

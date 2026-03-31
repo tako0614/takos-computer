@@ -1,0 +1,8 @@
+{
+  "name": "@takos-computer/computer-agent",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./agent-runner": "./src/agent-runner.ts"
+  }
+}

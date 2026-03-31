@@ -7,8 +7,8 @@ import type {
   ParsedWorkflow,
   WorkflowDiagnostic,
   WorkflowTrigger,
-} from '../types.js';
-import { normalizeNeedsInput } from '../scheduler/job-context.js';
+} from '../types.ts';
+import { normalizeNeedsInput } from '../scheduler/job-context.ts';
 
 /**
  * Error thrown when workflow parsing fails

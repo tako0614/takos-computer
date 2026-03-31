@@ -1,7 +1,7 @@
 /**
  * Default action resolver for step execution
  */
-import type { Step, StepResult, ActionResolver } from '../types.js';
+import type { Step, StepResult, ActionResolver } from '../types.ts';
 
 const BUILTIN_NOOP_ACTIONS = new Set(['actions/checkout', 'actions/setup-node']);
 

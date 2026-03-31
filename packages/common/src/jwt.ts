@@ -3,7 +3,8 @@
  * Uses RS256 (RSA with SHA-256) for asymmetric signing
  */
 
-import * as crypto from 'crypto';
+import * as crypto from 'node:crypto';
+import { Buffer } from "node:buffer";
 
 /**
  * Service token JWT payload structure

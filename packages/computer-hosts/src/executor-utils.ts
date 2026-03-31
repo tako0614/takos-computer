@@ -9,11 +9,11 @@ import type {
   D1Database,
   Queue,
   VectorizeIndex,
-} from './cf-types';
+} from './cf-types.ts';
 import type {
   AgentExecutorDispatchPayload,
   AgentExecutorDispatchResult,
-} from './executor-dispatch';
+} from './executor-dispatch.ts';
 
 // ---------------------------------------------------------------------------
 // Environment types
