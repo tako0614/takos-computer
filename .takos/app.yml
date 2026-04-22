@@ -93,6 +93,8 @@ routes:
   - target: web
     path: /gui
   - target: web
+    path: /icons/computer.svg
+  - target: web
     path: /session
   - target: web
     path: /session/:id/mcp
