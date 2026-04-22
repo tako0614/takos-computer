@@ -16,6 +16,7 @@ import { generateProxyToken } from "./proxy-token.ts";
 import { constantTimeEqual } from "./crypto-utils.ts";
 import type { DurableObjectStub } from "./cf-types.ts";
 import { appHtml, styleCss } from "./gui/assets.ts";
+import { computerIconSvg } from "./gui/icon.ts";
 import type {
   CreateSandboxSessionPayload,
   SandboxHostEnv,
@@ -567,6 +568,17 @@ function serveGuiStyle(): Response {
   });
 }
 
+function serveComputerIcon(): Response {
+  return new Response(computerIconSvg, {
+    headers: {
+      "Content-Type": "image/svg+xml",
+      "Cache-Control": "public, max-age=31536000, immutable",
+    },
+  });
+}
+
+app.get("/icons/computer.svg", serveComputerIcon);
+app.get("/gui/icons/computer.svg", serveComputerIcon);
 app.get("/gui", serveGuiApp);
 app.get("/gui/", serveGuiApp);
 

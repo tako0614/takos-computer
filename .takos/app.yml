@@ -9,7 +9,7 @@ publish:
     title: Computer
     spec:
       description: Browser automation and sandbox computer
-      icon: C
+      icon: /icons/computer.svg
       category: agent
       sortOrder: 100
   - name: takos-computer-api
@@ -34,6 +34,7 @@ publish:
 
 compute:
   web:
+    icon: /icons/computer.svg
     readiness: /readyz
     env:
       TAKOS_TRUST_ROUTED_GUI_API: "1"
