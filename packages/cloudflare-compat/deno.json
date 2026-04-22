@@ -5,6 +5,7 @@
     ".": "./src/index.ts"
   },
   "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.13",
     "@cloudflare/workers-types": "npm:@cloudflare/workers-types@^4.20260118.0",
     "hono": "npm:hono@^4.11.10"
   },

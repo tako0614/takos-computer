@@ -6,26 +6,26 @@
  * - Consistent error handling
  */
 
-import type { Context, Next, Env, ErrorHandler } from 'hono';
+import type { Context, Env, ErrorHandler, MiddlewareHandler, Next } from "hono";
 import {
-  verifyServiceToken,
   type ServiceTokenPayloadWithClaims,
-} from '../jwt.ts';
+  verifyServiceToken,
+} from "../jwt.ts";
 
 export type { ServiceTokenPayloadWithClaims };
 import {
-  AppError,
+  type AppError,
   AuthenticationError,
+  type ErrorCode,
   ErrorCodes,
+  type ErrorResponse,
   InternalError,
   isAppError,
   logError,
   NotFoundError,
   RateLimitError,
   ServiceUnavailableError,
-  type ErrorCode,
-  type ErrorResponse,
-} from '../errors.ts';
+} from "../errors.ts";
 
 // =============================================================================
 // Context variable types for Hono
@@ -44,7 +44,7 @@ import {
 export interface ServiceTokenEnv extends Env {
   Variables: {
     serviceToken: ServiceTokenPayloadWithClaims;
-    serviceAuthMethod: 'jwt';
+    serviceAuthMethod: "jwt";
   };
 }
 
@@ -72,9 +72,9 @@ export interface ServiceTokenConfig {
  * Extract service token from Authorization header.
  */
 export function getServiceTokenFromHeader(c: Context): string | null {
-  const authHeader = c.req.header('Authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    return authHeader.slice('Bearer '.length).trim();
+  const authHeader = c.req.header("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    return authHeader.slice("Bearer ".length).trim();
   }
   return null;
 }
@@ -83,7 +83,7 @@ export function getServiceTokenFromHeader(c: Context): string | null {
  * Check if the token looks like a JWT (has 3 parts separated by dots)
  */
 function isJwtFormat(token: string): boolean {
-  const parts = token.split('.');
+  const parts = token.split(".");
   return parts.length === 3;
 }
 
@@ -102,12 +102,14 @@ function isJwtFormat(token: string): boolean {
  * app.use('*', createServiceTokenMiddleware({ jwtPublicKey: '...' }));
  * ```
  */
-export function createServiceTokenMiddleware(config: ServiceTokenConfig) {
+export function createServiceTokenMiddleware(
+  config: ServiceTokenConfig,
+): MiddlewareHandler {
   const {
     jwtPublicKey,
     expectedIssuer,
     expectedAudience,
-    skipPaths = ['/health'],
+    skipPaths = ["/health"],
     clockToleranceSeconds = 30,
   } = config;
 
@@ -120,24 +122,26 @@ export function createServiceTokenMiddleware(config: ServiceTokenConfig) {
     }
 
     if (!jwtPublicKey) {
-      const error = new ServiceUnavailableError('Service token not configured');
+      const error = new ServiceUnavailableError("Service token not configured");
       return c.json(error.toResponse(), error.statusCode as 503);
     }
 
     if (!expectedIssuer || !expectedAudience) {
-      const error = new ServiceUnavailableError('JWT verification requires expectedIssuer and expectedAudience');
+      const error = new ServiceUnavailableError(
+        "JWT verification requires expectedIssuer and expectedAudience",
+      );
       return c.json(error.toResponse(), error.statusCode as 503);
     }
 
     // Extract token from request
     const token = getServiceTokenFromHeader(c);
     if (!token) {
-      const error = new AuthenticationError('Authorization token is required');
+      const error = new AuthenticationError("Authorization token is required");
       return c.json(error.toResponse(), error.statusCode as 401);
     }
 
     if (!isJwtFormat(token)) {
-      const error = new AuthenticationError('Service token must be a JWT');
+      const error = new AuthenticationError("Service token must be a JWT");
       return c.json(error.toResponse(), error.statusCode as 401);
     }
 
@@ -150,13 +154,13 @@ export function createServiceTokenMiddleware(config: ServiceTokenConfig) {
     });
 
     if (result.valid && result.payload) {
-      c.set('serviceToken', result.payload);
-      c.set('serviceAuthMethod', 'jwt' as const);
+      c.set("serviceToken", result.payload);
+      c.set("serviceAuthMethod", "jwt" as const);
       await next();
       return;
     }
 
-    const error = new AuthenticationError(result.error || 'Invalid JWT token');
+    const error = new AuthenticationError(result.error || "Invalid JWT token");
     return c.json(error.toResponse(), error.statusCode as 401);
   };
 }
@@ -189,7 +193,7 @@ export interface ErrorHandlerOptions {
  * ```
  */
 export function createErrorHandler(
-  options: ErrorHandlerOptions = {}
+  options: ErrorHandlerOptions = {},
 ): ErrorHandler {
   const { includeStack = false, logger = logError, transformError } = options;
 
@@ -206,9 +210,9 @@ export function createErrorHandler(
       logger(err, {
         path,
         method: c.req.method,
-        requestId: c.req.header('x-request-id'),
+        requestId: c.req.header("x-request-id"),
       });
-      appError = new InternalError('An unexpected error occurred');
+      appError = new InternalError("An unexpected error occurred");
     }
 
     // Build response
@@ -221,7 +225,7 @@ export function createErrorHandler(
 
     // Set special headers for rate limiting
     if (appError instanceof RateLimitError && appError.retryAfter) {
-      c.header('Retry-After', String(appError.retryAfter));
+      c.header("Retry-After", String(appError.retryAfter));
     }
 
     return c.json(response, appError.statusCode as 500);
@@ -240,8 +244,8 @@ export function createErrorHandler(
  * app.notFound(notFoundHandler);
  * ```
  */
-export function notFoundHandler(c: Context) {
-  const error = new NotFoundError('Route');
+export function notFoundHandler(c: Context): Response {
+  const error = new NotFoundError("Route");
   return c.json(error.toResponse(), 404);
 }
 
@@ -252,7 +256,7 @@ export function notFoundHandler(c: Context) {
 function buildErrorBody(
   message: string,
   code: ErrorCode,
-  details?: unknown
+  details?: unknown,
 ): ErrorResponse {
   return {
     error: {
@@ -269,8 +273,8 @@ function buildErrorBody(
 export function badRequest(
   c: Context,
   message: string,
-  details?: unknown
-) {
+  details?: unknown,
+): Response {
   return c.json(buildErrorBody(message, ErrorCodes.BAD_REQUEST, details), 400);
 }
 
@@ -279,16 +283,20 @@ export function badRequest(
  */
 export function notFound(
   c: Context,
-  message = 'Not found',
-  details?: unknown
-) {
+  message = "Not found",
+  details?: unknown,
+): Response {
   return c.json(buildErrorBody(message, ErrorCodes.NOT_FOUND, details), 404);
 }
 
 /**
  * 403 Forbidden
  */
-export function forbidden(c: Context, message = 'Access denied', details?: unknown) {
+export function forbidden(
+  c: Context,
+  message = "Access denied",
+  details?: unknown,
+): Response {
   return c.json(buildErrorBody(message, ErrorCodes.FORBIDDEN, details), 403);
 }
 
@@ -297,8 +305,11 @@ export function forbidden(c: Context, message = 'Access denied', details?: unkno
  */
 export function internalError(
   c: Context,
-  message = 'Internal server error',
-  details?: unknown
-) {
-  return c.json(buildErrorBody(message, ErrorCodes.INTERNAL_ERROR, details), 500);
+  message = "Internal server error",
+  details?: unknown,
+): Response {
+  return c.json(
+    buildErrorBody(message, ErrorCodes.INTERNAL_ERROR, details),
+    500,
+  );
 }

@@ -1,0 +1,64 @@
+# takos-sandbox-host Worker configuration
+# Hosts SandboxSessionContainer (CF Containers sidecar for takos-sandbox).
+# Called via SANDBOX_HOST service binding from takos (main worker).
+#
+# The sandbox container provides shell, filesystem, and process tools via MCP.
+#
+# OSS-safe deployment template. Replace placeholder IDs and service
+# names to match your deployment.
+#
+# Required secrets in both prod and staging:
+# - SANDBOX_HOST_AUTH_TOKEN
+# - MCP_AUTH_TOKEN (worker-to-container /mcp auth only)
+# Optional Takos CLI env injected into the sandbox container:
+# - TAKOS_TOKEN
+# - TAKOS_API_URL
+
+name = "takos-sandbox-host"
+main = "../packages/computer-hosts/src/sandbox-host.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolution"]
+
+[observability]
+enabled = true
+
+# Container DO binding
+[[durable_objects.bindings]]
+name = "SANDBOX_CONTAINER"
+class_name = "SandboxSessionContainer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SandboxSessionContainer"]
+
+# Container configuration — basic: 0.25 vCPU / 1 GiB, up to 100 instances
+[[containers]]
+class_name = "SandboxSessionContainer"
+image = "../apps/sandbox/Dockerfile"
+image_build_context = ".."
+instance_type = "basic"
+max_instances = 100
+
+# KV for session index
+[[kv_namespaces]]
+binding = "SESSION_INDEX"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[env.staging]
+name = "takos-sandbox-host-staging"
+workers_dev = true
+
+[[env.staging.durable_objects.bindings]]
+name = "SANDBOX_CONTAINER"
+class_name = "SandboxSessionContainer"
+
+[[env.staging.kv_namespaces]]
+binding = "SESSION_INDEX"
+id = "REPLACE_WITH_STAGING_KV_NAMESPACE_ID"
+
+[[env.staging.containers]]
+class_name = "SandboxSessionContainer"
+image = "../apps/sandbox/Dockerfile"
+image_build_context = ".."
+instance_type = "basic"
+max_instances = 10

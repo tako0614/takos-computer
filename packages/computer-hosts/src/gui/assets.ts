@@ -1,15 +1,24 @@
 /**
  * GUI asset loader.
  *
- * Wrangler bundles with esbuild. We use the `text` loader (configured via
- * wrangler rules) to import HTML/CSS files as strings.
+ * The SolidJS dashboard build writes `assets.generated.ts` so the Worker can
+ * import the dashboard HTML in Deno tests and in Wrangler without raw-loader
+ * support.
  */
 
-// @ts-expect-error — text loader import
-import dashboardHtml from './dashboard.html';
-// @ts-expect-error — text loader import
-import viewerHtml from './viewer.html';
-// @ts-expect-error — text loader import
-import styleCss from './style.css';
+import { appHtml } from "./assets.generated.ts";
 
-export { dashboardHtml, viewerHtml, styleCss };
+const styleCss = `
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  margin: 0;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+code {
+  color: #bfdbfe;
+}
+`;
+
+export { appHtml, styleCss };

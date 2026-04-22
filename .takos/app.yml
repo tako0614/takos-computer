@@ -1,90 +1,99 @@
-apiVersion: takos.dev/v1alpha1
-kind: App
-metadata:
-  name: takos-computer
-spec:
-  version: "1.0.0"
-  description: Browser automation and agent executor
-  category: service
-  tags:
-    - browser
-    - executor
-    - agent
-    - playwright
+name: takos-computer
+version: "2.0.0"
 
-  containers:
-    browser:
-      dockerfile: packages/browser-service/Dockerfile
-      port: 8080
-      instanceType: standard-2
-      maxInstances: 25
-    executor:
-      dockerfile: packages/executor-service/Dockerfile
-      port: 8080
-      instanceType: basic
-      maxInstances: 100
+publish:
+  - name: computer-ui
+    publisher: web
+    type: UiSurface
+    path: /gui
+    title: Computer
+    spec:
+      description: Browser automation and sandbox computer
+      icon: C
+      category: agent
+      sortOrder: 100
+  - name: takos-computer-api
+    publisher: takos
+    type: api-key
+    spec:
+      scopes:
+        - spaces:read
+        - files:read
+        - files:write
+        - memories:read
+        - memories:write
+        - threads:read
+        - threads:write
+        - runs:read
+        - runs:write
+        - agents:execute
+        - repos:read
+        - repos:write
+        - mcp:invoke
+        - events:subscribe
 
-  workers:
-    browser-host:
-      containers: [browser]
-      build:
-        fromWorkflow:
-          path: .takos/workflows/deploy.yml
-          job: build-browser-host
-          artifact: browser-host
-          artifactPath: dist/browser-host.js
-    executor-host:
-      containers: [executor]
-      build:
-        fromWorkflow:
-          path: .takos/workflows/deploy.yml
-          job: build-executor-host
-          artifact: executor-host
-          artifactPath: dist/executor-host.js
-      bindings:
-        services:
-          - takos-control
+compute:
+  web:
+    readiness: /readyz
+    env:
+      TAKOS_TRUST_ROUTED_GUI_API: "1"
+    consume:
+      - publication: takos-computer-api
+        env:
+          endpoint: TAKOS_API_URL
+          apiKey: TAKOS_TOKEN
+    build:
+      fromWorkflow:
+        path: .takos/workflows/deploy.yml
+        job: build-sandbox-host
+        artifact: sandbox-host
+        artifactPath: dist/sandbox-host.js
+    containers:
+      sandbox:
+        image: apps/sandbox/Dockerfile
+        dockerfile: apps/sandbox/Dockerfile
+        port: 8080
+        healthCheck:
+          path: /healthz
+        cloudflare:
+          container:
+            binding: SANDBOX_CONTAINER
+            className: SandboxSessionContainer
+            instanceType: basic
+            maxInstances: 100
+            imageBuildContext: .
+            migrationTag: v1
 
-  routes:
-    - name: browser-gui
-      target: browser-host
-      path: /gui
-    - name: browser-api
-      target: browser-host
-      path: /api
-    - name: browser-session
-      target: browser-host
-      path: /session
-    - name: browser-mcp
-      target: browser-host
-      path: /mcp
-    - name: executor-api
-      target: executor-host
-      path: /dispatch
+resources:
+  session-index:
+    type: key-value
+    bindings:
+      web: SESSION_INDEX
+  sandbox-host-token:
+    type: secret
+    generate: true
+    bind: SANDBOX_HOST_AUTH_TOKEN
+    to: web
+  sandbox-mcp-token:
+    type: secret
+    generate: true
+    bind: MCP_AUTH_TOKEN
+    to: web
 
-  resources:
-    mcp-auth-secret:
-      type: secretRef
-      binding: MCP_AUTH_TOKEN
-      generate: true
-
-  env:
-    required:
-      - TAKOS_ACCESS_TOKEN
-    inject:
-      BROWSER_API_URL: "{{routes.browser-api.url}}"
-      EXECUTOR_API_URL: "{{routes.executor-api.url}}"
-
-  takos:
-    scopes:
-      - threads:read
-      - threads:write
-      - runs:read
-      - runs:write
-      - repos:read
-
-  mcpServers:
-    - name: takos-computer
-      route: browser-mcp
-      transport: streamable-http
-      authSecretRef: mcp-auth-secret
+routes:
+  - target: web
+    path: /healthz
+  - target: web
+    path: /health
+  - target: web
+    path: /readyz
+  - target: web
+    path: /create
+  - target: web
+    path: /gui
+  - target: web
+    path: /session
+  - target: web
+    path: /session/:id/mcp
+  - target: web
+    path: /gui/api/sandbox-session/:id/mcp

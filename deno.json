@@ -1,17 +1,11 @@
 {
   "workspace": [
-    "./apps/browser",
-    "./apps/executor",
+    "./apps/sandbox",
     "./packages/common",
-    "./packages/actions-engine",
-    "./packages/agent-core",
-    "./packages/browser-service",
     "./packages/cloudflare-compat",
-    "./packages/computer-core",
-    "./packages/computer-agent",
     "./packages/computer-hosts",
-    "./packages/executor-service",
-    "./scripts"
+    "./packages/sandbox-service",
+    "./packages/dashboard"
   ],
   "compilerOptions": {
     "strict": true,
@@ -19,10 +13,23 @@
     "types": ["node"]
   },
   "tasks": {
-    "build:all": "echo 'No tsc build needed — Deno runs .ts directly'",
+    "build:all": "deno task --cwd packages/computer-hosts build:all",
+    "check": "deno check packages/common/src/**/*.ts packages/cloudflare-compat/src/**/*.ts packages/dashboard/src/**/*.ts packages/dashboard/src/**/*.tsx packages/dashboard/scripts/**/*.ts packages/dashboard/vite.config.ts packages/computer-hosts/src/**/*.ts packages/computer-hosts/scripts/**/*.ts packages/sandbox-service/src/**/*.ts",
     "test:all": "deno test --allow-all --parallel",
     "lint": "deno lint",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check"
+  },
+  "lint": {
+    "exclude": [
+      "dist"
+    ]
+  },
+  "fmt": {
+    "exclude": [
+      "dist",
+      "packages/computer-hosts/src/gui/app.html",
+      "packages/computer-hosts/src/gui/assets.generated.ts"
+    ]
   }
 }

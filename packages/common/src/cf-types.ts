@@ -32,13 +32,17 @@ export interface D1PreparedStatement {
   first<T = Record<string, unknown>>(colName?: string): Promise<T | null>;
   run(): Promise<D1Result>;
   all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
-  raw<T = unknown[]>(options: { columnNames: true }): Promise<[string[], ...T[]]>;
+  raw<T = unknown[]>(
+    options: { columnNames: true },
+  ): Promise<[string[], ...T[]]>;
   raw<T = unknown[]>(options?: { columnNames?: false }): Promise<T[]>;
 }
 
 export interface D1Database {
   prepare(query: string): D1PreparedStatement;
-  batch<T = Record<string, unknown>>(statements: D1PreparedStatement[]): Promise<D1Result<T>[]>;
+  batch<T = Record<string, unknown>>(
+    statements: D1PreparedStatement[],
+  ): Promise<D1Result<T>[]>;
   exec(query: string): Promise<D1ExecResult>;
 }
 
@@ -89,7 +93,13 @@ export interface R2Bucket {
   get(key: string): Promise<R2Object | null>;
   put(
     key: string,
-    value: ReadableStream | ArrayBuffer | ArrayBufferView | string | Blob | null,
+    value:
+      | ReadableStream
+      | ArrayBuffer
+      | ArrayBufferView
+      | string
+      | Blob
+      | null,
     options?: R2PutOptions,
   ): Promise<R2ObjectMetadata>;
   delete(key: string | string[]): Promise<void>;
@@ -157,13 +167,19 @@ export interface VectorizeQueryResult {
 export interface VectorizeQueryOptions {
   topK?: number;
   namespace?: string;
-  filter?: Record<string, string | number | boolean | Array<string | number | boolean>>;
+  filter?: Record<
+    string,
+    string | number | boolean | Array<string | number | boolean>
+  >;
   returnValues?: boolean;
-  returnMetadata?: 'none' | 'indexed' | 'all';
+  returnMetadata?: "none" | "indexed" | "all";
 }
 
 export interface VectorizeIndex {
-  query(vector: number[], options?: VectorizeQueryOptions): Promise<VectorizeQueryResult>;
+  query(
+    vector: number[],
+    options?: VectorizeQueryOptions,
+  ): Promise<VectorizeQueryResult>;
   insert(vectors: VectorizeVector[]): Promise<{ count: number; ids: string[] }>;
   upsert(vectors: VectorizeVector[]): Promise<{ count: number; ids: string[] }>;
   deleteByIds(ids: string[]): Promise<{ count: number; ids: string[] }>;
@@ -184,7 +200,7 @@ export interface Ai {
 // ---------------------------------------------------------------------------
 
 export interface QueueSendOptions {
-  contentType?: 'text' | 'bytes' | 'json' | 'v8';
+  contentType?: "text" | "bytes" | "json" | "v8";
   delaySeconds?: number;
 }
 
@@ -207,19 +223,32 @@ export interface Fetcher {
 
 export interface KVNamespace {
   get(key: string): Promise<string | null>;
-  get(key: string, options: { type: 'text' }): Promise<string | null>;
-  get<T = unknown>(key: string, options: { type: 'json' }): Promise<T | null>;
-  get(key: string, options: { type: 'arrayBuffer' }): Promise<ArrayBuffer | null>;
-  get(key: string, options: { type: 'stream' }): Promise<ReadableStream | null>;
+  get(key: string, options: { type: "text" }): Promise<string | null>;
+  get<T = unknown>(key: string, options: { type: "json" }): Promise<T | null>;
+  get(
+    key: string,
+    options: { type: "arrayBuffer" },
+  ): Promise<ArrayBuffer | null>;
+  get(key: string, options: { type: "stream" }): Promise<ReadableStream | null>;
   put(
     key: string,
     value: string | ArrayBuffer | ReadableStream,
-    options?: { expirationTtl?: number; expiration?: number; metadata?: unknown },
+    options?: {
+      expirationTtl?: number;
+      expiration?: number;
+      metadata?: unknown;
+    },
   ): Promise<void>;
   delete(key: string): Promise<void>;
   list(options?: {
     prefix?: string;
     limit?: number;
     cursor?: string;
-  }): Promise<{ keys: { name: string; expiration?: number; metadata?: unknown }[]; list_complete: boolean; cursor?: string }>;
+  }): Promise<
+    {
+      keys: { name: string; expiration?: number; metadata?: unknown }[];
+      list_complete: boolean;
+      cursor?: string;
+    }
+  >;
 }

@@ -35,13 +35,18 @@ export class LocalHostContainerRuntime<Env = unknown> {
   async destroy(): Promise<void> {}
 }
 
-const isNodeLikeRuntime =
-  typeof process !== 'undefined'
-  && Boolean(process.versions?.node);
+async function importContainerRuntime(): Promise<
+  typeof import("@cloudflare/containers") | null
+> {
+  try {
+    return await import("@cloudflare/containers");
+  } catch (error) {
+    if (typeof Deno !== "undefined") return null;
+    throw error;
+  }
+}
 
-const runtimeModule = isNodeLikeRuntime
-  ? null
-  : await import('@cloudflare/containers');
+const runtimeModule = await importContainerRuntime();
 
 export const HostContainerRuntime = (
   runtimeModule?.Container ?? LocalHostContainerRuntime

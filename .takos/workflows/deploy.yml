@@ -1,0 +1,10 @@
+name: deploy
+jobs:
+  build-sandbox-host:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build sandbox host bundle
+        run: cd packages/computer-hosts && deno task build:all
+    artifacts:
+      sandbox-host:
+        path: dist/sandbox-host.js

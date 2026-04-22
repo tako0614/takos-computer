@@ -1,15 +1,13 @@
-import { Buffer } from 'node:buffer';
-import * as crypto from 'node:crypto';
-import { assertEquals, assert, assertNotEquals } from 'jsr:@std/assert';
-import {
-  verifyServiceToken,
-} from '../jwt.ts';
+import { Buffer } from "node:buffer";
+import * as crypto from "node:crypto";
+import { assert, assertEquals, assertNotEquals } from "@std/assert";
+import { verifyServiceToken } from "../jwt.ts";
 
 function generateTestKeyPair(modulusLength = 1024) {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
     modulusLength,
-    publicKeyEncoding: { type: 'spki', format: 'pem' },
-    privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+    publicKeyEncoding: { type: "spki", format: "pem" },
+    privateKeyEncoding: { type: "pkcs8", format: "pem" },
   });
   return { privateKey, publicKey };
 }
@@ -38,10 +36,10 @@ function signTestToken(options: {
 
   const now = Math.floor(Date.now() / 1000);
 
-  const header: Record<string, string> = { alg: 'RS256', typ: 'JWT' };
+  const header: Record<string, string> = { alg: "RS256", typ: "JWT" };
   if (kid) header.kid = kid;
 
-  const RESERVED_CLAIMS = new Set(['iss', 'sub', 'aud', 'iat', 'exp', 'jti']);
+  const RESERVED_CLAIMS = new Set(["iss", "sub", "aud", "iat", "exp", "jti"]);
   const filteredCustomClaims: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(customClaims)) {
     if (!RESERVED_CLAIMS.has(key)) {
@@ -56,126 +54,140 @@ function signTestToken(options: {
     aud: audience,
     iat: now,
     exp: now + expiresInSeconds,
-    jti: crypto.randomBytes(16).toString('base64url'),
+    jti: crypto.randomBytes(16).toString("base64url"),
   };
 
-  const encodedHeader = Buffer.from(JSON.stringify(header)).toString('base64url');
-  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const encodedHeader = Buffer.from(JSON.stringify(header)).toString(
+    "base64url",
+  );
+  const encodedPayload = Buffer.from(JSON.stringify(payload)).toString(
+    "base64url",
+  );
   const signingInput = `${encodedHeader}.${encodedPayload}`;
 
-  const sign = crypto.createSign('RSA-SHA256');
+  const sign = crypto.createSign("RSA-SHA256");
   sign.update(signingInput);
   sign.end();
   const signature = sign.sign(privateKey);
-  const encodedSignature = signature.toString('base64url');
+  const encodedSignature = signature.toString("base64url");
 
   return `${signingInput}.${encodedSignature}`;
 }
 
-function decodeToken(token: string): { header: Record<string, unknown>; payload: Record<string, unknown> } | null {
-  const parts = token.split('.');
+function decodeToken(
+  token: string,
+):
+  | { header: Record<string, unknown>; payload: Record<string, unknown> }
+  | null {
+  const parts = token.split(".");
   if (parts.length !== 3) return null;
   try {
-    const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf-8'));
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+    const header = JSON.parse(
+      Buffer.from(parts[0], "base64url").toString("utf-8"),
+    );
+    const payload = JSON.parse(
+      Buffer.from(parts[1], "base64url").toString("utf-8"),
+    );
     return { header, payload };
   } catch {
     return null;
   }
 }
 
-Deno.test('service JWT - signs and verifies a valid RS256 token', () => {
+Deno.test("service JWT - signs and verifies a valid RS256 token", () => {
   const { privateKey, publicKey } = generateTestKeyPair(1024);
 
   const token = signTestToken({
-    issuer: 'takos-control',
-    subject: 'service-runtime',
-    audience: 'takos-runtime',
+    issuer: "takos-control",
+    subject: "service-runtime",
+    audience: "takos-runtime",
     privateKey,
     expiresInSeconds: 120,
-    customClaims: { role: 'internal' },
+    customClaims: { role: "internal" },
   });
 
   const result = verifyServiceToken({
     token,
     publicKey,
-    expectedAudience: 'takos-runtime',
-    expectedIssuer: 'takos-control',
+    expectedAudience: "takos-runtime",
+    expectedIssuer: "takos-control",
   });
 
   assertEquals(result.valid, true);
-  assertEquals(result.payload?.sub, 'service-runtime');
-  assertEquals(result.payload?.role, 'internal');
+  assertEquals(result.payload?.sub, "service-runtime");
+  assertEquals(result.payload?.role, "internal");
 });
 
-Deno.test('service JWT - rejects token when audience mismatches', () => {
+Deno.test("service JWT - rejects token when audience mismatches", () => {
   const { privateKey, publicKey } = generateTestKeyPair(1024);
 
   const token = signTestToken({
-    issuer: 'takos-control',
-    subject: 'service-runtime',
-    audience: 'takos-runtime',
+    issuer: "takos-control",
+    subject: "service-runtime",
+    audience: "takos-runtime",
     privateKey,
   });
 
   const result = verifyServiceToken({
     token,
     publicKey,
-    expectedAudience: 'different-service',
-    expectedIssuer: 'takos-control',
+    expectedAudience: "different-service",
+    expectedIssuer: "takos-control",
   });
 
   assertEquals(result.valid, false);
-  assert(result.error?.includes('Invalid audience'));
+  assert(result.error?.includes("Invalid audience"));
 });
 
-Deno.test('service JWT - rejects tampered token payload', () => {
+Deno.test("service JWT - rejects tampered token payload", () => {
   const { privateKey, publicKey } = generateTestKeyPair(1024);
 
   const token = signTestToken({
-    issuer: 'takos-control',
-    subject: 'service-runtime',
-    audience: 'takos-runtime',
+    issuer: "takos-control",
+    subject: "service-runtime",
+    audience: "takos-runtime",
     privateKey,
   });
 
-  const [header, payload, signature] = token.split('.');
-  const tamperedPayload = Buffer.from(JSON.stringify({ aud: 'evil' })).toString('base64url');
-  const tamperedToken = [header, tamperedPayload, signature].join('.');
+  const [header, payload, signature] = token.split(".");
+  const tamperedPayload = Buffer.from(JSON.stringify({ aud: "evil" })).toString(
+    "base64url",
+  );
+  const tamperedToken = [header, tamperedPayload, signature].join(".");
 
   const result = verifyServiceToken({
     token: tamperedToken,
     publicKey,
-    expectedAudience: 'takos-runtime',
-    expectedIssuer: 'takos-control',
+    expectedAudience: "takos-runtime",
+    expectedIssuer: "takos-control",
   });
 
   assertEquals(result.valid, false);
-  assertEquals(result.error, 'Invalid signature');
+  assertEquals(result.error, "Invalid signature");
   assertNotEquals(payload, tamperedPayload);
 });
 
-Deno.test('service JWT - returns null for malformed token in decodeToken', () => {
-  assertEquals(decodeToken('not-a-jwt'), null);
+Deno.test("service JWT - returns null for malformed token in decodeToken", () => {
+  assertEquals(decodeToken("not-a-jwt"), null);
 });
 
-Deno.test('service JWT - does not allow reserved claims to be overridden by customClaims', () => {
+Deno.test("service JWT - does not allow reserved claims to be overridden by customClaims", () => {
   const { privateKey, publicKey } = generateTestKeyPair(1024);
 
   const token = signTestToken({
-    issuer: 'takos-control',
-    subject: 'service-runtime',
-    audience: 'takos-runtime',
+    issuer: "takos-control",
+    subject: "service-runtime",
+    audience: "takos-runtime",
     privateKey,
     expiresInSeconds: 120,
     customClaims: {
-      iss: 'evil-issuer',
-      sub: 'evil-subject',
-      aud: 'evil-audience',
+      iss: "evil-issuer",
+      sub: "evil-subject",
+      aud: "evil-audience",
       exp: 1,
       iat: 1,
-      jti: 'evil-jti',
-      role: 'internal',
+      jti: "evil-jti",
+      role: "internal",
     },
   });
 
@@ -184,24 +196,24 @@ Deno.test('service JWT - does not allow reserved claims to be overridden by cust
 
   const payload = decoded?.payload as Record<string, unknown>;
 
-  assertEquals(payload.iss, 'takos-control');
-  assertEquals(payload.sub, 'service-runtime');
-  assertEquals(payload.aud, 'takos-runtime');
-  assertNotEquals(payload.jti, 'evil-jti');
+  assertEquals(payload.iss, "takos-control");
+  assertEquals(payload.sub, "service-runtime");
+  assertEquals(payload.aud, "takos-runtime");
+  assertNotEquals(payload.jti, "evil-jti");
   assertNotEquals(payload.iat, 1);
   assertNotEquals(payload.exp, 1);
   assertEquals(payload.exp, (payload.iat as number) + 120);
 
   // Non-reserved custom claims still pass through.
-  assertEquals(payload.role, 'internal');
+  assertEquals(payload.role, "internal");
 
   const verified = verifyServiceToken({
     token,
     publicKey,
-    expectedAudience: 'takos-runtime',
-    expectedIssuer: 'takos-control',
+    expectedAudience: "takos-runtime",
+    expectedIssuer: "takos-control",
   });
 
   assertEquals(verified.valid, true);
-  assertEquals(verified.payload?.role, 'internal');
+  assertEquals(verified.payload?.role, "internal");
 });

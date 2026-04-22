@@ -6,9 +6,13 @@
  * official types, while keeping the dependency boundary in one place.
  */
 
-import type { R2Object, VectorizeMatch, VectorizeMatches } from '@cloudflare/workers-types';
+import type {
+  R2Object,
+  VectorizeMatch,
+  VectorizeMatches,
+} from "@cloudflare/workers-types";
 
-export type { ExecutionContext } from 'hono';
+export type { ExecutionContext } from "hono";
 
 export type {
   Ai,
@@ -36,7 +40,7 @@ export type {
   VectorizeMatch,
   VectorizeQueryOptions,
   VectorizeVector,
-} from '@cloudflare/workers-types';
+} from "@cloudflare/workers-types";
 
 export type R2ObjectMetadata = R2Object;
 

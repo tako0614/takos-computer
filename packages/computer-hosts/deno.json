@@ -3,14 +3,20 @@
   "version": "1.0.0",
   "exports": {
     ".": "./src/index.ts",
-    "./executor-host": "./src/executor-host.ts",
-    "./browser-host": "./src/browser-session-host.ts",
-    "./executor-dispatch": "./src/executor-dispatch.ts",
-    "./executor-proxy-config": "./src/executor-proxy-config.ts",
-    "./browser-session-types": "./src/browser-session-types.ts"
+    "./sandbox-host": "./src/sandbox-host.ts",
+    "./sandbox-session-types": "./src/sandbox-session-types.ts",
+    "./proxy-token": "./src/proxy-token.ts"
   },
   "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.13",
     "@cloudflare/containers": "npm:@cloudflare/containers@^0.1.1",
+    "esbuild": "npm:esbuild@0.25.5",
     "hono": "npm:hono@^4.7.0"
+  },
+  "tasks": {
+    "test": "deno test --allow-all src/",
+    "build:dashboard-assets": "cd ../dashboard && deno task build",
+    "build:sandbox-host": "deno run -A scripts/build-host.ts sandbox",
+    "build:all": "deno task build:dashboard-assets && deno task build:sandbox-host"
   }
 }

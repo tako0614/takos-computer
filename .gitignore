@@ -1,5 +1,7 @@
 node_modules/
 dist/
+!/dist/
+!/dist/sandbox-host.js
 .wrangler/
 .env
 .env.*

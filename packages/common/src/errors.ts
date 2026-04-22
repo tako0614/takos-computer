@@ -9,31 +9,30 @@
  * - details: Optional field-level or additional details
  */
 
-import type { Logger } from './logger.ts';
+import type { Logger } from "./logger.ts";
 
 /**
  * Standard error codes for consistent client handling
  */
 export const ErrorCodes = {
   // 4xx Client Errors
-  BAD_REQUEST: 'BAD_REQUEST',
-  UNAUTHORIZED: 'UNAUTHORIZED',
-  PAYMENT_REQUIRED: 'PAYMENT_REQUIRED',
-  FORBIDDEN: 'FORBIDDEN',
-  NOT_FOUND: 'NOT_FOUND',
-  CONFLICT: 'CONFLICT',
-  GONE: 'GONE',
-  VALIDATION_ERROR: 'VALIDATION_ERROR',
-  RATE_LIMITED: 'RATE_LIMITED',
-  PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
+  BAD_REQUEST: "BAD_REQUEST",
+  UNAUTHORIZED: "UNAUTHORIZED",
+  PAYMENT_REQUIRED: "PAYMENT_REQUIRED",
+  FORBIDDEN: "FORBIDDEN",
+  NOT_FOUND: "NOT_FOUND",
+  CONFLICT: "CONFLICT",
+  GONE: "GONE",
+  VALIDATION_ERROR: "VALIDATION_ERROR",
+  RATE_LIMITED: "RATE_LIMITED",
+  PAYLOAD_TOO_LARGE: "PAYLOAD_TOO_LARGE",
 
   // 5xx Server Errors
-  INTERNAL_ERROR: 'INTERNAL_ERROR',
-  NOT_IMPLEMENTED: 'NOT_IMPLEMENTED',
-  SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE',
-  BAD_GATEWAY: 'BAD_GATEWAY',
-  GATEWAY_TIMEOUT: 'GATEWAY_TIMEOUT',
-
+  INTERNAL_ERROR: "INTERNAL_ERROR",
+  NOT_IMPLEMENTED: "NOT_IMPLEMENTED",
+  SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
+  BAD_GATEWAY: "BAD_GATEWAY",
+  GATEWAY_TIMEOUT: "GATEWAY_TIMEOUT",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
@@ -70,7 +69,7 @@ export class AppError extends Error {
     message: string,
     code: ErrorCode = ErrorCodes.INTERNAL_ERROR,
     statusCode = 500,
-    details?: unknown
+    details?: unknown,
   ) {
     super(message);
     this.name = this.constructor.name;
@@ -95,14 +94,13 @@ export class AppError extends Error {
       },
     };
   }
-
 }
 
 /**
  * 400 Bad Request - Invalid request syntax or parameters
  */
 export class BadRequestError extends AppError {
-  constructor(message = 'Bad request', details?: unknown) {
+  constructor(message = "Bad request", details?: unknown) {
     super(message, ErrorCodes.BAD_REQUEST, 400, details);
   }
 }
@@ -111,7 +109,7 @@ export class BadRequestError extends AppError {
  * 401 Unauthorized - Authentication required or invalid
  */
 export class AuthenticationError extends AppError {
-  constructor(message = 'Authentication required', details?: unknown) {
+  constructor(message = "Authentication required", details?: unknown) {
     super(message, ErrorCodes.UNAUTHORIZED, 401, details);
   }
 }
@@ -120,7 +118,7 @@ export class AuthenticationError extends AppError {
  * 402 Payment Required - Payment is required to access the resource
  */
 export class PaymentRequiredError extends AppError {
-  constructor(message = 'Payment required', details?: unknown) {
+  constructor(message = "Payment required", details?: unknown) {
     super(message, ErrorCodes.PAYMENT_REQUIRED, 402, details);
   }
 }
@@ -129,7 +127,7 @@ export class PaymentRequiredError extends AppError {
  * 403 Forbidden - Authenticated but not authorized
  */
 export class AuthorizationError extends AppError {
-  constructor(message = 'Access denied', details?: unknown) {
+  constructor(message = "Access denied", details?: unknown) {
     super(message, ErrorCodes.FORBIDDEN, 403, details);
   }
 }
@@ -138,7 +136,7 @@ export class AuthorizationError extends AppError {
  * 404 Not Found - Resource does not exist
  */
 export class NotFoundError extends AppError {
-  constructor(resource = 'Resource', details?: unknown) {
+  constructor(resource = "Resource", details?: unknown) {
     super(`${resource} not found`, ErrorCodes.NOT_FOUND, 404, details);
   }
 }
@@ -147,7 +145,7 @@ export class NotFoundError extends AppError {
  * 409 Conflict - Resource conflict (e.g., duplicate)
  */
 export class ConflictError extends AppError {
-  constructor(message = 'Resource conflict', details?: unknown) {
+  constructor(message = "Resource conflict", details?: unknown) {
     super(message, ErrorCodes.CONFLICT, 409, details);
   }
 }
@@ -156,7 +154,7 @@ export class ConflictError extends AppError {
  * 410 Gone - Resource no longer available
  */
 export class GoneError extends AppError {
-  constructor(message = 'Resource is no longer available', details?: unknown) {
+  constructor(message = "Resource is no longer available", details?: unknown) {
     super(message, ErrorCodes.GONE, 410, details);
   }
 }
@@ -165,7 +163,7 @@ export class GoneError extends AppError {
  * 413 Payload Too Large - Request payload exceeds limit
  */
 export class PayloadTooLargeError extends AppError {
-  constructor(message = 'Payload too large', details?: unknown) {
+  constructor(message = "Payload too large", details?: unknown) {
     super(message, ErrorCodes.PAYLOAD_TOO_LARGE, 413, details);
   }
 }
@@ -177,18 +175,17 @@ export class ValidationError extends AppError {
   public readonly fieldErrors: ValidationErrorDetail[];
 
   constructor(
-    message = 'Validation failed',
-    fieldErrors: ValidationErrorDetail[] = []
+    message = "Validation failed",
+    fieldErrors: ValidationErrorDetail[] = [],
   ) {
     super(
       message,
       ErrorCodes.VALIDATION_ERROR,
       422,
-      fieldErrors.length > 0 ? { fields: fieldErrors } : undefined
+      fieldErrors.length > 0 ? { fields: fieldErrors } : undefined,
     );
     this.fieldErrors = fieldErrors;
   }
-
 }
 
 /**
@@ -197,7 +194,7 @@ export class ValidationError extends AppError {
 export class RateLimitError extends AppError {
   public readonly retryAfter?: number;
 
-  constructor(message = 'Rate limit exceeded', retryAfter?: number) {
+  constructor(message = "Rate limit exceeded", retryAfter?: number) {
     super(message, ErrorCodes.RATE_LIMITED, 429);
     this.retryAfter = retryAfter;
   }
@@ -207,7 +204,7 @@ export class RateLimitError extends AppError {
  * 500 Internal Server Error - Unexpected server error
  */
 export class InternalError extends AppError {
-  constructor(message = 'Internal server error', details?: unknown) {
+  constructor(message = "Internal server error", details?: unknown) {
     super(message, ErrorCodes.INTERNAL_ERROR, 500, details);
   }
 }
@@ -216,7 +213,7 @@ export class InternalError extends AppError {
  * 501 Not Implemented - Functionality not implemented
  */
 export class NotImplementedError extends AppError {
-  constructor(message = 'Not implemented', details?: unknown) {
+  constructor(message = "Not implemented", details?: unknown) {
     super(message, ErrorCodes.NOT_IMPLEMENTED, 501, details);
   }
 }
@@ -225,7 +222,7 @@ export class NotImplementedError extends AppError {
  * 502 Bad Gateway - Invalid response from upstream service
  */
 export class BadGatewayError extends AppError {
-  constructor(message = 'Bad gateway', details?: unknown) {
+  constructor(message = "Bad gateway", details?: unknown) {
     super(message, ErrorCodes.BAD_GATEWAY, 502, details);
   }
 }
@@ -234,7 +231,7 @@ export class BadGatewayError extends AppError {
  * 503 Service Unavailable - Service temporarily unavailable
  */
 export class ServiceUnavailableError extends AppError {
-  constructor(message = 'Service temporarily unavailable', details?: unknown) {
+  constructor(message = "Service temporarily unavailable", details?: unknown) {
     super(message, ErrorCodes.SERVICE_UNAVAILABLE, 503, details);
   }
 }
@@ -243,7 +240,7 @@ export class ServiceUnavailableError extends AppError {
  * 504 Gateway Timeout - Upstream service timeout
  */
 export class GatewayTimeoutError extends AppError {
-  constructor(message = 'Gateway timeout', details?: unknown) {
+  constructor(message = "Gateway timeout", details?: unknown) {
     super(message, ErrorCodes.GATEWAY_TIMEOUT, 504, details);
   }
 }
@@ -266,21 +263,20 @@ export function normalizeError(error: unknown, logger?: Logger): AppError {
 
   if (error instanceof Error) {
     if (logger) {
-      logger.error('Converting Error to AppError', { error });
+      logger.error("Converting Error to AppError", { error });
     } else {
-      console.error('[normalizeError] Converting Error to AppError:', error);
+      console.error("[normalizeError] Converting Error to AppError:", error);
     }
-    return new InternalError('An unexpected error occurred');
+    return new InternalError("An unexpected error occurred");
   }
 
   if (logger) {
-    logger.error('Converting unknown to AppError', { value: String(error) });
+    logger.error("Converting unknown to AppError", { value: String(error) });
   } else {
-    console.error('[normalizeError] Converting unknown to AppError:', error);
+    console.error("[normalizeError] Converting unknown to AppError:", error);
   }
-  return new InternalError('An unexpected error occurred');
+  return new InternalError("An unexpected error occurred");
 }
-
 
 /**
  * Extract a human-readable message from an unknown thrown value.
@@ -292,7 +288,7 @@ export function normalizeError(error: unknown, logger?: Logger): AppError {
  * (returns the fallback when no meaningful message can be extracted).
  */
 export function getErrorMessage(error: unknown, fallback?: string): string {
-  if (typeof error === 'string' && error.trim()) {
+  if (typeof error === "string" && error.trim()) {
     return error;
   }
 
@@ -300,9 +296,9 @@ export function getErrorMessage(error: unknown, fallback?: string): string {
     return error.message;
   }
 
-  if (typeof error === 'object' && error !== null) {
+  if (typeof error === "object" && error !== null) {
     const candidate = (error as { message?: unknown }).message;
-    if (typeof candidate === 'string' && candidate.trim()) {
+    if (typeof candidate === "string" && candidate.trim()) {
       return candidate;
     }
   }
@@ -313,29 +309,32 @@ export function getErrorMessage(error: unknown, fallback?: string): string {
 /**
  * Log error with full details for server-side debugging
  */
-export function logError(error: unknown, context?: Record<string, unknown>, logger?: Logger): void {
+export function logError(
+  error: unknown,
+  context?: Record<string, unknown>,
+  logger?: Logger,
+): void {
   const errorInfo = isAppError(error)
     ? {
-        name: error.name,
-        code: error.code,
-        message: error.message,
-        statusCode: error.statusCode,
-        details: error.details,
-        stack: error.stack,
-      }
+      name: error.name,
+      code: error.code,
+      message: error.message,
+      statusCode: error.statusCode,
+      details: error.details,
+      stack: error.stack,
+    }
     : {
-        message: error instanceof Error ? error.message : String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      };
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    };
 
   if (logger) {
-    logger.error('Error', { ...errorInfo, ...context });
+    logger.error("Error", { ...errorInfo, ...context });
   } else {
-    console.error('[Error]', {
+    console.error("[Error]", {
       ...errorInfo,
       context,
       timestamp: new Date().toISOString(),
     });
   }
 }
-

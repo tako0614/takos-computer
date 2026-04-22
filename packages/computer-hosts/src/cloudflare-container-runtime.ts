@@ -14,8 +14,8 @@ class LocalHostContainerRuntimeFallback<Env> {
   protected envVars: Record<string, string> = {};
 
   defaultPort = 8080;
-  sleepAfter = '10m';
-  pingEndpoint = 'container/health';
+  sleepAfter = "10m";
+  pingEndpoint = "container/health";
 
   constructor(ctx: DurableObjectState<Record<string, never>>, env: Env) {
     this.ctx = ctx;
@@ -29,15 +29,17 @@ class LocalHostContainerRuntimeFallback<Env> {
   async destroy(): Promise<void> {}
 }
 
-const runningInNode =
-  typeof process !== 'undefined'
-  && !!process.versions?.node;
+const runtimeGlobal = globalThis as typeof globalThis & {
+  process?: { versions?: { node?: string } };
+};
+
+const runningInNode = !!runtimeGlobal.process?.versions?.node;
 
 const cloudflareContainerModule = runningInNode
   ? null
-  : await import('@cloudflare/containers');
+  : await import("@cloudflare/containers");
 
-export const HostContainerRuntime =
-  (cloudflareContainerModule?.Container ?? LocalHostContainerRuntimeFallback);
+export const HostContainerRuntime = cloudflareContainerModule?.Container ??
+  LocalHostContainerRuntimeFallback;
 
 export const Container = HostContainerRuntime;

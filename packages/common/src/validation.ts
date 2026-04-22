@@ -14,13 +14,13 @@
 export function isLocalhost(hostname: string): boolean {
   const lower = hostname.toLowerCase();
   return (
-    lower === 'localhost' ||
-    lower === '127.0.0.1' ||
-    lower === '::1' ||
-    lower.endsWith('.localhost') ||
-    lower.endsWith('.local') ||
-    lower.endsWith('.localdomain') ||
-    lower.endsWith('.internal')
+    lower === "localhost" ||
+    lower === "127.0.0.1" ||
+    lower === "::1" ||
+    lower.endsWith(".localhost") ||
+    lower.endsWith(".local") ||
+    lower.endsWith(".localdomain") ||
+    lower.endsWith(".internal")
   );
 }
 
@@ -77,25 +77,27 @@ export function isPrivateIP(ip: string): boolean {
   }
 
   // IPv6 private ranges
-  if (ip.startsWith('::1')) return true; // Loopback
-  if (ip.startsWith('fe80:')) return true; // Link-local
-  if (ip.startsWith('fc') || ip.startsWith('fd')) return true; // Unique local
+  if (ip.startsWith("::1")) return true; // Loopback
+  if (ip.startsWith("fe80:")) return true; // Link-local
+  if (ip.startsWith("fc") || ip.startsWith("fd")) return true; // Unique local
 
   // IPv4-mapped IPv6 addresses (e.g. ::ffff:192.168.1.1 or ::ffff:0a00:0001)
   const ipLower = ip.toLowerCase();
-  if (ipLower.startsWith('::ffff:')) {
-    const rest = ipLower.slice('::ffff:'.length);
+  if (ipLower.startsWith("::ffff:")) {
+    const rest = ipLower.slice("::ffff:".length);
     // Handle dotted-decimal form: ::ffff:192.168.1.1
     if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(rest)) {
       return isPrivateIP(rest);
     }
     // Handle hex form: ::ffff:c0a8:0101 → convert to dotted-decimal
-    const hexParts = rest.split(':');
+    const hexParts = rest.split(":");
     if (hexParts.length === 2) {
       const hi = parseInt(hexParts[0], 16);
       const lo = parseInt(hexParts[1], 16);
       if (!isNaN(hi) && !isNaN(lo)) {
-        const dotted = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+        const dotted = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${
+          lo & 0xff
+        }`;
         return isPrivateIP(dotted);
       }
     }
