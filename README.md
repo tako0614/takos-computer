@@ -56,15 +56,15 @@ server-to-client GET streams are not implemented for the sandbox endpoint.
 
 ### Sandbox Tools
 
-| Tool           | Description                                                                         |
-| -------------- | ----------------------------------------------------------------------------------- |
-| `shell_exec`   | Execute a shell command (bash -c). Params: `command`, `timeout_ms?`, `cwd?`, `env?` |
-| `file_read`    | Read workspace file contents. Params: `path`, `offset?`, `limit?`, `encoding?`      |
-| `file_write`   | Write a workspace file. Params: `path`, `content`, `encoding?`, `create_dirs?`      |
-| `file_list`    | List workspace directory entries. Params: `path`, `recursive?`, `glob?`             |
-| `file_info`    | Get workspace file metadata. Params: `path`                                         |
-| `process_list` | List running processes.                                                             |
-| `process_kill` | Kill a process. Params: `pid`, `signal?`                                            |
+| Tool           | Description                                                                                                               |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `shell_exec`   | Execute a shell command (bash -c). Params: `command`, `timeout_ms?`, `cwd?`, `env?`, `allow_takos_token?`, `takos_token?` |
+| `file_read`    | Read workspace file contents. Params: `path`, `offset?`, `limit?`, `encoding?`                                            |
+| `file_write`   | Write a workspace file. Params: `path`, `content`, `encoding?`, `create_dirs?`                                            |
+| `file_list`    | List workspace directory entries. Params: `path`, `recursive?`, `glob?`                                                   |
+| `file_info`    | Get workspace file metadata. Params: `path`                                                                               |
+| `process_list` | List running processes.                                                                                                   |
+| `process_kill` | Kill a managed process. Params: `pid`, `signal?`                                                                          |
 
 File tools are constrained to `/home/sandbox/workspace`. Relative paths resolve
 under that directory, and absolute paths must stay inside it after symlink
@@ -122,6 +122,7 @@ deno cache apps/sandbox/src/index.ts
 deno task test:all
 deno task lint
 deno task fmt
+deno task check:dist
 ```
 
 ### Running Locally
@@ -147,15 +148,16 @@ deno task dev
 
 ## Environment Variables
 
-| Variable                     | Default  | Description                                                                                                               |
-| ---------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`                       | `8080`   | HTTP server listen port                                                                                                   |
-| `SANDBOX_HOST_AUTH_TOKEN`    | _(none)_ | Required bearer token for sandbox-host admin/session routes; never injected into sandbox containers                       |
-| `MCP_AUTH_TOKEN`             | _(none)_ | Required worker-to-container `/mcp` auth token; injected into the sandbox service but stripped from shell child processes |
-| `TAKOS_TOKEN`                | _(none)_ | Optional Takos CLI bearer token injected into sandbox containers as `TAKOS_TOKEN`                                         |
-| `TAKOS_API_URL`              | _(none)_ | Optional Takos API endpoint injected into sandbox containers as `TAKOS_API_URL`                                           |
-| `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_ | Set to `1` only behind Takos dispatch so `X-Takos-Internal-Marker: 1` can authenticate routed GUI/API requests            |
-| `SHUTDOWN_GRACE_MS`          | `15000`  | Grace period before force-exit on SIGTERM                                                                                 |
+| Variable                     | Default  | Description                                                                                                                             |
+| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                       | `8080`   | HTTP server listen port                                                                                                                 |
+| `SANDBOX_HOST_AUTH_TOKEN`    | _(none)_ | Required bearer token for sandbox-host admin/session routes; never injected into sandbox containers                                     |
+| `MCP_AUTH_TOKEN`             | _(none)_ | Required worker-to-container `/mcp` auth token; injected into the sandbox service but stripped from shell child processes               |
+| `MCP_ALLOW_UNAUTHENTICATED`  | `false`  | Set to `true` only for local/dev sandbox-service `/mcp` access without `MCP_AUTH_TOKEN`                                                 |
+| `TAKOS_TOKEN`                | _(none)_ | Optional Takos CLI bearer token available to the sandbox service; shell child processes only inherit it when `allow_takos_token` is set |
+| `TAKOS_API_URL`              | _(none)_ | Optional Takos API endpoint injected into sandbox containers as `TAKOS_API_URL`                                                         |
+| `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_ | Set to `1` only behind Takos dispatch so `X-Takos-Internal-Marker: 1` can authenticate routed GUI/API requests                          |
+| `SHUTDOWN_GRACE_MS`          | `15000`  | Grace period before force-exit on SIGTERM                                                                                               |
 
 ## Cloudflare Worker Bindings
 
@@ -188,14 +190,27 @@ ID. A future session resolver/catalog should expose concrete per-session MCP
 URLs after session creation. Until then, callers reach MCP through the GUI or
 session API. `MCP_AUTH_TOKEN` is the worker-to-container token only; it must be
 different from `SANDBOX_HOST_AUTH_TOKEN`. If the sandbox needs to run Takos CLI
-commands, provide a downscoped `TAKOS_TOKEN` instead. Wrangler remains a
-fallback production deployment path for operators that want to deploy outside
-the Takos manifest flow.
+commands, provide a downscoped `TAKOS_TOKEN` instead. `shell_exec` only forwards
+that token when `allow_takos_token: true` is supplied; otherwise the child
+process sees the safe default environment. Wrangler remains a fallback
+production deployment path for operators that want to deploy outside the Takos
+manifest flow.
 
 ```bash
 wrangler deploy -c deploy/wrangler.sandbox-host.toml
 wrangler deploy -c deploy/wrangler.sandbox-host.toml --env staging
 ```
+
+### Generated Worker Bundles
+
+`dist/sandbox-host.js` is a generated Worker bundle kept in git for artifact
+based Takos deploys. Source files under `packages/computer-hosts/src/` and the
+dashboard-generated GUI assets are the source of truth. `dist/` stays excluded
+from lint and format checks; run `deno task build:all` after source changes and
+`deno task check:dist` to detect bundle drift.
+
+`dist/browser-host.js` is a legacy generated bundle retained in the repository
+for now, but it is not a current deploy target.
 
 ### Container Specifications
 
@@ -212,9 +227,11 @@ Then provision the required sandbox-host secrets for each environment.
 `SANDBOX_HOST_AUTH_TOKEN` protects host admin/session routes. `MCP_AUTH_TOKEN`
 protects host-to-container MCP traffic and is intentionally stripped from shell
 child processes. Use `TAKOS_TOKEN` for Takos CLI access inside the sandbox.
-Shell child processes inherit only a small safe environment allowlist plus the
-Takos CLI variables; MCP and host admin tokens are stripped, and per-command
-`env` overrides reject sensitive variable names.
+Shell child processes inherit only a small safe environment allowlist by
+default; `TAKOS_TOKEN` is forwarded only when `shell_exec` is called with
+`allow_takos_token: true`, and `takos_token` can be supplied for a downscoped
+token. MCP and host admin tokens are stripped, and per-command `env` overrides
+reject sensitive variable names.
 
 ```bash
 wrangler secret put MCP_AUTH_TOKEN -c deploy/wrangler.sandbox-host.toml

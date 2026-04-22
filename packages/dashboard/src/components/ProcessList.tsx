@@ -1,5 +1,6 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { mcpCall } from "../lib/mcp.ts";
+import { useI18n } from "../i18n.ts";
 
 interface ProcessInfo {
   user: string;
@@ -10,6 +11,7 @@ interface ProcessInfo {
 }
 
 export default function ProcessList(props: { mcpUrl: string }) {
+  const { t } = useI18n();
   const [version, setVersion] = createSignal(0);
 
   const [procs] = createResource(
@@ -26,14 +28,16 @@ export default function ProcessList(props: { mcpUrl: string }) {
   return (
     <div>
       <div class="flex gap-2 items-center" style="margin-bottom:0.5rem">
-        <span style="font-size:0.8125rem; font-weight:600">Processes</span>
+        <span style="font-size:0.8125rem; font-weight:600">
+          {t("processes")}
+        </span>
         <div class="flex-1" />
         <button
           type="button"
           class="btn btn-ghost btn-sm"
           onClick={() => setVersion((v) => v + 1)}
         >
-          Refresh
+          {t("refresh")}
         </button>
       </div>
       <div
@@ -44,14 +48,16 @@ export default function ProcessList(props: { mcpUrl: string }) {
           when={!procs.loading}
           fallback={
             <div style="padding:1rem; text-align:center" class="muted">
-              Loading...
+              {t("loadingEllipsis")}
             </div>
           }
         >
           <Show
             when={(procs() ?? []).length > 0}
             fallback={
-              <div style="padding:0.75rem" class="muted">No processes</div>
+              <div style="padding:0.75rem" class="muted">
+                {t("noProcesses")}
+              </div>
             }
           >
             <For each={procs()}>

@@ -179,7 +179,8 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
     },
     {
       name: "process_kill",
-      description: "Kill a process by PID. Sends SIGTERM by default.",
+      description:
+        "Kill a process by PID if ShellManager is tracking it. Sends SIGTERM by default.",
       inputSchema: { type: "object" },
       handle: (args) => {
         if (!isRecord(args)) {
@@ -228,6 +229,12 @@ export function createSandboxMcpServer(deps: McpServerDeps): McpServer {
       cwd: z.string().optional().describe("Working directory"),
       env: z.record(z.string()).optional().describe(
         "Additional environment variables",
+      ),
+      allow_takos_token: z.boolean().optional().describe(
+        "Set to true to include TAKOS_TOKEN in the child process environment",
+      ),
+      takos_token: z.string().optional().describe(
+        "Optional explicit TAKOS token to pass instead of the container token",
       ),
     },
     (args: ShellExecOptions) => callTool("shell_exec", args),
@@ -316,7 +323,7 @@ export function createSandboxMcpServer(deps: McpServerDeps): McpServer {
 
   server.tool(
     "process_kill",
-    "Kill a process by PID. Sends SIGTERM by default.",
+    "Kill a process by PID if ShellManager is tracking it. Sends SIGTERM by default.",
     {
       pid: z.number().describe("Process ID to kill"),
       signal: z.string().optional().describe("Signal name (default: SIGTERM)"),

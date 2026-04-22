@@ -136,6 +136,29 @@ Deno.test("ShellManager: killProcess rejects unsafe pid and signal inputs", () =
   );
 });
 
+Deno.test("ShellManager: killProcess rejects unmanaged processes", async () => {
+  const shell = new ShellManager("/tmp");
+  const proc = new Deno.Command("bash", {
+    args: ["-c", "sleep 30"],
+    stdout: "null",
+    stderr: "null",
+  }).spawn();
+
+  try {
+    const result = shell.killProcess(proc.pid);
+    assertEquals(result.killed, false);
+    assertEquals(result.pid, proc.pid);
+    assert(result.error?.includes("not managed"));
+  } finally {
+    try {
+      proc.kill("SIGKILL");
+    } catch {
+      // Process may already be gone.
+    }
+    await proc.status;
+  }
+});
+
 Deno.test("ShellManager: exec with custom env", async () => {
   const tmpDir = await Deno.makeTempDir();
   try {
@@ -151,30 +174,85 @@ Deno.test("ShellManager: exec with custom env", async () => {
   }
 });
 
-Deno.test("ShellManager: exec strips control-plane auth env from child process", async () => {
+Deno.test("ShellManager: exec does not inherit TAKOS_TOKEN by default", async () => {
   const tmpDir = await Deno.makeTempDir();
   const snapshot = {
-    CUSTOM_SECRET: Deno.env.get("CUSTOM_SECRET"),
-    MCP_AUTH_TOKEN: Deno.env.get("MCP_AUTH_TOKEN"),
-    SANDBOX_HOST_AUTH_TOKEN: Deno.env.get("SANDBOX_HOST_AUTH_TOKEN"),
     TAKOS_TOKEN: Deno.env.get("TAKOS_TOKEN"),
   };
   try {
-    Deno.env.set("CUSTOM_SECRET", "custom-secret");
-    Deno.env.set("MCP_AUTH_TOKEN", "mcp-secret");
-    Deno.env.set("SANDBOX_HOST_AUTH_TOKEN", "host-secret");
     Deno.env.set("TAKOS_TOKEN", "takos-cli-token");
 
     const shell = new ShellManager(tmpDir);
     const result = await shell.exec({
-      command:
-        'printf "%s:%s:%s:%s" "${MCP_AUTH_TOKEN:-}" "${SANDBOX_HOST_AUTH_TOKEN:-}" "${CUSTOM_SECRET:-}" "${TAKOS_TOKEN:-}"',
+      command: 'printf "%s" "${TAKOS_TOKEN:-missing}"',
     });
 
-    assertEquals(result.stdout, ":::takos-cli-token");
+    assertEquals(result.stdout, "missing");
     assertEquals(result.exit_code, 0);
   } finally {
     restoreEnv(snapshot);
+    await Deno.remove(tmpDir, { recursive: true });
+  }
+});
+
+Deno.test("ShellManager: exec can explicitly inherit TAKOS_TOKEN", async () => {
+  const tmpDir = await Deno.makeTempDir();
+  const snapshot = {
+    TAKOS_TOKEN: Deno.env.get("TAKOS_TOKEN"),
+  };
+  try {
+    Deno.env.set("TAKOS_TOKEN", "takos-cli-token");
+
+    const shell = new ShellManager(tmpDir);
+    const result = await shell.exec({
+      command: 'printf "%s" "${TAKOS_TOKEN:-missing}"',
+      allow_takos_token: true,
+    });
+
+    assertEquals(result.stdout, "takos-cli-token");
+    assertEquals(result.exit_code, 0);
+  } finally {
+    restoreEnv(snapshot);
+    await Deno.remove(tmpDir, { recursive: true });
+  }
+});
+
+Deno.test("ShellManager: exec can use an explicit downscoped TAKOS token", async () => {
+  const tmpDir = await Deno.makeTempDir();
+  const snapshot = {
+    TAKOS_TOKEN: Deno.env.get("TAKOS_TOKEN"),
+  };
+  try {
+    Deno.env.set("TAKOS_TOKEN", "takos-cli-token");
+
+    const shell = new ShellManager(tmpDir);
+    const result = await shell.exec({
+      command: 'printf "%s" "${TAKOS_TOKEN:-missing}"',
+      allow_takos_token: true,
+      takos_token: "downscoped-token",
+    });
+
+    assertEquals(result.stdout, "downscoped-token");
+    assertEquals(result.exit_code, 0);
+  } finally {
+    restoreEnv(snapshot);
+    await Deno.remove(tmpDir, { recursive: true });
+  }
+});
+
+Deno.test("ShellManager: exec rejects TAKOS token override without allow flag", async () => {
+  const tmpDir = await Deno.makeTempDir();
+  try {
+    const shell = new ShellManager(tmpDir);
+    const result = await shell.exec({
+      command: "echo unreachable",
+      takos_token: "downscoped-token",
+    });
+
+    assertEquals(result.stdout, "");
+    assert(result.stderr.includes("requires allow_takos_token"));
+    assertEquals(result.exit_code, 1);
+  } finally {
     await Deno.remove(tmpDir, { recursive: true });
   }
 });

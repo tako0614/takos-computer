@@ -43,4 +43,11 @@ ENV PORT=8080
 
 EXPOSE 8080
 
-CMD ["deno", "run", "--allow-all", "src/index.ts"]
+CMD ["deno", \
+    "run", \
+    "--allow-read=.,../../packages,/home/sandbox/workspace", \
+    "--allow-write=/home/sandbox/workspace", \
+    "--allow-env", \
+    "--allow-net=0.0.0.0:8080", \
+    "--allow-run=bash,/bin/bash", \
+    "src/index.ts"]

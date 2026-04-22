@@ -4,8 +4,11 @@ import { sandboxSessions } from "../lib/api.ts";
 import Shell from "../components/Shell.tsx";
 import FileBrowser from "../components/FileBrowser.tsx";
 import ProcessList from "../components/ProcessList.tsx";
+import LanguageSwitcher from "../components/LanguageSwitcher.tsx";
+import { useI18n } from "../i18n.ts";
 
 export default function SandboxViewer() {
+  const { t } = useI18n();
   const params = useParams<{ id: string }>();
   const sessionId = () => params.id;
   const mcpUrl = () =>
@@ -31,8 +34,16 @@ export default function SandboxViewer() {
       : "badge badge-stopped";
   };
 
+  const statusLabel = () => {
+    const value = status()?.status;
+    if (value === "active" || value === "starting" || value === "stopped") {
+      return t(value);
+    }
+    return t("loading");
+  };
+
   const destroySession = async () => {
-    if (!confirm("Destroy this sandbox session?")) return;
+    if (!confirm(t("destroyCurrentConfirm"))) return;
     await sandboxSessions.destroy(sessionId());
     location.href = "/gui";
   };
@@ -41,19 +52,22 @@ export default function SandboxViewer() {
     <div class="container">
       {/* Toolbar */}
       <div class="flex gap-2 items-center" style="margin-bottom:0.75rem">
-        <A href="/" class="btn btn-ghost btn-sm">&larr; Dashboard</A>
+        <A href="/" class="btn btn-ghost btn-sm">
+          &larr; {t("backToDashboard")}
+        </A>
         <div style="width:1px; height:1.5rem; background:#334155" />
         <span class="mono muted" style="font-size:0.8125rem">
-          Sandbox: {sessionId()}
+          {t("sandbox")} {sessionId()}
         </span>
         <div class="flex-1" />
-        <span class={badgeClass()}>{status()?.status ?? "loading"}</span>
+        <LanguageSwitcher />
+        <span class={badgeClass()}>{statusLabel()}</span>
         <button
           type="button"
           class="btn btn-danger btn-sm"
           onClick={destroySession}
         >
-          Destroy
+          {t("destroy")}
         </button>
       </div>
 

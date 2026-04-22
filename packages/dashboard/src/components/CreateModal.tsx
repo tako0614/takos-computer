@@ -1,4 +1,5 @@
 import { createSignal, Show } from "solid-js";
+import { useI18n } from "../i18n.ts";
 
 export default function CreateModal(props: {
   open: boolean;
@@ -7,6 +8,7 @@ export default function CreateModal(props: {
     payload: { sessionId: string; spaceId: string; userId: string },
   ) => Promise<void>;
 }) {
+  const { t } = useI18n();
   const [loading, setLoading] = createSignal(false);
   let formRef!: HTMLFormElement;
 
@@ -24,7 +26,11 @@ export default function CreateModal(props: {
       formRef.reset();
       props.onClose();
     } catch (err) {
-      alert("Create failed: " + (err instanceof Error ? err.message : err));
+      alert(
+        t("createFailed", {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
     } finally {
       setLoading(false);
     }
@@ -40,16 +46,16 @@ export default function CreateModal(props: {
       >
         <div class="modal-content">
           <h2 style="font-size:1rem; font-weight:600; margin-bottom:1rem">
-            Create Sandbox Session
+            {t("createSandboxSession")}
           </h2>
           <form ref={formRef} onSubmit={handleSubmit}>
-            <label>Session ID</label>
+            <label>{t("sessionId")}</label>
             <input name="sessionId" required placeholder="e.g. my-session-01" />
 
-            <label>Space ID</label>
+            <label>{t("spaceId")}</label>
             <input name="spaceId" required placeholder="e.g. space-abc" />
 
-            <label>User ID</label>
+            <label>{t("userId")}</label>
             <input name="userId" required placeholder="e.g. user-123" />
 
             <div
@@ -61,14 +67,14 @@ export default function CreateModal(props: {
                 class="btn btn-ghost"
                 onClick={props.onClose}
               >
-                Cancel
+                {t("cancel")}
               </button>
               <button
                 type="submit"
                 class="btn btn-primary"
                 disabled={loading()}
               >
-                {loading() ? "Creating..." : "Create"}
+                {loading() ? t("creating") : t("create")}
               </button>
             </div>
           </form>

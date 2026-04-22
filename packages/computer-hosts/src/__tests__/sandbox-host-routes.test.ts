@@ -204,6 +204,14 @@ Deno.test("sandbox host serves published GUI app routes", async () => {
     styleResponse.headers.get("content-type"),
     "text/css; charset=utf-8",
   );
+
+  const iconResponse = await fetchWorker(env, "/icons/computer.svg");
+  assertEquals(iconResponse.status, 200);
+  assertEquals(iconResponse.headers.get("content-type"), "image/svg+xml");
+  const iconBody = await iconResponse.text();
+  if (!iconBody.includes('aria-label="Computer"')) {
+    throw new Error("Expected computer icon SVG");
+  }
 });
 
 Deno.test("sandbox host rejects routed marker header without GUI auth", async () => {

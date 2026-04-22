@@ -1,5 +1,6 @@
 import { createResource, createSignal, For, Show } from "solid-js";
 import { mcpCall } from "../lib/mcp.ts";
+import { useI18n } from "../i18n.ts";
 
 interface FileEntry {
   name: string;
@@ -17,6 +18,7 @@ function formatSize(bytes: number): string {
 export default function FileBrowser(
   props: { mcpUrl: string; cwd: () => string; setCwd: (v: string) => void },
 ) {
+  const { t } = useI18n();
   const [version, setVersion] = createSignal(0);
 
   const [entries] = createResource(
@@ -49,7 +51,7 @@ export default function FileBrowser(
   return (
     <div>
       <div class="flex gap-2 items-center" style="margin-bottom:0.5rem">
-        <span style="font-size:0.8125rem; font-weight:600">Files</span>
+        <span style="font-size:0.8125rem; font-weight:600">{t("files")}</span>
         <input
           class="input input-mono flex-1"
           style="font-size:0.8125rem"
@@ -64,7 +66,7 @@ export default function FileBrowser(
           class="btn btn-ghost btn-sm"
           onClick={() => setVersion((v) => v + 1)}
         >
-          Refresh
+          {t("refresh")}
         </button>
       </div>
       <div
@@ -75,14 +77,16 @@ export default function FileBrowser(
           when={!entries.loading}
           fallback={
             <div style="padding:1rem; text-align:center" class="muted">
-              Loading...
+              {t("loadingEllipsis")}
             </div>
           }
         >
           <Show
             when={(entries() ?? []).length > 0}
             fallback={
-              <div style="padding:0.75rem" class="muted">Empty directory</div>
+              <div style="padding:0.75rem" class="muted">
+                {t("emptyDirectory")}
+              </div>
             }
           >
             <For each={entries()}>

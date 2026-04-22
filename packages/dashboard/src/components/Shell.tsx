@@ -1,5 +1,6 @@
-import { createSignal, For, onMount } from "solid-js";
+import { createEffect, createSignal, For, onMount } from "solid-js";
 import { mcpCall } from "../lib/mcp.ts";
+import { useI18n } from "../i18n.ts";
 
 interface ShellLine {
   text: string;
@@ -7,13 +8,21 @@ interface ShellLine {
 }
 
 export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
+  const { t } = useI18n();
   const [lines, setLines] = createSignal<ShellLine[]>([
-    { text: "Type a command and press Enter.\n", color: "#64748b" },
+    { text: t("typeCommandHint"), color: "#64748b" },
   ]);
   const [history, setHistory] = createSignal<string[]>([]);
   const [historyIdx, setHistoryIdx] = createSignal(-1);
   let inputRef!: HTMLInputElement;
   let outputRef!: HTMLDivElement;
+
+  createEffect(() => {
+    setLines((prev) => {
+      if (prev.length !== 1) return prev;
+      return [{ text: t("typeCommandHint"), color: "#64748b" }];
+    });
+  });
 
   const append = (text: string, color: string) => {
     setLines((prev) => [...prev, { text, color }]);
@@ -45,12 +54,19 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
       });
       if (result?.stdout) append(result.stdout, "#e2e8f0");
       if (result?.stderr) append(result.stderr, "#fca5a5");
-      if (result?.timed_out) append("(timed out)\n", "#fcd34d");
+      if (result?.timed_out) append(`${t("timedOut")}\n`, "#fcd34d");
       else if (result && result.exit_code !== 0) {
         append(`exit ${result.exit_code}\n`, "#64748b");
       }
     } catch (err) {
-      append(`Error: ${err instanceof Error ? err.message : err}\n`, "#ef4444");
+      append(
+        `${
+          t("error", {
+            message: err instanceof Error ? err.message : String(err),
+          })
+        }\n`,
+        "#ef4444",
+      );
     }
   };
 
@@ -104,7 +120,7 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
           ref={inputRef}
           class="mono"
           style="flex:1; background:transparent; border:none; outline:none; color:#e2e8f0; font-size:0.8125rem; padding:0.5rem 0.75rem 0.5rem 0"
-          placeholder="command..."
+          placeholder={t("commandPlaceholder")}
           autocomplete="off"
           spellcheck={false}
           onKeyDown={onKeyDown}

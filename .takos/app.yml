@@ -5,32 +5,15 @@ publish:
   - name: computer-ui
     publisher: web
     type: UiSurface
-    path: /gui
+    outputs:
+      url:
+        route: /gui
     title: Computer
     spec:
       description: Browser automation and sandbox computer
       icon: /icons/computer.svg
       category: agent
       sortOrder: 100
-  - name: takos-computer-api
-    publisher: takos
-    type: api-key
-    spec:
-      scopes:
-        - spaces:read
-        - files:read
-        - files:write
-        - memories:read
-        - memories:write
-        - threads:read
-        - threads:write
-        - runs:read
-        - runs:write
-        - agents:execute
-        - repos:read
-        - repos:write
-        - mcp:invoke
-        - events:subscribe
 
 compute:
   web:
@@ -39,7 +22,24 @@ compute:
     env:
       TAKOS_TRUST_ROUTED_GUI_API: "1"
     consume:
-      - publication: takos-computer-api
+      - publication: takos.api-key
+        as: takos-computer-api
+        request:
+          scopes:
+            - spaces:read
+            - files:read
+            - files:write
+            - memories:read
+            - memories:write
+            - threads:read
+            - threads:write
+            - runs:read
+            - runs:write
+            - agents:execute
+            - repos:read
+            - repos:write
+            - mcp:invoke
+            - events:subscribe
         env:
           endpoint: TAKOS_API_URL
           apiKey: TAKOS_TOKEN

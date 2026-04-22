@@ -1,16 +1,7 @@
 import { For, Show } from "solid-js";
 import { A } from "@solidjs/router";
 import type { SessionState } from "../lib/api.ts";
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return m + "m ago";
-  const h = Math.floor(m / 60);
-  if (h < 24) return h + "h ago";
-  return Math.floor(h / 24) + "d ago";
-}
+import { useI18n } from "../i18n.ts";
 
 const badgeClass = (status: string) =>
   status === "active"
@@ -19,31 +10,46 @@ const badgeClass = (status: string) =>
     ? "badge badge-starting"
     : "badge badge-stopped";
 
+const statusKey = (status: string): "active" | "starting" | "stopped" =>
+  status === "active" || status === "starting" ? status : "stopped";
+
 export default function SessionTable(props: {
   sessions: SessionState[];
   loading: boolean;
   onDestroy: (id: string) => void;
 }) {
+  const { t } = useI18n();
+
+  const timeAgo = (iso: string): string => {
+    const diff = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(diff / 60000);
+    if (m < 1) return t("justNow");
+    if (m < 60) return t("timeAgoMinutes", { count: m });
+    const h = Math.floor(m / 60);
+    if (h < 24) return t("timeAgoHours", { count: h });
+    return t("timeAgoDays", { count: Math.floor(h / 24) });
+  };
+
   return (
     <div class="card">
       <table class="session-table">
         <thead>
           <tr>
-            <th>Session ID</th>
-            <th>Status</th>
-            <th>Space</th>
-            <th>Created</th>
-            <th>Actions</th>
+            <th>{t("sessionId")}</th>
+            <th>{t("status")}</th>
+            <th>{t("space")}</th>
+            <th>{t("created")}</th>
+            <th>{t("actions")}</th>
           </tr>
         </thead>
         <tbody>
           <Show
             when={!props.loading}
-            fallback={<Placeholder text="Loading..." />}
+            fallback={<Placeholder text={t("loadingEllipsis")} />}
           >
             <Show
               when={props.sessions.length > 0}
-              fallback={<Placeholder text="No sessions" />}
+              fallback={<Placeholder text={t("noSessions")} />}
             >
               <For each={props.sessions}>
                 {(s) => (
@@ -52,7 +58,9 @@ export default function SessionTable(props: {
                       {s.sessionId}
                     </td>
                     <td>
-                      <span class={badgeClass(s.status)}>{s.status}</span>
+                      <span class={badgeClass(s.status)}>
+                        {t(statusKey(s.status))}
+                      </span>
                     </td>
                     <td style="font-size:0.8125rem; color:#94a3b8">
                       {s.spaceId}
@@ -66,14 +74,14 @@ export default function SessionTable(props: {
                           href={`/sandbox/${encodeURIComponent(s.sessionId)}`}
                           class="btn btn-primary btn-sm"
                         >
-                          Open
+                          {t("open")}
                         </A>
                         <button
                           type="button"
                           class="btn btn-danger btn-sm"
                           onClick={() => props.onDestroy(s.sessionId)}
                         >
-                          Delete
+                          {t("delete")}
                         </button>
                       </div>
                     </td>

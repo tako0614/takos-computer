@@ -13,10 +13,22 @@ const targets: Record<TargetName, { entry: string; outfile: string }> = {
 
 const targetName = Deno.args[0] as TargetName | undefined;
 if (!targetName || !(targetName in targets)) {
-  throw new Error("Usage: deno task build:sandbox-host");
+  throw new Error("Usage: deno task build:sandbox-host [--outfile <path>]");
 }
 
 const target = targets[targetName];
+const defaultOutfile = fileURLToPath(new URL(target.outfile, import.meta.url));
+let outfile = defaultOutfile;
+for (let index = 1; index < Deno.args.length; index++) {
+  const arg = Deno.args[index];
+  if (arg === "--outfile") {
+    const value = Deno.args[++index];
+    if (!value) throw new Error("--outfile requires a path");
+    outfile = value;
+    continue;
+  }
+  throw new Error(`Unknown argument: ${arg}`);
+}
 
 const generatedAssetsUrl = new URL(
   "../src/gui/assets.generated.ts",
@@ -61,7 +73,7 @@ await build({
   format: "esm",
   platform: "neutral",
   target: "es2022",
-  outfile: fileURLToPath(new URL(target.outfile, import.meta.url)),
+  outfile,
   loader: {
     ".html": "text",
     ".css": "text",
@@ -70,4 +82,8 @@ await build({
   logLevel: "info",
 });
 
-console.log(`Built ${targetName}: ${target.outfile}`);
+console.log(
+  `Built ${targetName}: ${
+    outfile === defaultOutfile ? target.outfile : outfile
+  }`,
+);

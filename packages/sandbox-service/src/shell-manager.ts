@@ -34,7 +34,6 @@ const INHERITED_ENV_ALLOWLIST = new Set([
   "NPM_CONFIG_REGISTRY",
   "CI",
   "TAKOS_API_URL",
-  "TAKOS_TOKEN",
   "TAKOS_SPACE_ID",
   "TAKOS_REPO_ID",
   "TAKOS_SESSION_ID",
@@ -75,6 +74,8 @@ export interface ShellExecOptions {
   timeout_ms?: number;
   cwd?: string;
   env?: Record<string, string>;
+  allow_takos_token?: boolean;
+  takos_token?: string;
   signal?: AbortSignal;
 }
 
@@ -94,12 +95,23 @@ export interface ProcessKillResult {
 
 export class ShellManager {
   private defaultCwd: string;
+  private managedProcesses = new Map<number, Deno.ChildProcess>();
 
   constructor(defaultCwd = "/home/sandbox/workspace") {
     this.defaultCwd = defaultCwd;
   }
 
   async exec(options: ShellExecOptions): Promise<ShellExecResult> {
+    if (
+      options.takos_token !== undefined && options.allow_takos_token !== true
+    ) {
+      return {
+        stdout: "",
+        stderr: "takos_token requires allow_takos_token",
+        exit_code: 1,
+        timed_out: false,
+      };
+    }
     const timeoutMs = normalizeTimeoutMs(options.timeout_ms);
     const cwd = options.cwd ?? this.defaultCwd;
 
@@ -141,12 +153,16 @@ export class ShellManager {
         args: ["-c", options.command],
         cwd,
         clearEnv: true,
-        env: buildCommandEnv(options.env),
+        env: buildCommandEnv(options.env, {
+          allowTakosToken: options.allow_takos_token === true,
+          takosToken: options.takos_token,
+        }),
         stdout: "piped",
         stderr: "piped",
       });
 
       process = cmd.spawn();
+      this.trackProcess(process);
       if (options.signal?.aborted) externalAbort();
 
       const [status, stdout, stderr] = await Promise.all([
@@ -186,8 +202,18 @@ export class ShellManager {
       throw new Error(`Unsupported signal: ${signal}`);
     }
 
+    const process = this.managedProcesses.get(pid);
+    if (!process) {
+      return {
+        killed: false,
+        pid,
+        signal,
+        error: "Process is not managed by this ShellManager",
+      };
+    }
+
     try {
-      Deno.kill(pid, signal);
+      process.kill(signal);
       return { killed: true, pid, signal };
     } catch (err) {
       return {
@@ -198,10 +224,23 @@ export class ShellManager {
       };
     }
   }
+
+  private trackProcess(process: Deno.ChildProcess): void {
+    this.managedProcesses.set(process.pid, process);
+    void process.status.finally(() => {
+      if (this.managedProcesses.get(process.pid) === process) {
+        this.managedProcesses.delete(process.pid);
+      }
+    });
+  }
 }
 
 function buildCommandEnv(
   overrides: Record<string, string> | undefined,
+  options: {
+    allowTakosToken: boolean;
+    takosToken?: string;
+  },
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(Deno.env.toObject())) {
@@ -210,6 +249,13 @@ function buildCommandEnv(
       !CONTROL_PLANE_ENV_DENYLIST.has(key)
     ) {
       env[key] = value;
+    }
+  }
+  if (options.allowTakosToken) {
+    const takosToken = options.takosToken ?? Deno.env.get("TAKOS_TOKEN");
+    if (takosToken !== undefined) {
+      validateDirectEnv("TAKOS_TOKEN", takosToken);
+      env.TAKOS_TOKEN = takosToken;
     }
   }
   if (!overrides) return env;
@@ -233,6 +279,24 @@ function validateOverrideEnv(
   }
   if (CONTROL_PLANE_ENV_DENYLIST.has(key) || isSensitiveOverrideEnv(key)) {
     throw new Error(`Sensitive environment variable is not allowed: ${key}`);
+  }
+  if (value.length > MAX_ENV_VALUE_LENGTH) {
+    throw new Error(`Environment variable value too long: ${key}`);
+  }
+  if (value.includes("\0") || value.includes("\r") || value.includes("\n")) {
+    throw new Error(`Environment variable contains invalid characters: ${key}`);
+  }
+}
+
+function validateDirectEnv(
+  key: string,
+  value: unknown,
+): asserts value is string {
+  if (!ENV_NAME_PATTERN.test(key)) {
+    throw new Error(`Invalid environment variable name: ${key}`);
+  }
+  if (typeof value !== "string") {
+    throw new Error(`Environment variable value must be a string: ${key}`);
   }
   if (value.length > MAX_ENV_VALUE_LENGTH) {
     throw new Error(`Environment variable value too long: ${key}`);
