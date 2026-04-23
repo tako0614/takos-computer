@@ -7,6 +7,7 @@ import type { DurableObjectNamespace } from "./cf-types.ts";
 export interface SandboxHostEnv {
   SANDBOX_CONTAINER: DurableObjectNamespace;
   SANDBOX_HOST_AUTH_TOKEN?: string;
+  PUBLISHED_MCP_AUTH_TOKEN?: string;
   MCP_AUTH_TOKEN?: string;
   TAKOS_API_URL?: string;
   TAKOS_TOKEN?: string;

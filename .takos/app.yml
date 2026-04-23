@@ -1,5 +1,5 @@
 name: takos-computer
-version: "2.0.0"
+version: "2.1.0"
 
 publish:
   - name: computer-ui
@@ -14,6 +14,19 @@ publish:
       icon: /icons/computer.svg
       category: agent
       sortOrder: 100
+  - name: computer-mcp
+    publisher: web
+    type: McpServer
+    outputs:
+      url:
+        route: /mcp
+    title: Computer MCP
+    auth:
+      bearer:
+        secretRef: PUBLISHED_MCP_AUTH_TOKEN
+    spec:
+      transport: streamable-http
+      description: Agent-accessible sandbox computer tools
 
 compute:
   web:
@@ -82,6 +95,8 @@ resources:
     to: web
 
 routes:
+  - target: web
+    path: /mcp
   - target: web
     path: /healthz
   - target: web

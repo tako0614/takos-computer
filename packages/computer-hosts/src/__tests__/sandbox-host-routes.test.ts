@@ -58,6 +58,7 @@ class MemoryKv implements NonNullable<SandboxHostEnv["SESSION_INDEX"]> {
 }
 
 const HOST_AUTH_TOKEN = "host-token";
+const PUBLISHED_MCP_AUTH_TOKEN = "published-mcp-token";
 const MCP_AUTH_TOKEN = "mcp-token";
 const SESSION_PROXY_TOKEN = "test-token";
 
@@ -68,6 +69,7 @@ function hostAuthHeaders(): Record<string, string> {
 function createEnv(
   options: {
     hostAuthToken?: string | null;
+    publishedMcpAuthToken?: string | null;
     mcpAuthToken?: string | null;
     trustRoutedGuiApi?: boolean;
   } = {},
@@ -118,6 +120,21 @@ function createEnv(
         authorization: headers.get("Authorization"),
         body,
       });
+      if (body?.method === "tools/call") {
+        return Promise.resolve(Response.json({
+          jsonrpc: "2.0",
+          id: body.id,
+          result: {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                tool: body.params?.name,
+                arguments: body.params?.arguments,
+              }),
+            }],
+          },
+        }));
+      }
       return Promise.resolve(Response.json({ ok: true, path, body }));
     },
   };
@@ -139,6 +156,10 @@ function createEnv(
     ? HOST_AUTH_TOKEN
     : options.hostAuthToken;
   if (hostAuthToken !== null) env.SANDBOX_HOST_AUTH_TOKEN = hostAuthToken;
+  const publishedMcpAuthToken = options.publishedMcpAuthToken;
+  if (publishedMcpAuthToken) {
+    env.PUBLISHED_MCP_AUTH_TOKEN = publishedMcpAuthToken;
+  }
   const mcpAuthToken = options.mcpAuthToken === undefined
     ? MCP_AUTH_TOKEN
     : options.mcpAuthToken;
@@ -677,4 +698,133 @@ Deno.test("sandbox host fails closed when no container MCP auth token source is 
 
   assertEquals(response.status, 503);
   assertEquals(mcpCalls, []);
+});
+
+Deno.test("sandbox host published MCP lists computer tools with host auth", async () => {
+  const { env } = createEnv();
+
+  const response = await fetchWorker(env, "/mcp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...hostAuthHeaders(),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+    }),
+  });
+
+  assertEquals(response.status, 200);
+  const body = await response.json() as {
+    result: { tools: Array<{ name: string }> };
+  };
+  const names = body.result.tools.map((tool) => tool.name);
+  if (!names.includes("computer_shell_exec")) {
+    throw new Error("Expected published MCP computer_shell_exec tool");
+  }
+  if (!names.includes("computer_session_create")) {
+    throw new Error("Expected published MCP computer_session_create tool");
+  }
+});
+
+Deno.test("sandbox host published MCP requires host auth", async () => {
+  const { env, mcpCalls } = createEnv();
+
+  const response = await fetchWorker(env, "/mcp", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+    }),
+  });
+
+  assertEquals(response.status, 401);
+  assertEquals(mcpCalls, []);
+});
+
+Deno.test("sandbox host published MCP prefers dedicated publication auth token", async () => {
+  const { env } = createEnv({
+    publishedMcpAuthToken: PUBLISHED_MCP_AUTH_TOKEN,
+  });
+
+  const hostTokenResponse = await fetchWorker(env, "/mcp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...hostAuthHeaders(),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+    }),
+  });
+  assertEquals(hostTokenResponse.status, 401);
+
+  const publishedTokenResponse = await fetchWorker(env, "/mcp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${PUBLISHED_MCP_AUTH_TOKEN}`,
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/list",
+    }),
+  });
+  assertEquals(publishedTokenResponse.status, 200);
+});
+
+Deno.test("sandbox host published MCP auto-creates a session and proxies tool calls", async () => {
+  const { env, mcpCalls } = createEnv();
+
+  const response = await fetchWorker(env, "/mcp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...hostAuthHeaders(),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "computer_shell_exec",
+        arguments: {
+          command: "pwd",
+          session_id: "agent-session-1",
+          space_id: "space-1",
+          user_id: "user-1",
+        },
+      },
+    }),
+  });
+
+  assertEquals(response.status, 200);
+  const body = await response.json() as {
+    result: { content: Array<{ type: string; text: string }> };
+  };
+  assertEquals(body.result.content[0]?.type, "text");
+  assertEquals(JSON.parse(body.result.content[0]!.text), {
+    tool: "shell_exec",
+    arguments: { command: "pwd" },
+  });
+  assertEquals(mcpCalls, [{
+    path: "/mcp",
+    authorization: `Bearer ${MCP_AUTH_TOKEN}`,
+    body: {
+      jsonrpc: "2.0",
+      id: "published-mcp-call",
+      method: "tools/call",
+      params: {
+        name: "shell_exec",
+        arguments: { command: "pwd" },
+      },
+    },
+  }]);
 });

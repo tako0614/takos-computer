@@ -8,7 +8,7 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/helpers.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/helpers.js
 function generateId(length = 9) {
   const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   const bytes = new Uint8Array(length);
@@ -44,11 +44,11 @@ function parseTimeExpression(timeExpression) {
   throw new Error(`invalid type for a time expression: ${typeof timeExpression}`);
 }
 var init_helpers = __esm({
-  "../../../../../../.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/helpers.js"() {
+  "../../../../home/tako/.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/helpers.js"() {
   }
 });
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/container.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/container.js
 import { DurableObject } from "cloudflare:workers";
 function isErrorOfType(e, matchingString) {
   const errorString = e instanceof Error ? e.message : String(e);
@@ -79,7 +79,7 @@ function addTimeoutSignal(existingSignal, timeoutMs) {
 }
 var NO_CONTAINER_INSTANCE_ERROR, RUNTIME_SIGNALLED_ERROR, UNEXPECTED_EXIT_ERROR, NOT_LISTENING_ERROR, CONTAINER_STATE_KEY, MAX_ALARM_RETRIES, PING_TIMEOUT_MS, DEFAULT_SLEEP_AFTER, INSTANCE_POLL_INTERVAL_MS, TIMEOUT_TO_GET_CONTAINER_MS, TIMEOUT_TO_GET_PORTS_MS, FALLBACK_PORT_TO_CHECK, signalToNumbers, isNoInstanceError, isRuntimeSignalledError, isNotListeningError, isContainerExitNonZeroError, ContainerState, Container;
 var init_container = __esm({
-  "../../../../../../.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/container.js"() {
+  "../../../../home/tako/.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/container.js"() {
     init_helpers();
     NO_CONTAINER_INSTANCE_ERROR = "there is no container instance that can be provided to this durable object";
     RUNTIME_SIGNALLED_ERROR = "runtime signalled the container to exit:";
@@ -909,7 +909,7 @@ var init_container = __esm({
   }
 });
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/utils.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/utils.js
 async function getRandom(binding, instances = 3) {
   const id = Math.floor(Math.random() * instances).toString();
   const objectId = binding.idFromName(`instance-${id}`);
@@ -930,12 +930,12 @@ function switchPort(request, port) {
 }
 var singletonContainerId;
 var init_utils = __esm({
-  "../../../../../../.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/utils.js"() {
+  "../../../../home/tako/.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/lib/utils.js"() {
     singletonContainerId = "cf-singleton-container";
   }
 });
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/index.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/index.js
 var dist_exports = {};
 __export(dist_exports, {
   Container: () => Container,
@@ -945,7 +945,7 @@ __export(dist_exports, {
   switchPort: () => switchPort
 });
 var init_dist = __esm({
-  "../../../../../../.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/index.js"() {
+  "../../../../home/tako/.cache/deno/npm/registry.npmjs.org/@cloudflare/containers/0.1.1/dist/index.js"() {
     init_container();
     init_utils();
   }
@@ -979,7 +979,7 @@ var runtimeModule = await importContainerRuntime();
 var HostContainerRuntime = runtimeModule?.Container ?? LocalHostContainerRuntime;
 var Container2 = runtimeModule?.Container ?? LocalHostContainerRuntime;
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/compose.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/compose.js
 var compose = (middleware, onError, onNotFound) => {
   return (context, next) => {
     let index = -1;
@@ -1023,10 +1023,10 @@ var compose = (middleware, onError, onNotFound) => {
   };
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/request/constants.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/request/constants.js
 var GET_MATCH_RESULT = /* @__PURE__ */ Symbol();
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/utils/body.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/utils/body.js
 var parseBody = async (request, options = /* @__PURE__ */ Object.create(null)) => {
   const { all = false, dot = false } = options;
   const headers = request instanceof HonoRequest ? request.raw.headers : request.headers;
@@ -1098,7 +1098,7 @@ var handleParsingNestedValues = (form, key, value) => {
   });
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/utils/url.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/utils/url.js
 var splitPath = (path) => {
   const paths = path.split("/");
   if (paths[0] === "") {
@@ -1302,7 +1302,7 @@ var getQueryParams = (url, key) => {
 };
 var decodeURIComponent_ = decodeURIComponent;
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/request.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/request.js
 var tryDecodeURIComponent = (str) => tryDecode(str, decodeURIComponent_);
 var HonoRequest = class {
   /**
@@ -1570,7 +1570,7 @@ var HonoRequest = class {
   }
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/utils/html.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/utils/html.js
 var HtmlEscapedCallbackPhase = {
   Stringify: 1,
   BeforeStream: 2,
@@ -1612,7 +1612,7 @@ var resolveCallback = async (str, phase, preserveCallbacks, context, buffer) => 
   }
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/context.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/context.js
 var TEXT_PLAIN = "text/plain; charset=UTF-8";
 var setDefaultContentType = (contentType, headers) => {
   return {
@@ -2019,7 +2019,7 @@ var Context = class {
   };
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router.js
 var METHOD_NAME_ALL = "ALL";
 var METHOD_NAME_ALL_LOWERCASE = "all";
 var METHODS = ["get", "post", "put", "delete", "options", "patch"];
@@ -2027,10 +2027,10 @@ var MESSAGE_MATCHER_IS_ALREADY_BUILT = "Can not add a route since the matcher is
 var UnsupportedPathError = class extends Error {
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/utils/constants.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/utils/constants.js
 var COMPOSED_HANDLER = "__COMPOSED_HANDLER";
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/hono-base.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/hono-base.js
 var notFoundHandler = (c) => {
   return c.text("404 Not Found", 404);
 };
@@ -2401,7 +2401,7 @@ var Hono = class _Hono {
   };
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/reg-exp-router/matcher.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/reg-exp-router/matcher.js
 var emptyParam = [];
 function match(method, path) {
   const matchers = this.buildAllMatchers();
@@ -2422,7 +2422,7 @@ function match(method, path) {
   return match2(method, path);
 }
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/reg-exp-router/node.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/reg-exp-router/node.js
 var LABEL_REG_EXP_STR = "[^/]+";
 var ONLY_WILDCARD_REG_EXP_STR = ".*";
 var TAIL_WILDCARD_REG_EXP_STR = "(?:|/.*)";
@@ -2530,7 +2530,7 @@ var Node = class _Node {
   }
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/reg-exp-router/trie.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/reg-exp-router/trie.js
 var Trie = class {
   #context = { varIndex: 0 };
   #root = new Node();
@@ -2586,7 +2586,7 @@ var Trie = class {
   }
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/reg-exp-router/router.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/reg-exp-router/router.js
 var nullMatcher = [/^$/, [], /* @__PURE__ */ Object.create(null)];
 var wildcardRegExpCache = /* @__PURE__ */ Object.create(null);
 function buildWildcardRegExp(path) {
@@ -2765,7 +2765,7 @@ var RegExpRouter = class {
   }
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/smart-router/router.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/smart-router/router.js
 var SmartRouter = class {
   name = "SmartRouter";
   #routers = [];
@@ -2820,7 +2820,7 @@ var SmartRouter = class {
   }
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/trie-router/node.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/trie-router/node.js
 var emptyParams = /* @__PURE__ */ Object.create(null);
 var hasChildren = (children) => {
   for (const _ in children) {
@@ -2995,7 +2995,7 @@ var Node2 = class _Node2 {
   }
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/trie-router/router.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/router/trie-router/router.js
 var TrieRouter = class {
   name = "TrieRouter";
   #node;
@@ -3017,7 +3017,7 @@ var TrieRouter = class {
   }
 };
 
-// ../../../../../../.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/hono.js
+// ../../../../home/tako/.cache/deno/npm/registry.npmjs.org/hono/4.12.9/dist/hono.js
 var Hono2 = class extends Hono {
   /**
    * Creates an instance of the Hono class.
@@ -3093,8 +3093,14 @@ var SESSION_STATE_STORAGE_KEY = "sessionState";
 var GUI_ADMIN_COOKIE = "takos_computer_admin_token";
 var GUI_PROXY_COOKIE = "takos_computer_proxy_token";
 var GUI_AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60;
+var PUBLISHED_MCP_DEFAULT_SESSION_ID = "agent-default";
+var PUBLISHED_MCP_DEFAULT_SPACE_ID = "published-mcp";
+var PUBLISHED_MCP_DEFAULT_USER_ID = "takos-agent";
 function resolveContainerMcpAuthToken(env) {
   return env.MCP_AUTH_TOKEN || void 0;
+}
+function resolvePublishedMcpAuthToken(env) {
+  return env.PUBLISHED_MCP_AUTH_TOKEN || env.SANDBOX_HOST_AUTH_TOKEN || void 0;
 }
 var SandboxSessionContainer = class extends HostContainerRuntime {
   defaultPort = 8080;
@@ -3437,6 +3443,17 @@ function requireHostAdmin(c) {
   }
   return null;
 }
+function requirePublishedMcpAuth(c) {
+  const expected = resolvePublishedMcpAuthToken(c.env);
+  if (!expected) {
+    return authError(c, 503, "Published MCP auth token is not configured");
+  }
+  const token = extractBearerToken(c);
+  if (!token || !constantTimeEqual(token, expected)) {
+    return authError(c, 401, "Unauthorized");
+  }
+  return null;
+}
 async function authorizeSessionAccess(c, sessionId, stub) {
   if (isTrustedTakosRoutedRequest(c)) return null;
   const token = extractBearerToken(c);
@@ -3582,6 +3599,459 @@ app.get("/session/:id", getSession);
 app.get("/gui/api/sandbox-session/:id", getSession);
 app.delete("/session/:id", destroySession);
 app.delete("/gui/api/sandbox-session/:id", destroySession);
+var publishedSessionInputProperties = {
+  session_id: {
+    type: "string",
+    description: "Sandbox session id. Omit to use the default agent session, or pass the id returned by computer_session_create."
+  },
+  space_id: {
+    type: "string",
+    description: "Space id used when creating a new sandbox session. Optional for the default agent session."
+  },
+  user_id: {
+    type: "string",
+    description: "User id used when creating a new sandbox session. Optional for the default agent session."
+  }
+};
+var publishedMcpTools = [
+  {
+    name: "computer_session_create",
+    description: "Create or reuse a takos-computer sandbox session. Use this before multi-step computer work when you want an explicit session id.",
+    inputSchema: {
+      type: "object",
+      properties: publishedSessionInputProperties
+    },
+    handle: async (args, c) => {
+      const { state } = await ensurePublishedMcpSession(c, args);
+      return publishedMcpJson(toPublishedSessionState(state));
+    }
+  },
+  {
+    name: "computer_session_status",
+    description: "Get the current state for a takos-computer sandbox session.",
+    inputSchema: {
+      type: "object",
+      properties: publishedSessionInputProperties
+    },
+    handle: async (args, c) => {
+      const { sessionId } = resolvePublishedMcpSessionArgs(args);
+      const state = await getDOStub(c.env, sessionId).getSessionState();
+      return publishedMcpJson(
+        state ? toPublishedSessionState(state) : { session_id: sessionId, status: "missing" }
+      );
+    }
+  },
+  {
+    name: "computer_session_destroy",
+    description: "Destroy a takos-computer sandbox session and remove it from the session index.",
+    inputSchema: {
+      type: "object",
+      properties: publishedSessionInputProperties
+    },
+    handle: async (args, c) => {
+      const { sessionId } = resolvePublishedMcpSessionArgs(args);
+      await getDOStub(c.env, sessionId).destroySession();
+      const kv = c.env.SESSION_INDEX;
+      if (kv) await kv.delete(`session:${sessionId}`);
+      return publishedMcpJson({ ok: true, session_id: sessionId });
+    }
+  },
+  {
+    name: "computer_shell_exec",
+    description: "Execute a shell command in a takos-computer sandbox. Automatically creates the sandbox session if needed.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...publishedSessionInputProperties,
+        command: { type: "string", description: "Shell command to execute." },
+        timeout_ms: {
+          type: "number",
+          description: "Timeout in milliseconds. Default: 30000."
+        },
+        cwd: { type: "string", description: "Working directory." },
+        env: {
+          type: "object",
+          description: "Additional environment variables.",
+          additionalProperties: { type: "string" }
+        },
+        allow_takos_token: {
+          type: "boolean",
+          description: "Set to true to include TAKOS_TOKEN in the child process environment."
+        },
+        takos_token: {
+          type: "string",
+          description: "Optional explicit TAKOS token to pass instead of the container token."
+        }
+      },
+      required: ["command"]
+    },
+    handle: (args, c) => callSandboxToolThroughPublishedMcp(
+      c,
+      "shell_exec",
+      args
+    )
+  },
+  {
+    name: "computer_file_read",
+    description: "Read a file from the takos-computer sandbox workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...publishedSessionInputProperties,
+        path: {
+          type: "string",
+          description: "Workspace-relative path or absolute path inside /home/sandbox/workspace."
+        },
+        offset: { type: "number", description: "Byte offset to start at." },
+        limit: { type: "number", description: "Maximum bytes to read." },
+        encoding: {
+          type: "string",
+          enum: ["utf-8", "base64"],
+          description: "Output encoding. Default: utf-8."
+        }
+      },
+      required: ["path"]
+    },
+    handle: (args, c) => callSandboxToolThroughPublishedMcp(
+      c,
+      "file_read",
+      args
+    )
+  },
+  {
+    name: "computer_file_write",
+    description: "Write a file in the takos-computer sandbox workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...publishedSessionInputProperties,
+        path: {
+          type: "string",
+          description: "Workspace-relative path or absolute path inside /home/sandbox/workspace."
+        },
+        content: { type: "string", description: "Content to write." },
+        encoding: {
+          type: "string",
+          enum: ["utf-8", "base64"],
+          description: "Input encoding. Default: utf-8."
+        },
+        create_dirs: {
+          type: "boolean",
+          description: "Create parent directories if missing."
+        }
+      },
+      required: ["path", "content"]
+    },
+    handle: (args, c) => callSandboxToolThroughPublishedMcp(
+      c,
+      "file_write",
+      args
+    )
+  },
+  {
+    name: "computer_file_list",
+    description: "List files in the takos-computer sandbox workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...publishedSessionInputProperties,
+        path: {
+          type: "string",
+          description: "Workspace-relative directory path or absolute path inside /home/sandbox/workspace."
+        },
+        recursive: {
+          type: "boolean",
+          description: "Recurse into subdirectories."
+        },
+        glob: {
+          type: "string",
+          description: 'Filter entries by glob pattern, for example "*.ts".'
+        }
+      },
+      required: ["path"]
+    },
+    handle: (args, c) => callSandboxToolThroughPublishedMcp(
+      c,
+      "file_list",
+      args
+    )
+  },
+  {
+    name: "computer_file_info",
+    description: "Get metadata for a file or directory in the takos-computer sandbox workspace.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...publishedSessionInputProperties,
+        path: {
+          type: "string",
+          description: "Workspace-relative path or absolute path inside /home/sandbox/workspace."
+        }
+      },
+      required: ["path"]
+    },
+    handle: (args, c) => callSandboxToolThroughPublishedMcp(
+      c,
+      "file_info",
+      args
+    )
+  },
+  {
+    name: "computer_process_list",
+    description: "List running processes in the takos-computer sandbox.",
+    inputSchema: {
+      type: "object",
+      properties: publishedSessionInputProperties
+    },
+    handle: (args, c) => callSandboxToolThroughPublishedMcp(
+      c,
+      "process_list",
+      args
+    )
+  },
+  {
+    name: "computer_process_kill",
+    description: "Kill a process tracked by the takos-computer sandbox shell manager.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...publishedSessionInputProperties,
+        pid: { type: "number", description: "Process ID to kill." },
+        signal: {
+          type: "string",
+          description: "Signal name. Default: SIGTERM."
+        }
+      },
+      required: ["pid"]
+    },
+    handle: (args, c) => callSandboxToolThroughPublishedMcp(
+      c,
+      "process_kill",
+      args
+    )
+  }
+];
+var publishedMcpToolMap = new Map(
+  publishedMcpTools.map((tool) => [tool.name, tool])
+);
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function jsonRpcResponse(id, result) {
+  return Response.json({ jsonrpc: "2.0", id: id ?? null, result });
+}
+function jsonRpcError(id, code, message) {
+  return Response.json({
+    jsonrpc: "2.0",
+    id: id ?? null,
+    error: { code, message }
+  });
+}
+function publishedMcpJson(value) {
+  return {
+    content: [{ type: "text", text: JSON.stringify(value, null, 2) }]
+  };
+}
+function nonEmptyStringArg(args, names, fallback) {
+  for (const name of names) {
+    const value = args[name];
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed) return trimmed;
+  }
+  return fallback;
+}
+function resolvePublishedMcpSessionArgs(args) {
+  return {
+    sessionId: nonEmptyStringArg(
+      args,
+      ["session_id", "sessionId"],
+      PUBLISHED_MCP_DEFAULT_SESSION_ID
+    ),
+    spaceId: nonEmptyStringArg(
+      args,
+      ["space_id", "spaceId"],
+      PUBLISHED_MCP_DEFAULT_SPACE_ID
+    ),
+    userId: nonEmptyStringArg(
+      args,
+      ["user_id", "userId"],
+      PUBLISHED_MCP_DEFAULT_USER_ID
+    )
+  };
+}
+function stripPublishedMcpSessionArgs(args) {
+  const stripped = { ...args };
+  for (const key of [
+    "session_id",
+    "sessionId",
+    "space_id",
+    "spaceId",
+    "user_id",
+    "userId"
+  ]) {
+    delete stripped[key];
+  }
+  return stripped;
+}
+function toPublishedSessionState(state) {
+  return {
+    session_id: state.sessionId,
+    space_id: state.spaceId,
+    user_id: state.userId,
+    status: state.status,
+    created_at: state.createdAt
+  };
+}
+async function indexPublishedMcpSession(c, state) {
+  const kv = c.env.SESSION_INDEX;
+  if (kv) await kv.put(`session:${state.sessionId}`, JSON.stringify(state));
+}
+async function ensurePublishedMcpSession(c, args) {
+  const { sessionId, spaceId, userId } = resolvePublishedMcpSessionArgs(args);
+  const stub = getDOStub(c.env, sessionId);
+  const existing = await stub.getSessionState();
+  if (existing && existing.status !== "stopped") {
+    return { stub, state: existing };
+  }
+  await stub.createSession({ sessionId, spaceId, userId });
+  const state = await stub.getSessionState() ?? {
+    sessionId,
+    spaceId,
+    userId,
+    status: "active",
+    createdAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  await indexPublishedMcpSession(c, state);
+  return { stub, state };
+}
+async function callSandboxToolThroughPublishedMcp(c, targetToolName, args) {
+  const { stub } = await ensurePublishedMcpSession(c, args);
+  const mcpAuthToken = resolveContainerMcpAuthToken(c.env);
+  if (!mcpAuthToken) {
+    throw new Error("Sandbox MCP auth token is not configured");
+  }
+  const response = await stub.forwardToContainer("/mcp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${mcpAuthToken}`
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: "published-mcp-call",
+      method: "tools/call",
+      params: {
+        name: targetToolName,
+        arguments: stripPublishedMcpSessionArgs(args)
+      }
+    }),
+    signal: c.req.raw.signal
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(text || `Sandbox MCP HTTP ${response.status}`);
+  }
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    throw new Error("Sandbox MCP returned non-JSON response");
+  }
+  if (!isRecord(payload)) {
+    throw new Error("Sandbox MCP returned invalid response");
+  }
+  if (isRecord(payload.error)) {
+    const message = typeof payload.error.message === "string" ? payload.error.message : JSON.stringify(payload.error);
+    throw new Error(message);
+  }
+  const result = payload.result;
+  if (isRecord(result) && Array.isArray(result.content) && result.content.every(
+    (item) => isRecord(item) && item.type === "text" && typeof item.text === "string"
+  )) {
+    return result;
+  }
+  return publishedMcpJson(result ?? null);
+}
+async function handlePublishedMcp(c) {
+  if (c.req.raw.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: { Allow: "POST, OPTIONS" }
+    });
+  }
+  if (c.req.raw.method !== "POST") {
+    return new Response(
+      JSON.stringify({
+        error: "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this endpoint"
+      }),
+      {
+        status: 405,
+        headers: {
+          "Content-Type": "application/json",
+          Allow: "POST, OPTIONS"
+        }
+      }
+    );
+  }
+  const auth = requirePublishedMcpAuth(c);
+  if (auth) return auth;
+  let body;
+  try {
+    body = await c.req.json();
+  } catch {
+    return jsonRpcError(null, -32700, "Parse error");
+  }
+  if (!isRecord(body)) return jsonRpcError(null, -32600, "Invalid Request");
+  const request = body;
+  const id = request.id;
+  if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
+    return jsonRpcError(id, -32600, "Invalid Request");
+  }
+  if (request.method === "initialize") {
+    return jsonRpcResponse(id, {
+      protocolVersion: "2024-11-05",
+      capabilities: { tools: {} },
+      serverInfo: {
+        name: "takos-computer",
+        version: "2.0.0"
+      }
+    });
+  }
+  if (request.method === "notifications/initialized") {
+    return new Response(null, { status: 204 });
+  }
+  if (request.method === "tools/list") {
+    return jsonRpcResponse(id, {
+      tools: publishedMcpTools.map(({ name, description, inputSchema }) => ({
+        name,
+        description,
+        inputSchema
+      }))
+    });
+  }
+  if (request.method !== "tools/call") {
+    return jsonRpcError(id, -32601, "Method not found");
+  }
+  if (!isRecord(request.params) || typeof request.params.name !== "string") {
+    return jsonRpcError(id, -32602, "Invalid params");
+  }
+  const tool = publishedMcpToolMap.get(request.params.name);
+  if (!tool) {
+    return jsonRpcError(id, -32602, `Unknown tool: ${request.params.name}`);
+  }
+  try {
+    const args = isRecord(request.params.arguments) ? request.params.arguments : {};
+    return jsonRpcResponse(id, await tool.handle(args, c));
+  } catch (error) {
+    return jsonRpcError(
+      id,
+      -32e3,
+      error instanceof Error ? error.message : String(error)
+    );
+  }
+}
+app.all("/mcp", handlePublishedMcp);
 async function forwardMcp(c) {
   const sessionId = sessionIdParam(c);
   if (sessionId instanceof Response) return sessionId;

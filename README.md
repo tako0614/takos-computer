@@ -49,10 +49,29 @@ proxy-token authentication and auto-sleep after inactivity.
 
 ## MCP Tools Reference
 
-Tools are accessed via MCP Streamable HTTP JSON-RPC at `/session/:id/mcp`.
-`POST` is the supported request method. Non-POST MCP requests are routed to the
-sandbox endpoint and receive an explicit method response instead of a route 404;
-server-to-client GET streams are not implemented for the sandbox endpoint.
+Agents use the published MCP Streamable HTTP endpoint at `/mcp`. It exposes
+stable `computer_*` tools, creates or reuses a sandbox session, and proxies tool
+calls into the session container. Direct session MCP remains available at
+`/session/:id/mcp` for callers that already hold a session proxy token.
+
+`POST` is the supported MCP request method. Non-POST MCP requests receive an
+explicit method response instead of a route 404; server-to-client GET streams
+are not implemented for the sandbox endpoint.
+
+### Published MCP Tools
+
+| Tool                       | Description                                                                                   |
+| -------------------------- | --------------------------------------------------------------------------------------------- |
+| `computer_session_create`  | Create or reuse a sandbox session. Optional: `session_id`, `space_id`, `user_id`              |
+| `computer_session_status`  | Get sandbox session state. Optional: `session_id`                                             |
+| `computer_session_destroy` | Destroy a sandbox session. Optional: `session_id`                                             |
+| `computer_shell_exec`      | Execute a shell command. Params: `command`, `timeout_ms?`, `cwd?`, `env?`, `session_id?`      |
+| `computer_file_read`       | Read workspace file contents. Params: `path`, `offset?`, `limit?`, `encoding?`, `session_id?` |
+| `computer_file_write`      | Write a workspace file. Params: `path`, `content`, `encoding?`, `create_dirs?`, `session_id?` |
+| `computer_file_list`       | List workspace directory entries. Params: `path`, `recursive?`, `glob?`, `session_id?`        |
+| `computer_file_info`       | Get workspace file metadata. Params: `path`, `session_id?`                                    |
+| `computer_process_list`    | List running processes. Optional: `session_id`                                                |
+| `computer_process_kill`    | Kill a managed process. Params: `pid`, `signal?`, `session_id?`                               |
 
 ### Sandbox Tools
 
@@ -76,6 +95,7 @@ resolution.
 
 | Method   | Path               | Description                                                                 |
 | -------- | ------------------ | --------------------------------------------------------------------------- |
+| `POST`   | `/mcp`             | Published MCP endpoint for agent tools. Auth: published MCP bearer token    |
 | `POST`   | `/create`          | Create a new sandbox session. Body: `{ sessionId, spaceId, userId }`        |
 | `GET`    | `/session/:id`     | Get session state.                                                          |
 | `DELETE` | `/session/:id`     | Destroy a session and its container.                                        |
@@ -148,16 +168,17 @@ deno task dev
 
 ## Environment Variables
 
-| Variable                     | Default  | Description                                                                                                                             |
-| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`                       | `8080`   | HTTP server listen port                                                                                                                 |
-| `SANDBOX_HOST_AUTH_TOKEN`    | _(none)_ | Required bearer token for sandbox-host admin/session routes; never injected into sandbox containers                                     |
-| `MCP_AUTH_TOKEN`             | _(none)_ | Required worker-to-container `/mcp` auth token; injected into the sandbox service but stripped from shell child processes               |
-| `MCP_ALLOW_UNAUTHENTICATED`  | `false`  | Set to `true` only for local/dev sandbox-service `/mcp` access without `MCP_AUTH_TOKEN`                                                 |
-| `TAKOS_TOKEN`                | _(none)_ | Optional Takos CLI bearer token available to the sandbox service; shell child processes only inherit it when `allow_takos_token` is set |
-| `TAKOS_API_URL`              | _(none)_ | Optional Takos API endpoint injected into sandbox containers as `TAKOS_API_URL`                                                         |
-| `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_ | Set to `1` only behind Takos dispatch so `X-Takos-Internal-Marker: 1` can authenticate routed GUI/API requests                          |
-| `SHUTDOWN_GRACE_MS`          | `15000`  | Grace period before force-exit on SIGTERM                                                                                               |
+| Variable                     | Default  | Description                                                                                                                                                                              |
+| ---------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                       | `8080`   | HTTP server listen port                                                                                                                                                                  |
+| `PUBLISHED_MCP_AUTH_TOKEN`   | _(none)_ | Bearer token for the published `/mcp` endpoint. Manifest deploys generate this from `auth.bearer.secretRef`; direct Wrangler deploys may fall back to `SANDBOX_HOST_AUTH_TOKEN` if unset |
+| `SANDBOX_HOST_AUTH_TOKEN`    | _(none)_ | Required bearer token for sandbox-host admin/session routes; never injected into sandbox containers                                                                                      |
+| `MCP_AUTH_TOKEN`             | _(none)_ | Required worker-to-container `/mcp` auth token; injected into the sandbox service but stripped from shell child processes                                                                |
+| `MCP_ALLOW_UNAUTHENTICATED`  | `false`  | Set to `true` only for local/dev sandbox-service `/mcp` access without `MCP_AUTH_TOKEN`                                                                                                  |
+| `TAKOS_TOKEN`                | _(none)_ | Optional Takos CLI bearer token available to the sandbox service; shell child processes only inherit it when `allow_takos_token` is set                                                  |
+| `TAKOS_API_URL`              | _(none)_ | Optional Takos API endpoint injected into sandbox containers as `TAKOS_API_URL`                                                                                                          |
+| `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_ | Set to `1` only behind Takos dispatch so `X-Takos-Internal-Marker: 1` can authenticate routed GUI/API requests                                                                           |
+| `SHUTDOWN_GRACE_MS`          | `15000`  | Grace period before force-exit on SIGTERM                                                                                                                                                |
 
 ## Cloudflare Worker Bindings
 
@@ -173,10 +194,15 @@ binding inside the sandbox-host worker itself.
 
 Deployment uses Wrangler with configuration files in `deploy/`.
 
-The checked-in `.takos/app.yml` builds the sandbox host worker and declares the
-managed `SESSION_INDEX` KV namespace plus generated `SANDBOX_HOST_AUTH_TOKEN`
-and `MCP_AUTH_TOKEN` secrets. It also consumes a managed Takos API key as
-`TAKOS_TOKEN`/`TAKOS_API_URL` for CLI use inside sandboxes. The manifest also
+The checked-in `.takos/app.yml` builds the sandbox host worker, publishes the
+dashboard `UiSurface`, publishes `/mcp` as `McpServer`, and declares the managed
+`SESSION_INDEX` KV namespace plus generated `SANDBOX_HOST_AUTH_TOKEN` and
+`MCP_AUTH_TOKEN` secrets, plus a generated `PUBLISHED_MCP_AUTH_TOKEN` service
+env for the `McpServer` publication. `PUBLISHED_MCP_AUTH_TOKEN` protects the
+published `/mcp` endpoint, `SANDBOX_HOST_AUTH_TOKEN` protects host admin/session
+routes, and `MCP_AUTH_TOKEN` protects MCP traffic between the worker and
+container. These tokens must be different. The manifest also consumes a managed
+Takos API key as `TAKOS_TOKEN`/`TAKOS_API_URL` for CLI use inside sandboxes and
 sets `TAKOS_TRUST_ROUTED_GUI_API=1` so dispatch-routed GUI/API calls can use
 Takos' stripped-and-injected `X-Takos-Internal-Marker` header. It declares the
 native Cloudflare Containers Durable Object binding for `SANDBOX_CONTAINER`
@@ -184,17 +210,15 @@ native Cloudflare Containers Durable Object binding for `SANDBOX_CONTAINER`
 metadata. `/readyz` is the manifest readiness path; `/healthz` remains a
 bootstrap-safe liveness probe.
 
-The session MCP endpoint is not published as a static `McpServer` catalog entry
-because `/gui/api/sandbox-session/:id/mcp` requires a concrete sandbox session
-ID. A future session resolver/catalog should expose concrete per-session MCP
-URLs after session creation. Until then, callers reach MCP through the GUI or
-session API. `MCP_AUTH_TOKEN` is the worker-to-container token only; it must be
-different from `SANDBOX_HOST_AUTH_TOKEN`. If the sandbox needs to run Takos CLI
-commands, provide a downscoped `TAKOS_TOKEN` instead. `shell_exec` only forwards
-that token when `allow_takos_token: true` is supplied; otherwise the child
-process sees the safe default environment. Wrangler remains a fallback
-production deployment path for operators that want to deploy outside the Takos
-manifest flow.
+The published `/mcp` endpoint is the agent-facing static catalog entry. It wraps
+session lifecycle and forwards sandbox operations to the concrete
+`/session/:id/mcp` container endpoint. Direct session MCP still requires a
+session id and proxy token. If the sandbox needs to run Takos CLI commands,
+provide a downscoped `TAKOS_TOKEN` instead. `shell_exec` only forwards that
+token when `allow_takos_token: true` is supplied; otherwise the child process
+sees the safe default environment. Wrangler remains a fallback production
+deployment path for operators that want to deploy outside the Takos manifest
+flow.
 
 ```bash
 wrangler deploy -c deploy/wrangler.sandbox-host.toml
