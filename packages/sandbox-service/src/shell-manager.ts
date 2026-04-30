@@ -4,8 +4,20 @@
  * Runs commands via Deno.Command with configurable timeout and output limits.
  */
 
+import { isAbsolute, relative, resolve, sep } from "node:path";
+
 const MAX_OUTPUT_BYTES = 256 * 1024; // 256 KB per stream
 const PROCESS_KILL_GRACE_MS = 1_000;
+const WORKSPACE_CWD_GUARD_SCRIPT = [
+  'workspace_root="$1"',
+  'user_command="$2"',
+  'current_cwd="$(pwd -P)" || exit 1',
+  'case "$current_cwd" in',
+  '  "$workspace_root"|"$workspace_root"/*) ;;',
+  '  *) echo "cwd is outside workspace" >&2; exit 1 ;;',
+  "esac",
+  'exec "$BASH" -c "$user_command"',
+].join("\n");
 const CONTROL_PLANE_ENV_DENYLIST = new Set([
   "MCP_AUTH_TOKEN",
   "SANDBOX_HOST_AUTH_TOKEN",
@@ -94,11 +106,14 @@ export interface ProcessKillResult {
 }
 
 export class ShellManager {
-  private defaultCwd: string;
+  private readonly workspaceRoot: string;
+  private readonly defaultCwd: string;
+  private workspaceRealRoot: string | null = null;
   private managedProcesses = new Map<number, Deno.ChildProcess>();
 
   constructor(defaultCwd = "/home/sandbox/workspace") {
-    this.defaultCwd = defaultCwd;
+    this.workspaceRoot = resolve(defaultCwd);
+    this.defaultCwd = this.workspaceRoot;
   }
 
   async exec(options: ShellExecOptions): Promise<ShellExecResult> {
@@ -113,7 +128,6 @@ export class ShellManager {
       };
     }
     const timeoutMs = normalizeTimeoutMs(options.timeout_ms);
-    const cwd = options.cwd ?? this.defaultCwd;
 
     let timedOut = false;
     let aborted = false;
@@ -149,8 +163,16 @@ export class ShellManager {
     }
 
     try {
+      const cwd = await this.resolveCwd(options.cwd ?? this.defaultCwd);
+      const workspaceRoot = await this.getWorkspaceRealRoot();
       const cmd = new Deno.Command("bash", {
-        args: ["-c", options.command],
+        args: [
+          "-c",
+          WORKSPACE_CWD_GUARD_SCRIPT,
+          "takos-shell-manager",
+          workspaceRoot,
+          options.command,
+        ],
         cwd,
         clearEnv: true,
         env: buildCommandEnv(options.env, {
@@ -232,6 +254,48 @@ export class ShellManager {
         this.managedProcesses.delete(process.pid);
       }
     });
+  }
+
+  private async resolveCwd(cwd: string): Promise<string> {
+    if (!cwd || cwd.includes("\0")) {
+      throw new Error("cwd must be a non-empty string");
+    }
+
+    const lexicalPath = isAbsolute(cwd)
+      ? resolve(cwd)
+      : resolve(this.workspaceRoot, cwd);
+    this.assertInsideWorkspace(lexicalPath);
+
+    const [workspaceRealRoot, cwdRealPath] = await Promise.all([
+      this.getWorkspaceRealRoot(),
+      Deno.realPath(lexicalPath),
+    ]);
+    const resolvedCwd = resolve(cwdRealPath);
+    this.assertInsideWorkspace(resolvedCwd, workspaceRealRoot);
+
+    const stat = await Deno.stat(resolvedCwd);
+    if (!stat.isDirectory) {
+      throw new Error("cwd must be a directory");
+    }
+    return resolvedCwd;
+  }
+
+  private async getWorkspaceRealRoot(): Promise<string> {
+    if (!this.workspaceRealRoot) {
+      this.workspaceRealRoot = resolve(await Deno.realPath(this.workspaceRoot));
+    }
+    return this.workspaceRealRoot;
+  }
+
+  private assertInsideWorkspace(path: string, root = this.workspaceRoot): void {
+    const rel = relative(root, path);
+    if (
+      rel === "" ||
+      (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
+    ) {
+      return;
+    }
+    throw new Error("cwd is outside workspace");
   }
 }
 

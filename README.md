@@ -168,17 +168,17 @@ deno task dev
 
 ## Environment Variables
 
-| Variable                     | Default  | Description                                                                                                                                                                              |
-| ---------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`                       | `8080`   | HTTP server listen port                                                                                                                                                                  |
-| `PUBLISHED_MCP_AUTH_TOKEN`   | _(none)_ | Bearer token for the published `/mcp` endpoint. Manifest deploys generate this from `auth.bearer.secretRef`; direct Wrangler deploys may fall back to `SANDBOX_HOST_AUTH_TOKEN` if unset |
-| `SANDBOX_HOST_AUTH_TOKEN`    | _(none)_ | Required bearer token for sandbox-host admin/session routes; never injected into sandbox containers                                                                                      |
-| `MCP_AUTH_TOKEN`             | _(none)_ | Required worker-to-container `/mcp` auth token; injected into the sandbox service but stripped from shell child processes                                                                |
-| `MCP_ALLOW_UNAUTHENTICATED`  | `false`  | Set to `true` only for local/dev sandbox-service `/mcp` access without `MCP_AUTH_TOKEN`                                                                                                  |
-| `TAKOS_TOKEN`                | _(none)_ | Optional Takos CLI bearer token available to the sandbox service; shell child processes only inherit it when `allow_takos_token` is set                                                  |
-| `TAKOS_API_URL`              | _(none)_ | Optional Takos API endpoint injected into sandbox containers as `TAKOS_API_URL`                                                                                                          |
-| `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_ | Set to `1` only behind Takos dispatch so `X-Takos-Internal-Marker: 1` can authenticate routed GUI/API requests                                                                           |
-| `SHUTDOWN_GRACE_MS`          | `15000`  | Grace period before force-exit on SIGTERM                                                                                                                                                |
+| Variable                     | Default  | Description                                                                                                                                                                                               |
+| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                       | `8080`   | HTTP server listen port                                                                                                                                                                                   |
+| `PUBLISHED_MCP_AUTH_TOKEN`   | _(none)_ | Required bearer token for the published `/mcp` endpoint. Manifest deploys generate this from `auth.bearer.secretRef`; direct Wrangler deploys must configure it separately from `SANDBOX_HOST_AUTH_TOKEN` |
+| `SANDBOX_HOST_AUTH_TOKEN`    | _(none)_ | Required bearer token for sandbox-host admin/session routes; never injected into sandbox containers                                                                                                       |
+| `MCP_AUTH_TOKEN`             | _(none)_ | Required worker-to-container `/mcp` auth token; injected into the sandbox service but stripped from shell child processes                                                                                 |
+| `MCP_ALLOW_UNAUTHENTICATED`  | `false`  | Set to `true` only for local/dev sandbox-service `/mcp` access without `MCP_AUTH_TOKEN`                                                                                                                   |
+| `TAKOS_TOKEN`                | _(none)_ | Optional Takos CLI bearer token available to the sandbox service; shell child processes only inherit it when `allow_takos_token` is set                                                                   |
+| `TAKOS_API_URL`              | _(none)_ | Optional Takos API endpoint injected into sandbox containers as `TAKOS_API_URL`                                                                                                                           |
+| `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_ | Set to `1` only behind Takos dispatch so `X-Takos-Internal-Marker: 1` can authenticate routed GUI/API requests                                                                                            |
+| `SHUTDOWN_GRACE_MS`          | `15000`  | Grace period before force-exit on SIGTERM                                                                                                                                                                 |
 
 ## Cloudflare Worker Bindings
 
@@ -248,18 +248,21 @@ Before deploying, replace placeholder IDs in the wrangler config files:
 - `REPLACE_WITH_STAGING_KV_NAMESPACE_ID`
 
 Then provision the required sandbox-host secrets for each environment.
-`SANDBOX_HOST_AUTH_TOKEN` protects host admin/session routes. `MCP_AUTH_TOKEN`
-protects host-to-container MCP traffic and is intentionally stripped from shell
-child processes. Use `TAKOS_TOKEN` for Takos CLI access inside the sandbox.
-Shell child processes inherit only a small safe environment allowlist by
-default; `TAKOS_TOKEN` is forwarded only when `shell_exec` is called with
-`allow_takos_token: true`, and `takos_token` can be supplied for a downscoped
-token. MCP and host admin tokens are stripped, and per-command `env` overrides
-reject sensitive variable names.
+`PUBLISHED_MCP_AUTH_TOKEN` protects the published `/mcp` endpoint and must be
+different from `SANDBOX_HOST_AUTH_TOKEN`. `SANDBOX_HOST_AUTH_TOKEN` protects
+host admin/session routes. `MCP_AUTH_TOKEN` protects host-to-container MCP
+traffic and is intentionally stripped from shell child processes. Use
+`TAKOS_TOKEN` for Takos CLI access inside the sandbox. Shell child processes
+inherit only a small safe environment allowlist by default; `TAKOS_TOKEN` is
+forwarded only when `shell_exec` is called with `allow_takos_token: true`, and
+`takos_token` can be supplied for a downscoped token. MCP and host admin tokens
+are stripped, and per-command `env` overrides reject sensitive variable names.
 
 ```bash
 wrangler secret put MCP_AUTH_TOKEN -c deploy/wrangler.sandbox-host.toml
 wrangler secret put MCP_AUTH_TOKEN -c deploy/wrangler.sandbox-host.toml --env staging
+wrangler secret put PUBLISHED_MCP_AUTH_TOKEN -c deploy/wrangler.sandbox-host.toml
+wrangler secret put PUBLISHED_MCP_AUTH_TOKEN -c deploy/wrangler.sandbox-host.toml --env staging
 wrangler secret put SANDBOX_HOST_AUTH_TOKEN -c deploy/wrangler.sandbox-host.toml
 wrangler secret put SANDBOX_HOST_AUTH_TOKEN -c deploy/wrangler.sandbox-host.toml --env staging
 wrangler secret put TAKOS_TOKEN -c deploy/wrangler.sandbox-host.toml

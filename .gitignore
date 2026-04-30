@@ -2,6 +2,7 @@ node_modules/
 dist/*
 !/dist/sandbox-host.js
 !/dist/browser-host.js
+packages/dashboard/dist/
 .wrangler/
 .env
 .env.*

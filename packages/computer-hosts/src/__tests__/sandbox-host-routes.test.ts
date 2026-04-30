@@ -157,7 +157,9 @@ function createEnv(
     : options.hostAuthToken;
   if (hostAuthToken !== null) env.SANDBOX_HOST_AUTH_TOKEN = hostAuthToken;
   const publishedMcpAuthToken = options.publishedMcpAuthToken;
-  if (publishedMcpAuthToken) {
+  if (publishedMcpAuthToken === undefined) {
+    env.PUBLISHED_MCP_AUTH_TOKEN = PUBLISHED_MCP_AUTH_TOKEN;
+  } else if (publishedMcpAuthToken) {
     env.PUBLISHED_MCP_AUTH_TOKEN = publishedMcpAuthToken;
   }
   const mcpAuthToken = options.mcpAuthToken === undefined
@@ -178,6 +180,10 @@ function fetchWorker(
     new Request(`https://sandbox-host.test${path}`, init),
     env,
   );
+}
+
+function publishedMcpAuthHeaders(): Record<string, string> {
+  return { Authorization: `Bearer ${PUBLISHED_MCP_AUTH_TOKEN}` };
 }
 
 Deno.test("sandbox host serves published GUI app routes", async () => {
@@ -261,6 +267,7 @@ Deno.test("sandbox host health reports missing required bindings", async () => {
   const { env } = createEnv({
     hostAuthToken: null,
     mcpAuthToken: null,
+    publishedMcpAuthToken: null,
   });
   delete env.SESSION_INDEX;
 
@@ -273,6 +280,7 @@ Deno.test("sandbox host health reports missing required bindings", async () => {
     missingBindings: [
       "SANDBOX_HOST_AUTH_TOKEN",
       "MCP_AUTH_TOKEN",
+      "PUBLISHED_MCP_AUTH_TOKEN",
       "SESSION_INDEX",
     ],
   });
@@ -282,6 +290,7 @@ Deno.test("sandbox host healthz is bootstrap-safe while readyz is strict", async
   const { env } = createEnv({
     hostAuthToken: null,
     mcpAuthToken: null,
+    publishedMcpAuthToken: null,
   });
   delete env.SESSION_INDEX;
 
@@ -294,6 +303,7 @@ Deno.test("sandbox host healthz is bootstrap-safe while readyz is strict", async
     missingBindings: [
       "SANDBOX_HOST_AUTH_TOKEN",
       "MCP_AUTH_TOKEN",
+      "PUBLISHED_MCP_AUTH_TOKEN",
       "SESSION_INDEX",
     ],
   });
@@ -312,6 +322,19 @@ Deno.test("sandbox host does not use host auth token as container MCP auth fallb
     status: "misconfigured",
     service: "takos-sandbox-host",
     missingBindings: ["MCP_AUTH_TOKEN"],
+  });
+});
+
+Deno.test("sandbox host readyz fails when published MCP auth token is missing", async () => {
+  const { env } = createEnv({ publishedMcpAuthToken: null });
+
+  const response = await fetchWorker(env, "/readyz");
+
+  assertEquals(response.status, 503);
+  assertEquals(await response.json(), {
+    status: "misconfigured",
+    service: "takos-sandbox-host",
+    missingBindings: ["PUBLISHED_MCP_AUTH_TOKEN"],
   });
 });
 
@@ -700,14 +723,14 @@ Deno.test("sandbox host fails closed when no container MCP auth token source is 
   assertEquals(mcpCalls, []);
 });
 
-Deno.test("sandbox host published MCP lists computer tools with host auth", async () => {
+Deno.test("sandbox host published MCP lists computer tools with published auth", async () => {
   const { env } = createEnv();
 
   const response = await fetchWorker(env, "/mcp", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...hostAuthHeaders(),
+      ...publishedMcpAuthHeaders(),
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -729,7 +752,7 @@ Deno.test("sandbox host published MCP lists computer tools with host auth", asyn
   }
 });
 
-Deno.test("sandbox host published MCP requires host auth", async () => {
+Deno.test("sandbox host published MCP requires published auth", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(env, "/mcp", {
@@ -746,10 +769,8 @@ Deno.test("sandbox host published MCP requires host auth", async () => {
   assertEquals(mcpCalls, []);
 });
 
-Deno.test("sandbox host published MCP prefers dedicated publication auth token", async () => {
-  const { env } = createEnv({
-    publishedMcpAuthToken: PUBLISHED_MCP_AUTH_TOKEN,
-  });
+Deno.test("sandbox host published MCP rejects host auth token", async () => {
+  const { env, mcpCalls } = createEnv();
 
   const hostTokenResponse = await fetchWorker(env, "/mcp", {
     method: "POST",
@@ -764,12 +785,17 @@ Deno.test("sandbox host published MCP prefers dedicated publication auth token",
     }),
   });
   assertEquals(hostTokenResponse.status, 401);
+  assertEquals(mcpCalls, []);
+});
 
-  const publishedTokenResponse = await fetchWorker(env, "/mcp", {
+Deno.test("sandbox host published MCP fails closed when publication auth token is missing", async () => {
+  const { env, mcpCalls } = createEnv({ publishedMcpAuthToken: null });
+
+  const response = await fetchWorker(env, "/mcp", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${PUBLISHED_MCP_AUTH_TOKEN}`,
+      ...hostAuthHeaders(),
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -777,7 +803,12 @@ Deno.test("sandbox host published MCP prefers dedicated publication auth token",
       method: "tools/list",
     }),
   });
-  assertEquals(publishedTokenResponse.status, 200);
+
+  assertEquals(response.status, 503);
+  assertEquals(await response.json(), {
+    error: "Published MCP auth token is not configured",
+  });
+  assertEquals(mcpCalls, []);
 });
 
 Deno.test("sandbox host published MCP auto-creates a session and proxies tool calls", async () => {
@@ -787,7 +818,7 @@ Deno.test("sandbox host published MCP auto-creates a session and proxies tool ca
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...hostAuthHeaders(),
+      ...publishedMcpAuthHeaders(),
     },
     body: JSON.stringify({
       jsonrpc: "2.0",

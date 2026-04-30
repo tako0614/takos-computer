@@ -36,8 +36,10 @@ const en = {
   sandbox: "Sandbox:",
   sandboxSession: "+ Sandbox Session",
   sessionId: "Session ID",
+  sessionIdPlaceholder: "e.g. my-session-01",
   space: "Space",
   spaceId: "Space ID",
+  spaceIdPlaceholder: "e.g. space-abc",
   status: "Status",
   starting: "starting",
   stopped: "stopped",
@@ -47,6 +49,7 @@ const en = {
   timedOut: "(timed out)",
   typeCommandHint: "Type a command and press Enter.\n",
   userId: "User ID",
+  userIdPlaceholder: "e.g. user-123",
 } as const;
 
 type TranslationKey = keyof typeof en;
@@ -82,8 +85,10 @@ const ja: Record<TranslationKey, string> = {
   sandbox: "サンドボックス:",
   sandboxSession: "+ サンドボックスセッション",
   sessionId: "セッション ID",
+  sessionIdPlaceholder: "例: my-session-01",
   space: "スペース",
   spaceId: "スペース ID",
+  spaceIdPlaceholder: "例: space-abc",
   status: "状態",
   starting: "起動中",
   stopped: "停止中",
@@ -93,6 +98,7 @@ const ja: Record<TranslationKey, string> = {
   timedOut: "(タイムアウト)",
   typeCommandHint: "コマンドを入力して Enter を押してください。\n",
   userId: "ユーザー ID",
+  userIdPlaceholder: "例: user-123",
 };
 
 const translations: Record<Language, Record<TranslationKey, string>> = {

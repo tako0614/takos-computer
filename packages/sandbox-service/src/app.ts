@@ -7,6 +7,7 @@ export type SandboxServiceOptions = {
   port?: number;
   shutdownGraceMs?: number;
   serviceName?: string;
+  workspaceRoot?: string;
   mcpAuthToken?: string | null;
   allowUnauthenticatedMcp?: boolean;
 };
@@ -18,8 +19,8 @@ export function createSandboxServiceApp(options: SandboxServiceOptions = {}): {
   logger: ReturnType<typeof createLogger>;
 } {
   const logger = createLogger({ service: options.serviceName ?? "sandbox" });
-  const shell = new ShellManager();
-  const fs = new FsManager();
+  const shell = new ShellManager(options.workspaceRoot);
+  const fs = new FsManager(options.workspaceRoot);
   const app = new Hono();
   const mcpAuthToken = options.mcpAuthToken === null
     ? undefined

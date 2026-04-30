@@ -66,8 +66,7 @@ function resolveContainerMcpAuthToken(env: Env): string | undefined {
 }
 
 function resolvePublishedMcpAuthToken(env: Env): string | undefined {
-  return env.PUBLISHED_MCP_AUTH_TOKEN || env.SANDBOX_HOST_AUTH_TOKEN ||
-    undefined;
+  return env.PUBLISHED_MCP_AUTH_TOKEN || undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -555,6 +554,9 @@ function collectMissingRuntimeBindings(env: Env): string[] {
   if (!env.SANDBOX_HOST_AUTH_TOKEN) missing.push("SANDBOX_HOST_AUTH_TOKEN");
   if (!resolveContainerMcpAuthToken(env)) {
     missing.push("MCP_AUTH_TOKEN");
+  }
+  if (!resolvePublishedMcpAuthToken(env)) {
+    missing.push("PUBLISHED_MCP_AUTH_TOKEN");
   }
   if (!env.SESSION_INDEX) missing.push("SESSION_INDEX");
   return missing;

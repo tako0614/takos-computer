@@ -50,13 +50,25 @@ export default function CreateModal(props: {
           </h2>
           <form ref={formRef} onSubmit={handleSubmit}>
             <label>{t("sessionId")}</label>
-            <input name="sessionId" required placeholder="e.g. my-session-01" />
+            <input
+              name="sessionId"
+              required
+              placeholder={t("sessionIdPlaceholder")}
+            />
 
             <label>{t("spaceId")}</label>
-            <input name="spaceId" required placeholder="e.g. space-abc" />
+            <input
+              name="spaceId"
+              required
+              placeholder={t("spaceIdPlaceholder")}
+            />
 
             <label>{t("userId")}</label>
-            <input name="userId" required placeholder="e.g. user-123" />
+            <input
+              name="userId"
+              required
+              placeholder={t("userIdPlaceholder")}
+            />
 
             <div
               class="flex gap-2"

@@ -29,6 +29,7 @@ Deno.test("createSandboxServiceApp: health endpoint returns 200", async () => {
 Deno.test("createSandboxServiceApp: MCP endpoint handles tools/call", async () => {
   const { app } = createSandboxServiceApp({
     serviceName: "test-sandbox",
+    workspaceRoot: Deno.cwd(),
     mcpAuthToken: MCP_AUTH_TOKEN,
   });
 

@@ -9,6 +9,7 @@
 #
 # Required secrets in both prod and staging:
 # - SANDBOX_HOST_AUTH_TOKEN
+# - PUBLISHED_MCP_AUTH_TOKEN (published /mcp auth only)
 # - MCP_AUTH_TOKEN (worker-to-container /mcp auth only)
 # Optional Takos CLI env injected into the sandbox container:
 # - TAKOS_TOKEN

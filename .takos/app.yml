@@ -3,24 +3,25 @@ version: "2.1.0"
 
 publish:
   - name: computer-ui
-    publisher: web
-    type: UiSurface
-    outputs:
-      url:
-        route: /gui
-    title: Computer
-    spec:
+    type: takos.ui-surface.v1
+    display:
+      title: Computer
       description: Browser automation and sandbox computer
       icon: /icons/computer.svg
       category: agent
       sortOrder: 100
-  - name: computer-mcp
-    publisher: web
-    type: McpServer
     outputs:
       url:
-        route: /mcp
-    title: Computer MCP
+        kind: url
+        routeRef: gui
+  - name: computer-mcp
+    type: takos.mcp-server.v1
+    display:
+      title: Computer MCP
+    outputs:
+      url:
+        kind: url
+        routeRef: mcp
     auth:
       bearer:
         secretRef: PUBLISHED_MCP_AUTH_TOKEN
@@ -93,25 +94,40 @@ resources:
     generate: true
     bind: MCP_AUTH_TOKEN
     to: web
+  published-mcp-token:
+    type: secret
+    generate: true
+    bind: PUBLISHED_MCP_AUTH_TOKEN
+    to: web
 
 routes:
-  - target: web
+  - id: mcp
+    target: web
     path: /mcp
-  - target: web
+  - id: healthz
+    target: web
     path: /healthz
-  - target: web
+  - id: health
+    target: web
     path: /health
-  - target: web
+  - id: readyz
+    target: web
     path: /readyz
-  - target: web
+  - id: create
+    target: web
     path: /create
-  - target: web
+  - id: gui
+    target: web
     path: /gui
-  - target: web
+  - id: icon
+    target: web
     path: /icons/computer.svg
-  - target: web
+  - id: session
+    target: web
     path: /session
-  - target: web
+  - id: session-mcp
+    target: web
     path: /session/:id/mcp
-  - target: web
+  - id: gui-session-mcp
+    target: web
     path: /gui/api/sandbox-session/:id/mcp

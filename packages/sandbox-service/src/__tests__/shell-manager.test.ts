@@ -37,6 +37,41 @@ Deno.test("ShellManager: exec with custom cwd", async () => {
   }
 });
 
+Deno.test("ShellManager: exec rejects cwd outside workspace", async () => {
+  const workspaceDir = await Deno.makeTempDir();
+  const outsideDir = await Deno.makeTempDir();
+  try {
+    const shell = new ShellManager(workspaceDir);
+    const result = await shell.exec({ command: "pwd", cwd: outsideDir });
+
+    assertEquals(result.stdout, "");
+    assert(result.stderr.includes("cwd is outside workspace"));
+    assertEquals(result.exit_code, 1);
+  } finally {
+    await Deno.remove(workspaceDir, { recursive: true });
+    await Deno.remove(outsideDir, { recursive: true });
+  }
+});
+
+Deno.test("ShellManager: exec rejects symlink cwd escaping workspace", async () => {
+  const workspaceDir = await Deno.makeTempDir();
+  const outsideDir = await Deno.makeTempDir();
+  const linkPath = `${workspaceDir}/escape`;
+  try {
+    await Deno.symlink(outsideDir, linkPath, { type: "dir" });
+
+    const shell = new ShellManager(workspaceDir);
+    const result = await shell.exec({ command: "pwd", cwd: linkPath });
+
+    assertEquals(result.stdout, "");
+    assert(result.stderr.includes("cwd is outside workspace"));
+    assertEquals(result.exit_code, 1);
+  } finally {
+    await Deno.remove(workspaceDir, { recursive: true });
+    await Deno.remove(outsideDir, { recursive: true });
+  }
+});
+
 Deno.test("ShellManager: exec command that fails returns non-zero exit_code", async () => {
   const tmpDir = await Deno.makeTempDir();
   try {

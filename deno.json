@@ -23,12 +23,14 @@
   },
   "lint": {
     "exclude": [
-      "dist"
+      "dist",
+      "packages/dashboard/dist"
     ]
   },
   "fmt": {
     "exclude": [
       "dist",
+      "packages/dashboard/dist",
       "packages/computer-hosts/src/gui/app.html",
       "packages/computer-hosts/src/gui/assets.generated.ts"
     ]
