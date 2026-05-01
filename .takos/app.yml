@@ -1,9 +1,9 @@
 name: takos-computer
 version: "2.1.0"
 
-publish:
+publications:
   - name: computer-ui
-    type: takos.ui-surface.v1
+    type: publication.http-endpoint@v1
     display:
       title: Computer
       description: Browser automation and sandbox computer
@@ -15,7 +15,7 @@ publish:
         kind: url
         routeRef: gui
   - name: computer-mcp
-    type: takos.mcp-server.v1
+    type: publication.mcp-server@v1
     display:
       title: Computer MCP
     outputs:
@@ -54,9 +54,10 @@ compute:
             - repos:write
             - mcp:invoke
             - events:subscribe
-        env:
-          endpoint: TAKOS_API_URL
-          apiKey: TAKOS_TOKEN
+        inject:
+          env:
+            endpoint: TAKOS_API_URL
+            apiKey: TAKOS_TOKEN
     build:
       fromWorkflow:
         path: .takos/workflows/deploy.yml

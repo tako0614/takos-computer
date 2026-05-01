@@ -102,6 +102,26 @@ Deno.test("createSandboxServiceApp: MCP endpoint rejects missing bearer token", 
   assertEquals(res.status, 401);
 });
 
+Deno.test("createSandboxServiceApp: MCP endpoint rejects GET streams explicitly", async () => {
+  const { app } = createSandboxServiceApp({
+    serviceName: "test-sandbox",
+    mcpAuthToken: MCP_AUTH_TOKEN,
+  });
+
+  const req = new Request("http://localhost/mcp", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${MCP_AUTH_TOKEN}` },
+  });
+
+  const res = await app.fetch(req);
+  assertEquals(res.status, 405);
+  assertEquals(res.headers.get("allow"), "POST, OPTIONS");
+  assertEquals(await res.json(), {
+    error:
+      "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this sandbox endpoint",
+  });
+});
+
 Deno.test("createSandboxServiceApp: default service name is 'sandbox'", async () => {
   const { app } = createSandboxServiceApp();
 

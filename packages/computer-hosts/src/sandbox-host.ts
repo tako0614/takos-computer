@@ -1259,17 +1259,44 @@ async function handlePublishedMcp(c: AppContext): Promise<Response> {
 
 app.all("/mcp", handlePublishedMcp);
 
+function mcpMethodNotAllowed(): Response {
+  return new Response(
+    JSON.stringify({
+      error:
+        "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this endpoint",
+    }),
+    {
+      status: 405,
+      headers: {
+        "Content-Type": "application/json",
+        Allow: "POST, OPTIONS",
+      },
+    },
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Session MCP — forward to container
 // ---------------------------------------------------------------------------
 
 async function forwardMcp(c: AppContext): Promise<Response> {
+  if (c.req.raw.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: { Allow: "POST, OPTIONS" },
+    });
+  }
+
   const sessionId = sessionIdParam(c);
   if (sessionId instanceof Response) return sessionId;
   const stub = getDOStub(c.env, sessionId);
   try {
     const auth = await authorizeSessionAccess(c, sessionId, stub);
     if (auth) return auth;
+
+    if (c.req.raw.method !== "POST") {
+      return mcpMethodNotAllowed();
+    }
 
     const mcpAuthToken = resolveContainerMcpAuthToken(c.env);
     if (!mcpAuthToken) {

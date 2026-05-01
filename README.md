@@ -54,9 +54,10 @@ stable `computer_*` tools, creates or reuses a sandbox session, and proxies tool
 calls into the session container. Direct session MCP remains available at
 `/session/:id/mcp` for callers that already hold a session proxy token.
 
-`POST` is the supported MCP request method. Non-POST MCP requests receive an
-explicit method response instead of a route 404; server-to-client GET streams
-are not implemented for the sandbox endpoint.
+`POST` is the supported MCP request method. `OPTIONS` returns the allowed
+methods. Other MCP methods, including Streamable HTTP server-to-client `GET`
+streams, fail fast with `405 Method Not Allowed` and are not proxied to the
+sandbox container.
 
 ### Published MCP Tools
 
@@ -93,28 +94,29 @@ resolution.
 
 ### Session Lifecycle
 
-| Method   | Path               | Description                                                                 |
-| -------- | ------------------ | --------------------------------------------------------------------------- |
-| `POST`   | `/mcp`             | Published MCP endpoint for agent tools. Auth: published MCP bearer token    |
-| `POST`   | `/create`          | Create a new sandbox session. Body: `{ sessionId, spaceId, userId }`        |
-| `GET`    | `/session/:id`     | Get session state.                                                          |
-| `DELETE` | `/session/:id`     | Destroy a session and its container.                                        |
-| `POST`   | `/session/:id/mcp` | Forward MCP request to the container.                                       |
-| `GET`    | `/session/:id/mcp` | Forward MCP method negotiation to the container; stream GET is unsupported. |
-| `GET`    | `/health`          | Health check.                                                               |
+| Method   | Path               | Description                                                              |
+| -------- | ------------------ | ------------------------------------------------------------------------ |
+| `POST`   | `/mcp`             | Published MCP endpoint for agent tools. Auth: published MCP bearer token |
+| `GET`    | `/mcp`             | Returns `405`; server-to-client MCP stream GET is unsupported.           |
+| `POST`   | `/create`          | Create a new sandbox session. Body: `{ sessionId, spaceId, userId }`     |
+| `GET`    | `/session/:id`     | Get session state.                                                       |
+| `DELETE` | `/session/:id`     | Destroy a session and its container.                                     |
+| `POST`   | `/session/:id/mcp` | Forward MCP request to the container.                                    |
+| `GET`    | `/session/:id/mcp` | Returns `405`; server-to-client MCP stream GET is unsupported.           |
+| `GET`    | `/health`          | Health check.                                                            |
 
 ### Dashboard Routes
 
-| Method   | Path                               | Description                                              |
-| -------- | ---------------------------------- | -------------------------------------------------------- |
-| `GET`    | `/gui`                             | Dashboard UI.                                            |
-| `GET`    | `/gui/*`                           | Dashboard UI route fallback.                             |
-| `GET`    | `/gui/api/sandbox-sessions`        | List dashboard sandbox sessions.                         |
-| `POST`   | `/gui/api/sandbox-create`          | Create a dashboard sandbox session.                      |
-| `GET`    | `/gui/api/sandbox-session/:id`     | Get dashboard sandbox session state.                     |
-| `DELETE` | `/gui/api/sandbox-session/:id`     | Destroy a dashboard sandbox session.                     |
-| `POST`   | `/gui/api/sandbox-session/:id/mcp` | Proxy MCP route for the sandbox dashboard.               |
-| `GET`    | `/gui/api/sandbox-session/:id/mcp` | Proxy MCP method negotiation; stream GET is unsupported. |
+| Method   | Path                               | Description                                                    |
+| -------- | ---------------------------------- | -------------------------------------------------------------- |
+| `GET`    | `/gui`                             | Dashboard UI.                                                  |
+| `GET`    | `/gui/*`                           | Dashboard UI route fallback.                                   |
+| `GET`    | `/gui/api/sandbox-sessions`        | List dashboard sandbox sessions.                               |
+| `POST`   | `/gui/api/sandbox-create`          | Create a dashboard sandbox session.                            |
+| `GET`    | `/gui/api/sandbox-session/:id`     | Get dashboard sandbox session state.                           |
+| `DELETE` | `/gui/api/sandbox-session/:id`     | Destroy a dashboard sandbox session.                           |
+| `POST`   | `/gui/api/sandbox-session/:id/mcp` | Proxy MCP route for the sandbox dashboard.                     |
+| `GET`    | `/gui/api/sandbox-session/:id/mcp` | Returns `405`; server-to-client MCP stream GET is unsupported. |
 
 Direct dashboard access requires a GUI auth cookie or an explicit bearer/header
 token on API calls. For standalone operator access, open

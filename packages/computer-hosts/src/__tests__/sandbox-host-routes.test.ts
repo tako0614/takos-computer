@@ -657,7 +657,30 @@ Deno.test("sandbox host accepts explicit proxy token header for MCP route", asyn
   }]);
 });
 
-Deno.test("sandbox host forwards non-POST MCP compatibility requests instead of 404", async () => {
+Deno.test("sandbox host rejects session MCP GET stream requests without proxying", async () => {
+  const { env, mcpCalls } = createEnv();
+
+  const response = await fetchWorker(
+    env,
+    "/session/session-1/mcp",
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${SESSION_PROXY_TOKEN}`,
+      },
+    },
+  );
+
+  assertEquals(response.status, 405);
+  assertEquals(response.headers.get("allow"), "POST, OPTIONS");
+  assertEquals(await response.json(), {
+    error:
+      "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this endpoint",
+  });
+  assertEquals(mcpCalls, []);
+});
+
+Deno.test("sandbox host rejects GUI MCP GET stream requests without proxying", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(
@@ -671,17 +694,27 @@ Deno.test("sandbox host forwards non-POST MCP compatibility requests instead of 
     },
   );
 
-  assertEquals(response.status, 200);
+  assertEquals(response.status, 405);
+  assertEquals(response.headers.get("allow"), "POST, OPTIONS");
   assertEquals(await response.json(), {
-    ok: true,
-    path: "/mcp",
-    body: null,
+    error:
+      "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this endpoint",
   });
-  assertEquals(mcpCalls, [{
-    path: "/mcp",
-    authorization: `Bearer ${MCP_AUTH_TOKEN}`,
-    body: null,
-  }]);
+  assertEquals(mcpCalls, []);
+});
+
+Deno.test("sandbox host allows session MCP OPTIONS without proxying", async () => {
+  const { env, mcpCalls } = createEnv();
+
+  const response = await fetchWorker(
+    env,
+    "/session/session-1/mcp",
+    { method: "OPTIONS" },
+  );
+
+  assertEquals(response.status, 204);
+  assertEquals(response.headers.get("allow"), "POST, OPTIONS");
+  assertEquals(mcpCalls, []);
 });
 
 Deno.test("sandbox host rejects MCP without a valid session proxy token", async () => {
