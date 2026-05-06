@@ -1,6 +1,7 @@
 {
   "name": "@takos-computer/computer-hosts",
   "version": "1.0.0",
+  "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
     "./sandbox-host": "./src/sandbox-host.ts",
