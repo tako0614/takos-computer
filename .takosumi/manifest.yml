@@ -1,0 +1,70 @@
+apiVersion: "1.0"
+kind: Manifest
+metadata:
+  name: takos-computer
+  labels:
+    managed-by: takosumi-git
+    takos.app: computer
+imports:
+  - alias: account-auth
+    service: takosumi.account.auth@v1
+    refreshPolicy:
+      kind: ttl
+      ttl: 300s
+resources:
+  - shape: worker@v1
+    name: computer-host
+    provider: "@takos/cloudflare-workers"
+    spec:
+      artifact:
+        kind: js-bundle
+        hash: dist/sandbox-host.js
+      compatibilityDate: "2025-01-01"
+      compatibilityFlags:
+        - nodejs_compat
+        - no_handle_cross_request_promise_resolution
+      env:
+        TAKOS_TRUST_ROUTED_GUI_API: "1"
+      routes:
+        - /mcp
+        - /gui
+        - /gui/*
+        - /healthz
+        - /health
+        - /readyz
+        - /create
+        - /session
+        - /session/:id
+        - /session/:id/mcp
+        - /icons/computer.svg
+    metadata:
+      takosDefaultApp:
+        publications:
+          - name: computer-ui
+            type: publication.http-endpoint@v1
+            route: /gui
+          - name: computer-mcp
+            type: publication.mcp-server@v1
+            transport: streamable-http
+            route: /mcp
+        cloudflare:
+          kvNamespaces:
+            - binding: SESSION_INDEX
+              purpose: sandbox session index
+          generatedSecrets:
+            - SANDBOX_HOST_AUTH_TOKEN
+            - MCP_AUTH_TOKEN
+            - PUBLISHED_MCP_AUTH_TOKEN
+          containers:
+            - binding: SANDBOX_CONTAINER
+              className: SandboxSessionContainer
+              dockerfile: apps/sandbox/Dockerfile
+              port: 8080
+              healthcheckPath: /healthz
+              instanceType: basic
+              maxInstances: 100
+    workflowRef:
+      file: build.yml
+      job: build
+      artifact: sandbox-host
+      target: spec.artifact.hash

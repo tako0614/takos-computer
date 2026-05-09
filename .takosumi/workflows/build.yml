@@ -1,0 +1,10 @@
+version: "0"
+jobs:
+  - name: build
+    steps:
+      - name: build-sandbox-host
+        run: |
+          deno task build:all
+          echo "TAKOSUMI_ARTIFACT=dist/sandbox-host.js"
+    artifact:
+      name: sandbox-host

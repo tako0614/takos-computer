@@ -196,6 +196,18 @@ binding inside the sandbox-host worker itself.
 
 Deployment uses Wrangler with configuration files in `deploy/`.
 
+## Takosumi Install
+
+This repository includes `.takosumi/app.yml` for Git URL install through
+takosumi-git. The install metadata declares the app identity, OIDC binding,
+Takos resource AppGrants, the published MCP endpoint, and the Cloudflare Worker
+host bundle generated from `.takosumi/workflows/build.yml`.
+
+The kernel manifest models the host Worker as `worker@v1`. Cloudflare
+Containers, Durable Object binding, KV session index, and generated MCP tokens
+are recorded as provider-specific metadata because the current portable Takosumi
+shape catalog does not yet expose an attached-container binding.
+
 The checked-in `.takos/app.yml` builds the sandbox host worker, publishes the
 dashboard `UiSurface`, publishes `/mcp` as `McpServer`, and declares the managed
 `SESSION_INDEX` KV namespace plus generated `SANDBOX_HOST_AUTH_TOKEN` and
