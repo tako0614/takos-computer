@@ -5,6 +5,6 @@ jobs:
       - name: build-sandbox-host
         run: |
           deno task build:all
-          echo "TAKOSUMI_ARTIFACT=dist/sandbox-host.js"
+          echo "TAKOSUMI_ARTIFACT=sha256:$(sha256sum dist/sandbox-host.js | cut -d ' ' -f 1)"
     artifact:
       name: sandbox-host

@@ -208,21 +208,21 @@ Containers, Durable Object binding, KV session index, and generated MCP tokens
 are recorded as provider-specific metadata because the current portable Takosumi
 shape catalog does not yet expose an attached-container binding.
 
-The checked-in `.takos/app.yml` builds the sandbox host worker, publishes the
-dashboard `UiSurface`, publishes `/mcp` as `McpServer`, and declares the managed
-`SESSION_INDEX` KV namespace plus generated `SANDBOX_HOST_AUTH_TOKEN` and
-`MCP_AUTH_TOKEN` secrets, plus a generated `PUBLISHED_MCP_AUTH_TOKEN` service
-env for the `McpServer` publication. `PUBLISHED_MCP_AUTH_TOKEN` protects the
-published `/mcp` endpoint, `SANDBOX_HOST_AUTH_TOKEN` protects host admin/session
-routes, and `MCP_AUTH_TOKEN` protects MCP traffic between the worker and
-container. These tokens must be different. The manifest also consumes a managed
-Takos API key as `TAKOS_TOKEN`/`TAKOS_API_URL` for CLI use inside sandboxes and
-sets `TAKOS_TRUST_ROUTED_GUI_API=1` so dispatch-routed GUI/API calls can use
-Takos' stripped-and-injected `X-Takos-Internal-Marker` header. It declares the
-native Cloudflare Containers Durable Object binding for `SANDBOX_CONTAINER`
-(`SandboxSessionContainer`) and the `apps/sandbox/Dockerfile` container image
-metadata. `/readyz` is the manifest readiness path; `/healthz` remains a
-bootstrap-safe liveness probe.
+The checked-in `.takosumi/app.yml` declares install metadata, and
+`.takosumi/manifest.yml` builds the sandbox host worker, exposes the dashboard
+under `/gui`, exposes `/mcp`, and records the managed `SESSION_INDEX` KV
+namespace plus generated `SANDBOX_HOST_AUTH_TOKEN`, `MCP_AUTH_TOKEN`, and
+`PUBLISHED_MCP_AUTH_TOKEN` service env requirements. `PUBLISHED_MCP_AUTH_TOKEN`
+protects the published `/mcp` endpoint, `SANDBOX_HOST_AUTH_TOKEN` protects host
+admin/session routes, and `MCP_AUTH_TOKEN` protects MCP traffic between the
+worker and container. These tokens must be different. The manifest also consumes
+a managed Takos API key as `TAKOS_TOKEN`/`TAKOS_API_URL` for CLI use inside
+sandboxes and sets `TAKOS_TRUST_ROUTED_GUI_API=1` so dispatch-routed GUI/API
+calls can use Takos' stripped-and-injected `X-Takos-Internal-Marker` header. It
+declares the native Cloudflare Containers Durable Object binding for
+`SANDBOX_CONTAINER` (`SandboxSessionContainer`) and the
+`apps/sandbox/Dockerfile` container image metadata. `/readyz` is the manifest
+readiness path; `/healthz` remains a bootstrap-safe liveness probe.
 
 The published `/mcp` endpoint is the agent-facing static catalog entry. It wraps
 session lifecycle and forwards sandbox operations to the concrete

@@ -37,16 +37,6 @@ bindings:
     required: true
     consumePath: /gui/api/auth/launch
     maxLifetimeSeconds: 300
-serviceImports:
-  - binding: account-auth
-    service: takosumi.account.auth@v1
-    alias: account-auth
-    endpointRoles:
-      - oidc-issuer
-      - install-launch
-    refreshPolicy:
-      kind: ttl
-      ttl: 300s
 install:
   healthcheckPath: /readyz
   postInstallLaunchPath: /gui/api/auth/launch
