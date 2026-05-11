@@ -8,7 +8,7 @@ metadata:
   homepage: https://github.com/tako0614/takos-computer
 source:
   git: https://github.com/tako0614/takos-computer.git
-  ref: v2.1.1
+  ref: v2.1.2
 entry:
   manifest: .takosumi/manifest.yml
 runtime:
