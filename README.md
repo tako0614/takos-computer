@@ -1,8 +1,16 @@
 # takos-computer
 
-Containerized sandbox execution environment for Takos, exposed through MCP and a
-small dashboard. It runs on Cloudflare Workers + Containers and is split between
-a sandbox container and the worker-side dashboard/proxy layer.
+takos-computer is a standalone product / independent repository that provides a
+containerized sandbox execution environment for AI agents, exposed through MCP
+and a small dashboard. It runs on Cloudflare Workers + Containers and is split
+between a sandbox container and the worker-side dashboard/proxy layer.
+
+It is shipped as a bundled 1st-party InstallableApp with the Takos distribution
+(auto-installed into new spaces as a user-facing convenience). Bundling is not
+an architectural privilege: takos-computer is recorded as a normal
+AppInstallation entry and users can uninstall it like any other app. The sandbox
+/ MCP surface itself has no Takos-specific coupling and can be consumed by any
+MCP-compatible agent host.
 
 ## Architecture
 
