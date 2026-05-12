@@ -3,11 +3,12 @@
 takos-computer はエージェント向けの Linux サンドボックスコンテナと
 ダッシュボードを提供する独立リポジトリ / 独立 product です。
 
-Takos distribution が bundled として ship する 1st-party InstallableApp であり、
-新規 space 作成時に auto-install されますが、これは user convenience であって
-architectural privilege ではありません。通常の AppInstallation entry として
-記録され、user は uninstall できます。 MCP / sandbox surface 自体に
-Takos-specific な結合はなく、 MCP 互換 agent host から利用できます。
+Takos distribution が bundled として ship し Takosumi 上で動く 1st-party
+InstallableApp であり、新規 space 作成時に auto-install されますが、これは user
+convenience であって architectural privilege ではありません。通常の
+AppInstallation entry として 記録され、user は uninstall できます。 MCP /
+sandbox surface 自体に Takos-specific な結合はなく、 MCP 互換 agent host
+から利用できます。
 
 ## リポジトリ構成
 

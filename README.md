@@ -6,11 +6,11 @@ and a small dashboard. It runs on Cloudflare Workers + Containers and is split
 between a sandbox container and the worker-side dashboard/proxy layer.
 
 It is shipped as a bundled 1st-party InstallableApp with the Takos distribution
-(auto-installed into new spaces as a user-facing convenience). Bundling is not
-an architectural privilege: takos-computer is recorded as a normal
-AppInstallation entry and users can uninstall it like any other app. The sandbox
-/ MCP surface itself has no Takos-specific coupling and can be consumed by any
-MCP-compatible agent host.
+and deployed as a normal app on Takosumi (auto-installed into new spaces as a
+user-facing convenience). Bundling is not an architectural privilege:
+takos-computer is recorded as a normal AppInstallation entry and users can
+uninstall it like any other app. The sandbox / MCP surface itself has no
+Takos-specific coupling and can be consumed by any MCP-compatible agent host.
 
 ## Architecture
 
