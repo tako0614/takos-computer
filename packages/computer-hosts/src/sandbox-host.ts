@@ -231,8 +231,7 @@ export class SandboxSessionContainer extends HostContainerRuntime<Env> {
     await this.ensureSessionStateLoaded();
     this.applyContainerEnv();
     this.renewActivityTimeout();
-    const tcpPort = (this as unknown as HostContainerInternals).container
-      .getTcpPort(8080);
+    const tcpPort = this.container.getTcpPort(8080);
     const request = new Request(`http://internal${path}`, init);
     return tcpPort.fetch(request.url, request);
   }
@@ -249,9 +248,7 @@ function getDOStub(
   sessionId: string,
 ): DurableObjectStub & SandboxSessionContainer {
   const id = env.SANDBOX_CONTAINER.idFromName(sessionId);
-  return env.SANDBOX_CONTAINER.get(id) as unknown as
-    & DurableObjectStub
-    & SandboxSessionContainer;
+  return env.SANDBOX_CONTAINER.get(id);
 }
 
 function errorResponse(

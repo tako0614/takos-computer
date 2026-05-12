@@ -117,17 +117,22 @@ export interface DurableObjectId {
   readonly name?: string;
 }
 
-export interface DurableObjectStub {
+export interface DurableObjectStub<T = unknown> {
   id: DurableObjectId;
   name?: string;
   fetch(input: string | Request, init?: RequestInit): Promise<Response>;
+  // RPC surface of the Durable Object class — `env.NS.get(id).someMethod()`
+  // dispatches over the stub. Cloudflare types the property bag as the
+  // intersection with the DO class itself; we mirror that so callers do not
+  // need to bridge with `as unknown as DurableObjectStub & TheClass`.
 }
+export type DurableObjectStubOf<T> = DurableObjectStub<T> & T;
 
-export interface DurableObjectNamespace {
+export interface DurableObjectNamespace<T = unknown> {
   idFromName(name: string): DurableObjectId;
   idFromString(id: string): DurableObjectId;
   newUniqueId(): DurableObjectId;
-  get(id: DurableObjectId): DurableObjectStub;
+  get(id: DurableObjectId): DurableObjectStubOf<T>;
 }
 
 export interface DurableObjectStorage {

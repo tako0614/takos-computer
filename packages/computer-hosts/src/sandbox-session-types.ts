@@ -3,9 +3,10 @@
  */
 
 import type { DurableObjectNamespace } from "./cf-types.ts";
+import type { SandboxSessionContainer } from "./sandbox-host.ts";
 
 export interface SandboxHostEnv {
-  SANDBOX_CONTAINER: DurableObjectNamespace;
+  SANDBOX_CONTAINER: DurableObjectNamespace<SandboxSessionContainer>;
   SANDBOX_HOST_AUTH_TOKEN?: string;
   PUBLISHED_MCP_AUTH_TOKEN?: string;
   MCP_AUTH_TOKEN?: string;
