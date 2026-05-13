@@ -11,6 +11,12 @@
 
 import { HostContainerRuntime } from "./container-runtime.ts";
 import { type Context, Hono } from "hono";
+import {
+  guiAppAuthRequired,
+  registerGuiAuthRoutes,
+  requireGuiAppAuth,
+  requireGuiAppOrRedirect,
+} from "./app-auth.ts";
 import { generateProxyToken } from "./proxy-token.ts";
 import { constantTimeEqual } from "./crypto-utils.ts";
 import type { DurableObjectStub } from "./cf-types.ts";
@@ -423,6 +429,10 @@ async function authorizeGuiApp(c: AppContext): Promise<Response | null> {
     }
   }
 
+  if (guiAppAuthRequired(c.env)) {
+    return await requireGuiAppOrRedirect(c.env, c.req.raw);
+  }
+
   return authError(c, 401, "Unauthorized");
 }
 
@@ -493,20 +503,26 @@ async function readRequestTextWithLimit(
   }
 }
 
-function requireHostAdmin(c: AppContext): Response | null {
+async function requireHostAdmin(c: AppContext): Promise<Response | null> {
   if (isTrustedTakosRoutedRequest(c)) return null;
 
+  const token = extractBearerToken(c);
   const expected = c.env.SANDBOX_HOST_AUTH_TOKEN;
+  if (token && expected && constantTimeEqual(token, expected)) {
+    return null;
+  }
+
+  if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
+    const auth = await requireGuiAppAuth(c.env, c.req.raw);
+    if (!auth) return null;
+    return auth;
+  }
+
   if (!expected) {
     return authError(c, 503, "Sandbox host auth token is not configured");
   }
 
-  const token = extractBearerToken(c);
-  if (!token || !constantTimeEqual(token, expected)) {
-    return authError(c, 401, "Unauthorized");
-  }
-
-  return null;
+  return authError(c, 401, "Unauthorized");
 }
 
 function requirePublishedMcpAuth(c: AppContext): Response | null {
@@ -531,7 +547,12 @@ async function authorizeSessionAccess(
   if (isTrustedTakosRoutedRequest(c)) return null;
 
   const token = extractBearerToken(c);
-  if (!token) return authError(c, 401, "Unauthorized");
+  if (!token) {
+    if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
+      return await requireGuiAppAuth(c.env, c.req.raw);
+    }
+    return authError(c, 401, "Unauthorized");
+  }
 
   const adminToken = c.env.SANDBOX_HOST_AUTH_TOKEN;
   if (adminToken && constantTimeEqual(token, adminToken)) return null;
@@ -555,6 +576,21 @@ function collectMissingRuntimeBindings(env: Env): string[] {
     missing.push("PUBLISHED_MCP_AUTH_TOKEN");
   }
   if (!env.SESSION_INDEX) missing.push("SESSION_INDEX");
+  if (guiAppAuthRequired(env)) {
+    for (
+      const name of [
+        "APP_SESSION_SECRET",
+        "OIDC_ISSUER_URL",
+        "OIDC_CLIENT_ID",
+        "OIDC_CLIENT_SECRET",
+        "ACCOUNTS_BASE_URL",
+        "INSTALL_LAUNCH_INSTALLATION_ID",
+        "INSTALL_LAUNCH_CONSUME_PATH",
+      ] as const
+    ) {
+      if (!env[name]) missing.push(name);
+    }
+  }
   return missing;
 }
 
@@ -620,6 +656,7 @@ function serveComputerIcon(): Response {
 
 app.get("/icons/computer.svg", serveComputerIcon);
 app.get("/gui/icons/computer.svg", serveComputerIcon);
+registerGuiAuthRoutes(app);
 app.get("/gui", serveGuiApp);
 app.get("/gui/", serveGuiApp);
 
@@ -628,7 +665,7 @@ app.get("/gui/", serveGuiApp);
 // ---------------------------------------------------------------------------
 
 async function listSessions(c: AppContext): Promise<Response> {
-  const auth = requireHostAdmin(c);
+  const auth = await requireHostAdmin(c);
   if (auth) return auth;
 
   const kv = c.env.SESSION_INDEX;
@@ -652,7 +689,7 @@ app.get("/gui/api/sandbox-sessions", listSessions);
 // ---------------------------------------------------------------------------
 
 async function createSession(c: AppContext): Promise<Response> {
-  const auth = requireHostAdmin(c);
+  const auth = await requireHostAdmin(c);
   if (auth) return auth;
 
   const payload = await c.req.json<CreateSandboxSessionPayload>();

@@ -61,6 +61,11 @@ const HOST_AUTH_TOKEN = "host-token";
 const PUBLISHED_MCP_AUTH_TOKEN = "published-mcp-token";
 const MCP_AUTH_TOKEN = "mcp-token";
 const SESSION_PROXY_TOKEN = "test-token";
+const APP_SESSION_SECRET = "test-app-session-secret";
+const OIDC_ISSUER_URL = "https://accounts.example.test";
+const OIDC_CLIENT_ID = "computer-client";
+const OIDC_CLIENT_SECRET = "computer-client-secret";
+const INSTALLATION_ID = "inst_computer";
 
 function hostAuthHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${HOST_AUTH_TOKEN}` };
@@ -72,6 +77,9 @@ function createEnv(
     publishedMcpAuthToken?: string | null;
     mcpAuthToken?: string | null;
     trustRoutedGuiApi?: boolean;
+    appAuthRequired?: boolean;
+    appAuthConfig?: boolean;
+    launchConfig?: boolean;
   } = {},
 ) {
   const states = new Map<string, SandboxSessionState>();
@@ -167,6 +175,18 @@ function createEnv(
     : options.mcpAuthToken;
   if (mcpAuthToken !== null) env.MCP_AUTH_TOKEN = mcpAuthToken;
   if (options.trustRoutedGuiApi) env.TAKOS_TRUST_ROUTED_GUI_API = "1";
+  if (options.appAuthRequired) env.APP_AUTH_REQUIRED = "1";
+  if (options.appAuthRequired && options.appAuthConfig !== false) {
+    env.APP_SESSION_SECRET = APP_SESSION_SECRET;
+    env.OIDC_ISSUER_URL = OIDC_ISSUER_URL;
+    env.OIDC_CLIENT_ID = OIDC_CLIENT_ID;
+    env.OIDC_CLIENT_SECRET = OIDC_CLIENT_SECRET;
+  }
+  if (options.appAuthRequired && options.launchConfig !== false) {
+    env.ACCOUNTS_BASE_URL = OIDC_ISSUER_URL;
+    env.INSTALL_LAUNCH_INSTALLATION_ID = INSTALLATION_ID;
+    env.INSTALL_LAUNCH_CONSUME_PATH = "/gui/api/auth/launch";
+  }
 
   return { env, mcpCalls };
 }
@@ -184,6 +204,65 @@ function fetchWorker(
 
 function publishedMcpAuthHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${PUBLISHED_MCP_AUTH_TOKEN}` };
+}
+
+function fetchRequestUrl(request: RequestInfo | URL): string {
+  return request instanceof Request ? request.url : String(request);
+}
+
+async function withFetch<T>(
+  fakeFetch: typeof fetch,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const originalFetch = globalThis.fetch;
+  Object.defineProperty(globalThis, "fetch", {
+    value: fakeFetch,
+    configurable: true,
+  });
+  try {
+    return await fn();
+  } finally {
+    Object.defineProperty(globalThis, "fetch", {
+      value: originalFetch,
+      configurable: true,
+    });
+  }
+}
+
+function base64UrlEncodeBytes(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll(
+    "=",
+    "",
+  );
+}
+
+function base64UrlEncodeJson(value: unknown): string {
+  return base64UrlEncodeBytes(new TextEncoder().encode(JSON.stringify(value)));
+}
+
+async function signEs256Jwt(input: {
+  kid: string;
+  claims: Record<string, unknown>;
+  privateKey: CryptoKey;
+}): Promise<string> {
+  const signingInput = [
+    base64UrlEncodeJson({ alg: "ES256", typ: "JWT", kid: input.kid }),
+    base64UrlEncodeJson(input.claims),
+  ].join(".");
+  const signature = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    input.privateKey,
+    new TextEncoder().encode(signingInput),
+  );
+  return `${signingInput}.${base64UrlEncodeBytes(new Uint8Array(signature))}`;
+}
+
+function sessionCookieFromSetCookie(setCookie: string | null): string {
+  const match = setCookie?.match(/takos_computer_session=[^;,]+/);
+  if (!match) throw new Error("Expected GUI session cookie");
+  return match[0];
 }
 
 Deno.test("sandbox host serves published GUI app routes", async () => {
@@ -261,6 +340,306 @@ Deno.test("sandbox host accepts trusted Takos-routed GUI requests when enabled",
     response.headers.get("content-type"),
     "text/html; charset=utf-8",
   );
+});
+
+Deno.test("sandbox host redirects GUI users to OIDC login when app auth is required", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+
+  const response = await fetchWorker(env, "/gui");
+
+  assertEquals(response.status, 302);
+  assertEquals(
+    response.headers.get("location"),
+    "/gui/api/auth/login?return_to=%2Fgui",
+  );
+});
+
+Deno.test("sandbox host OIDC login creates state cookie and PKCE redirect", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+
+  await withFetch((request) => {
+    const url = new URL(fetchRequestUrl(request));
+    if (url.pathname === "/.well-known/openid-configuration") {
+      return Promise.resolve(Response.json({
+        issuer: OIDC_ISSUER_URL,
+        authorization_endpoint: `${OIDC_ISSUER_URL}/oauth/authorize`,
+        token_endpoint: `${OIDC_ISSUER_URL}/oauth/token`,
+        userinfo_endpoint: `${OIDC_ISSUER_URL}/oauth/userinfo`,
+        jwks_uri: `${OIDC_ISSUER_URL}/oauth/jwks`,
+      }));
+    }
+    return Promise.resolve(Response.json({ error: "unexpected" }, {
+      status: 404,
+    }));
+  }, async () => {
+    const response = await fetchWorker(
+      env,
+      "/gui/api/auth/login?return_to=https%3A%2F%2Fevil.example%2F",
+    );
+
+    assertEquals(response.status, 302);
+    const location = new URL(response.headers.get("location")!);
+    assertEquals(location.origin, OIDC_ISSUER_URL);
+    assertEquals(location.pathname, "/oauth/authorize");
+    assertEquals(location.searchParams.get("response_type"), "code");
+    assertEquals(location.searchParams.get("client_id"), OIDC_CLIENT_ID);
+    assertEquals(
+      location.searchParams.get("redirect_uri"),
+      "https://sandbox-host.test/gui/api/auth/callback",
+    );
+    assertEquals(
+      location.searchParams.get("code_challenge_method"),
+      "S256",
+    );
+    if (!location.searchParams.get("state")) {
+      throw new Error("Expected OAuth state");
+    }
+    if (!location.searchParams.get("nonce")) {
+      throw new Error("Expected OIDC nonce");
+    }
+    const cookie = response.headers.get("set-cookie");
+    if (
+      !cookie?.includes("takos_computer_oauth_state=") ||
+      !cookie.includes("Path=/gui/api/auth") ||
+      !cookie.includes("HttpOnly") ||
+      !cookie.includes("SameSite=Lax") ||
+      !cookie.includes("Secure")
+    ) {
+      throw new Error(`Unexpected state cookie: ${cookie}`);
+    }
+  });
+});
+
+Deno.test("sandbox host OIDC callback verifies id token and creates GUI session", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+  const keyPair = await crypto.subtle.generateKey(
+    { name: "ECDSA", namedCurve: "P-256" },
+    true,
+    ["sign", "verify"],
+  );
+  const publicJwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
+  const kid = "test-key";
+  let expectedNonce = "";
+  let tokenParams: URLSearchParams | null = null;
+
+  await withFetch(async (request, init) => {
+    const url = new URL(fetchRequestUrl(request));
+    if (url.pathname === "/.well-known/openid-configuration") {
+      return Response.json({
+        issuer: OIDC_ISSUER_URL,
+        authorization_endpoint: `${OIDC_ISSUER_URL}/oauth/authorize`,
+        token_endpoint: `${OIDC_ISSUER_URL}/oauth/token`,
+        userinfo_endpoint: `${OIDC_ISSUER_URL}/oauth/userinfo`,
+        jwks_uri: `${OIDC_ISSUER_URL}/oauth/jwks`,
+      });
+    }
+    if (url.pathname === "/oauth/token") {
+      tokenParams = new URLSearchParams(String(init?.body));
+      const now = Math.floor(Date.now() / 1000);
+      const idToken = await signEs256Jwt({
+        kid,
+        privateKey: keyPair.privateKey,
+        claims: {
+          iss: OIDC_ISSUER_URL,
+          sub: "subject-1",
+          aud: OIDC_CLIENT_ID,
+          nonce: expectedNonce,
+          iat: now,
+          exp: now + 300,
+          name: "Ada",
+          takosumi: {
+            account_id: "acct_1",
+            space_id: "space-1",
+            app_id: "jp.takos.computer",
+            role: "owner",
+          },
+        },
+      });
+      return Response.json({
+        access_token: "access-token",
+        token_type: "Bearer",
+        id_token: idToken,
+      });
+    }
+    if (url.pathname === "/oauth/jwks") {
+      return Response.json({
+        keys: [{ ...publicJwk, kid, use: "sig", alg: "ES256" }],
+      });
+    }
+    if (url.pathname === "/oauth/userinfo") {
+      return Response.json({ sub: "subject-1", name: "Ada" });
+    }
+    return Response.json({ error: "unexpected" }, { status: 404 });
+  }, async () => {
+    const loginResponse = await fetchWorker(
+      env,
+      "/gui/api/auth/login?return_to=https%3A%2F%2Fevil.example%2F",
+    );
+    const loginLocation = new URL(loginResponse.headers.get("location")!);
+    expectedNonce = loginLocation.searchParams.get("nonce")!;
+    const state = loginLocation.searchParams.get("state")!;
+    const stateCookie = loginResponse.headers.get("set-cookie")!;
+
+    const callbackResponse = await fetchWorker(
+      env,
+      `/gui/api/auth/callback?code=code-1&state=${encodeURIComponent(state)}`,
+      { headers: { Cookie: stateCookie } },
+    );
+
+    assertEquals(callbackResponse.status, 302);
+    assertEquals(callbackResponse.headers.get("location"), "/gui");
+    const setCookie = callbackResponse.headers.get("set-cookie");
+    if (
+      !setCookie?.includes("takos_computer_session=") ||
+      !setCookie.includes("takos_computer_oauth_state=;") ||
+      !setCookie.includes("Path=/gui") ||
+      !setCookie.includes("HttpOnly")
+    ) {
+      throw new Error(`Unexpected callback cookies: ${setCookie}`);
+    }
+    assertEquals(
+      tokenParams?.get("redirect_uri"),
+      "https://sandbox-host.test/gui/api/auth/callback",
+    );
+    if (!tokenParams?.get("code_verifier")) {
+      throw new Error("Expected PKCE code verifier");
+    }
+
+    const sessionCookie = sessionCookieFromSetCookie(setCookie);
+    const meResponse = await fetchWorker(env, "/gui/api/auth/me", {
+      headers: { Cookie: sessionCookie },
+    });
+    assertEquals(meResponse.status, 200);
+    assertEquals(await meResponse.json(), {
+      authenticated: true,
+      subject: "subject-1",
+      name: "Ada",
+      accountId: "acct_1",
+      spaceId: "space-1",
+      appId: "jp.takos.computer",
+      role: "owner",
+    });
+  });
+});
+
+Deno.test("sandbox host OIDC callback rejects invalid state", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+
+  const response = await fetchWorker(
+    env,
+    "/gui/api/auth/callback?code=code-1&state=bad-state",
+  );
+
+  assertEquals(response.status, 400);
+  assertEquals(await response.json(), { error: "Invalid OAuth state" });
+});
+
+Deno.test("sandbox host reports missing OIDC env when app auth is required", async () => {
+  const { env } = createEnv({
+    appAuthRequired: true,
+    appAuthConfig: false,
+  });
+
+  const loginResponse = await fetchWorker(env, "/gui/api/auth/login");
+  assertEquals(loginResponse.status, 503);
+  assertEquals(await loginResponse.json(), {
+    error: "GUI app auth is not configured",
+    missing: [
+      "APP_SESSION_SECRET",
+      "OIDC_ISSUER_URL",
+      "OIDC_CLIENT_ID",
+      "OIDC_CLIENT_SECRET",
+    ],
+  });
+
+  const readyResponse = await fetchWorker(env, "/readyz");
+  assertEquals(readyResponse.status, 503);
+  const readyBody = await readyResponse.json() as { missingBindings: string[] };
+  if (!readyBody.missingBindings.includes("APP_SESSION_SECRET")) {
+    throw new Error("Expected app auth env in readyz missing bindings");
+  }
+});
+
+Deno.test("sandbox host consumes launch token into GUI session", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+  let consumedUrl = "";
+  let consumedBody: Record<string, unknown> | null = null;
+
+  await withFetch((request, init) => {
+    const url = new URL(fetchRequestUrl(request));
+    if (url.pathname.endsWith("/launch-token/consume")) {
+      consumedUrl = url.toString();
+      consumedBody = JSON.parse(String(init?.body));
+      return Promise.resolve(Response.json({
+        consumed: true,
+        sub: "launch-subject",
+        account_id: "acct_1",
+        space_id: "space-1",
+        app_id: "jp.takos.computer",
+        role: "owner",
+      }));
+    }
+    return Promise.resolve(Response.json({ error: "unexpected" }, {
+      status: 404,
+    }));
+  }, async () => {
+    const response = await fetchWorker(
+      env,
+      "/gui/api/auth/launch?return_to=%2Fgui%2Fsandbox%2Fsession-1&launch_token=launch-1",
+    );
+
+    assertEquals(response.status, 302);
+    assertEquals(response.headers.get("location"), "/gui/sandbox/session-1");
+    assertEquals(
+      consumedUrl,
+      `${OIDC_ISSUER_URL}/v1/installations/${INSTALLATION_ID}/launch-token/consume`,
+    );
+    assertEquals(consumedBody?.token, "launch-1");
+    const redirectUri = new URL(String(consumedBody?.redirect_uri));
+    assertEquals(redirectUri.origin, "https://sandbox-host.test");
+    assertEquals(redirectUri.pathname, "/gui/api/auth/launch");
+    assertEquals(
+      redirectUri.searchParams.get("return_to"),
+      "/gui/sandbox/session-1",
+    );
+    assertEquals(redirectUri.searchParams.has("launch_token"), false);
+
+    const sessionCookie = sessionCookieFromSetCookie(
+      response.headers.get("set-cookie"),
+    );
+    const listResponse = await fetchWorker(env, "/gui/api/sandbox-sessions", {
+      headers: { Cookie: sessionCookie },
+    });
+    assertEquals(listResponse.status, 200);
+  });
+});
+
+Deno.test("sandbox host does not create session for invalid launch token", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+
+  await withFetch((request) => {
+    const url = new URL(fetchRequestUrl(request));
+    if (url.pathname.endsWith("/launch-token/consume")) {
+      return Promise.resolve(Response.json({
+        error: "launch_token_replayed",
+      }, { status: 410 }));
+    }
+    return Promise.resolve(Response.json({ error: "unexpected" }, {
+      status: 404,
+    }));
+  }, async () => {
+    const response = await fetchWorker(
+      env,
+      "/gui/api/auth/launch?return_to=%2Fgui&launch_token=replayed",
+    );
+
+    assertEquals(response.status, 302);
+    assertEquals(
+      response.headers.get("location"),
+      "/gui/api/auth/login?return_to=%2Fgui",
+    );
+    assertEquals(response.headers.get("set-cookie"), null);
+  });
 });
 
 Deno.test("sandbox host health reports missing required bindings", async () => {

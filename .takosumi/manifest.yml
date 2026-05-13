@@ -19,10 +19,12 @@ resources:
         - no_handle_cross_request_promise_resolution
       env:
         TAKOS_TRUST_ROUTED_GUI_API: "1"
+        APP_AUTH_REQUIRED: "1"
       routes:
         - /mcp
         - /gui
         - /gui/*
+        - /gui/api/auth/*
         - /healthz
         - /health
         - /readyz
@@ -49,6 +51,7 @@ resources:
             - SANDBOX_HOST_AUTH_TOKEN
             - MCP_AUTH_TOKEN
             - PUBLISHED_MCP_AUTH_TOKEN
+            - APP_SESSION_SECRET
           containers:
             - binding: SANDBOX_CONTAINER
               className: SandboxSessionContainer
