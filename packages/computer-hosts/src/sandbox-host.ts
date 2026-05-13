@@ -9,7 +9,6 @@
  *   client -> POST /session/:id/mcp -> this worker -> DO -> container /mcp
  */
 
-import type { HostContainerInternals } from "./container-runtime.ts";
 import { HostContainerRuntime } from "./container-runtime.ts";
 import { type Context, Hono } from "hono";
 import { generateProxyToken } from "./proxy-token.ts";

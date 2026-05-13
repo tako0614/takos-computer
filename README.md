@@ -1,18 +1,15 @@
 # takos-computer
 
-takos-computer is a standalone product / independent repository that provides a
-containerized sandbox execution environment for AI agents, exposed through MCP
-and a small dashboard. It runs on Cloudflare Workers + Containers and is split
-between a sandbox container and the worker-side dashboard/proxy layer.
+AI エージェント向けのコンテナ化サンドボックス実行環境を、MCP
+と簡易ダッシュボードで公開する独立 product です。Cloudflare Workers + Containers
+上で動作し、サンドボックスコンテナとワーカー側のダッシュボード /
+プロキシ層に分かれています。
 
-It is shipped as a bundled 1st-party InstallableApp with the Takos distribution
-and deployed as a normal app on Takosumi (auto-installed into new spaces as a
-user-facing convenience). Bundling is not an architectural privilege:
-takos-computer is recorded as a normal AppInstallation entry and users can
-uninstall it like any other app. The sandbox / MCP surface itself has no
-Takos-specific coupling and can be consumed by any MCP-compatible agent host.
+Takos ディストリビューションに同梱される 1st-party InstallableApp として
+Takosumi 上で動作します。サンドボックス / MCP 表面自体は Takos
+固有の結合を持たず、任意の MCP 対応エージェントホストから利用できます。
 
-## Architecture
+## アーキテクチャ
 
 ```
                   Internet / Service Bindings
@@ -28,120 +25,121 @@ CF Worker routes /gui, /session        CF Container (basic)
  Dashboard UI + sandbox MCP            Deno runtime, shell tools
 ```
 
-Session lifecycle is managed by Durable Objects that act as sidecars for
-Cloudflare Containers. Each sandbox session gets its own container instance with
-proxy-token authentication and auto-sleep after inactivity.
+セッションのライフサイクルは Cloudflare Containers のサイドカーとして動作する
+Durable Object で管理されます。各セッションは個別のコンテナインスタンスを持ち、
+プロキシトークン認証と非アクティブ時の自動スリープを備えます。
 
-## Package Layout
+## パッケージ構成
 
 ### Container Apps
 
-| Package     | Path            | Description                                                                 |
-| ----------- | --------------- | --------------------------------------------------------------------------- |
-| **sandbox** | `apps/sandbox/` | Deno-based sandbox container for shell execution and filesystem operations. |
+| Package     | Path            | 説明                                                           |
+| ----------- | --------------- | -------------------------------------------------------------- |
+| **sandbox** | `apps/sandbox/` | シェル実行・ファイル操作用の Deno ベースサンドボックスコンテナ |
 
 ### Service Packages
 
-| Package                             | Path                        | Description                                                                                                            |
-| ----------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| **@takos-computer/sandbox-service** | `packages/sandbox-service/` | Hono MCP server for shell execution and filesystem operations. Provides `shell_exec`, `file_*`, and `process_*` tools. |
-| **@takos-computer/computer-hosts**  | `packages/computer-hosts/`  | Cloudflare Workers entry points for the dashboard proxy and sandbox host.                                              |
+| Package                             | Path                        | 説明                                                                                |
+| ----------------------------------- | --------------------------- | ----------------------------------------------------------------------------------- |
+| **@takos-computer/sandbox-service** | `packages/sandbox-service/` | Hono MCP サーバー。`shell_exec`, `file_*`, `process_*` ツールを提供                 |
+| **@takos-computer/computer-hosts**  | `packages/computer-hosts/`  | ダッシュボードプロキシ / サンドボックスホスト用 Cloudflare Workers エントリポイント |
 
 ### Shared Packages
 
-| Package                               | Path                          | Description                                                                                |
-| ------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
-| **@takos-computer/common**            | `packages/common/`            | Shared utilities: logger, ID generation, validation, error classes, JWT helpers, CF shims. |
-| **@takos-computer/cloudflare-compat** | `packages/cloudflare-compat/` | Centralized re-exports of Cloudflare Workers types.                                        |
-| **@takos-computer/dashboard**         | `packages/dashboard/`         | SolidJS dashboard for listing and opening sandbox sessions.                                |
+| Package                               | Path                          | 説明                                                                                  |
+| ------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------- |
+| **@takos-computer/common**            | `packages/common/`            | logger, ID 生成, validation, error クラス, JWT helper, CF shim 等の共通ユーティリティ |
+| **@takos-computer/cloudflare-compat** | `packages/cloudflare-compat/` | Cloudflare Workers 型の再エクスポート                                                 |
+| **@takos-computer/dashboard**         | `packages/dashboard/`         | サンドボックスセッション一覧 / オープン用の SolidJS ダッシュボード                    |
 
-## MCP Tools Reference
+## MCP ツールリファレンス
 
-Agents use the published MCP Streamable HTTP endpoint at `/mcp`. It exposes
-stable `computer_*` tools, creates or reuses a sandbox session, and proxies tool
-calls into the session container. Direct session MCP remains available at
-`/session/:id/mcp` for callers that already hold a session proxy token.
+エージェントは公開された MCP Streamable HTTP エンドポイント `/mcp` を使います。
+安定した `computer_*` ツールを公開し、サンドボックスセッションを作成 /
+再利用して
+コンテナにプロキシします。既にセッションプロキシトークンを持つ呼び出し元向けに
+直接 `/session/:id/mcp` も利用可能です。
 
-`POST` is the supported MCP request method. `OPTIONS` returns the allowed
-methods. Other MCP methods, including Streamable HTTP server-to-client `GET`
-streams, fail fast with `405 Method Not Allowed` and are not proxied to the
-sandbox container.
+`POST` が MCP リクエスト用メソッドです。`OPTIONS` は許可メソッドを返します。
+他の MCP メソッド (Streamable HTTP の server-to-client `GET` ストリームを含む)
+は `405 Method Not Allowed` で fail-fast
+し、サンドボックスコンテナにはプロキシしません。
 
-### Published MCP Tools
+### 公開 MCP ツール
 
-| Tool                       | Description                                                                                   |
+| Tool                       | 説明                                                                                          |
 | -------------------------- | --------------------------------------------------------------------------------------------- |
-| `computer_session_create`  | Create or reuse a sandbox session. Optional: `session_id`, `space_id`, `user_id`              |
-| `computer_session_status`  | Get sandbox session state. Optional: `session_id`                                             |
-| `computer_session_destroy` | Destroy a sandbox session. Optional: `session_id`                                             |
-| `computer_shell_exec`      | Execute a shell command. Params: `command`, `timeout_ms?`, `cwd?`, `env?`, `session_id?`      |
-| `computer_file_read`       | Read workspace file contents. Params: `path`, `offset?`, `limit?`, `encoding?`, `session_id?` |
-| `computer_file_write`      | Write a workspace file. Params: `path`, `content`, `encoding?`, `create_dirs?`, `session_id?` |
-| `computer_file_list`       | List workspace directory entries. Params: `path`, `recursive?`, `glob?`, `session_id?`        |
-| `computer_file_info`       | Get workspace file metadata. Params: `path`, `session_id?`                                    |
-| `computer_process_list`    | List running processes. Optional: `session_id`                                                |
-| `computer_process_kill`    | Kill a managed process. Params: `pid`, `signal?`, `session_id?`                               |
+| `computer_session_create`  | サンドボックスセッションを作成 / 再利用。任意: `session_id`, `space_id`, `user_id`            |
+| `computer_session_status`  | セッション状態を取得。任意: `session_id`                                                      |
+| `computer_session_destroy` | セッションを破棄。任意: `session_id`                                                          |
+| `computer_shell_exec`      | シェルコマンドを実行。`command`, `timeout_ms?`, `cwd?`, `env?`, `session_id?`                 |
+| `computer_file_read`       | ワークスペースのファイルを読む。`path`, `offset?`, `limit?`, `encoding?`, `session_id?`       |
+| `computer_file_write`      | ワークスペースのファイルを書く。`path`, `content`, `encoding?`, `create_dirs?`, `session_id?` |
+| `computer_file_list`       | ディレクトリを一覧。`path`, `recursive?`, `glob?`, `session_id?`                              |
+| `computer_file_info`       | ファイルメタデータを取得。`path`, `session_id?`                                               |
+| `computer_process_list`    | 実行中プロセスを一覧。任意: `session_id`                                                      |
+| `computer_process_kill`    | 管理プロセスを kill。`pid`, `signal?`, `session_id?`                                          |
 
 ### Sandbox Tools
 
-| Tool           | Description                                                                                                               |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `shell_exec`   | Execute a shell command (bash -c). Params: `command`, `timeout_ms?`, `cwd?`, `env?`, `allow_takos_token?`, `takos_token?` |
-| `file_read`    | Read workspace file contents. Params: `path`, `offset?`, `limit?`, `encoding?`                                            |
-| `file_write`   | Write a workspace file. Params: `path`, `content`, `encoding?`, `create_dirs?`                                            |
-| `file_list`    | List workspace directory entries. Params: `path`, `recursive?`, `glob?`                                                   |
-| `file_info`    | Get workspace file metadata. Params: `path`                                                                               |
-| `process_list` | List running processes.                                                                                                   |
-| `process_kill` | Kill a managed process. Params: `pid`, `signal?`                                                                          |
+| Tool           | 説明                                                                                                            |
+| -------------- | --------------------------------------------------------------------------------------------------------------- |
+| `shell_exec`   | シェルコマンド (bash -c) を実行。`command`, `timeout_ms?`, `cwd?`, `env?`, `allow_takos_token?`, `takos_token?` |
+| `file_read`    | ワークスペースのファイルを読む。`path`, `offset?`, `limit?`, `encoding?`                                        |
+| `file_write`   | ワークスペースのファイルを書く。`path`, `content`, `encoding?`, `create_dirs?`                                  |
+| `file_list`    | ディレクトリを一覧。`path`, `recursive?`, `glob?`                                                               |
+| `file_info`    | ファイルメタデータを取得。`path`                                                                                |
+| `process_list` | 実行中プロセスを一覧                                                                                            |
+| `process_kill` | 管理プロセスを kill。`pid`, `signal?`                                                                           |
 
-File tools are constrained to `/home/sandbox/workspace`. Relative paths resolve
-under that directory, and absolute paths must stay inside it after symlink
-resolution.
+ファイルツールは `/home/sandbox/workspace` 配下に制約されています。相対パスは
+このディレクトリ下に解決され、絶対パスはシンボリックリンク解決後もこの中に
+収まる必要があります。
 
-## HTTP Endpoints
+## HTTP エンドポイント
 
-### Session Lifecycle
+### セッションライフサイクル
 
-| Method   | Path               | Description                                                              |
-| -------- | ------------------ | ------------------------------------------------------------------------ |
-| `POST`   | `/mcp`             | Published MCP endpoint for agent tools. Auth: published MCP bearer token |
-| `GET`    | `/mcp`             | Returns `405`; server-to-client MCP stream GET is unsupported.           |
-| `POST`   | `/create`          | Create a new sandbox session. Body: `{ sessionId, spaceId, userId }`     |
-| `GET`    | `/session/:id`     | Get session state.                                                       |
-| `DELETE` | `/session/:id`     | Destroy a session and its container.                                     |
-| `POST`   | `/session/:id/mcp` | Forward MCP request to the container.                                    |
-| `GET`    | `/session/:id/mcp` | Returns `405`; server-to-client MCP stream GET is unsupported.           |
-| `GET`    | `/health`          | Health check.                                                            |
+| Method   | Path               | 説明                                                                    |
+| -------- | ------------------ | ----------------------------------------------------------------------- |
+| `POST`   | `/mcp`             | エージェント向け公開 MCP エンドポイント。Auth: 公開 MCP bearer トークン |
+| `GET`    | `/mcp`             | `405` を返す                                                            |
+| `POST`   | `/create`          | サンドボックスセッション作成。Body: `{ sessionId, spaceId, userId }`    |
+| `GET`    | `/session/:id`     | セッション状態を取得                                                    |
+| `DELETE` | `/session/:id`     | セッションとコンテナを破棄                                              |
+| `POST`   | `/session/:id/mcp` | MCP リクエストをコンテナへ転送                                          |
+| `GET`    | `/session/:id/mcp` | `405` を返す                                                            |
+| `GET`    | `/health`          | ヘルスチェック                                                          |
 
-### Dashboard Routes
+### ダッシュボードルート
 
-| Method   | Path                               | Description                                                    |
-| -------- | ---------------------------------- | -------------------------------------------------------------- |
-| `GET`    | `/gui`                             | Dashboard UI.                                                  |
-| `GET`    | `/gui/*`                           | Dashboard UI route fallback.                                   |
-| `GET`    | `/gui/api/sandbox-sessions`        | List dashboard sandbox sessions.                               |
-| `POST`   | `/gui/api/sandbox-create`          | Create a dashboard sandbox session.                            |
-| `GET`    | `/gui/api/sandbox-session/:id`     | Get dashboard sandbox session state.                           |
-| `DELETE` | `/gui/api/sandbox-session/:id`     | Destroy a dashboard sandbox session.                           |
-| `POST`   | `/gui/api/sandbox-session/:id/mcp` | Proxy MCP route for the sandbox dashboard.                     |
-| `GET`    | `/gui/api/sandbox-session/:id/mcp` | Returns `405`; server-to-client MCP stream GET is unsupported. |
+| Method   | Path                               | 説明                                   |
+| -------- | ---------------------------------- | -------------------------------------- |
+| `GET`    | `/gui`                             | ダッシュボード UI                      |
+| `GET`    | `/gui/*`                           | ダッシュボード UI ルートフォールバック |
+| `GET`    | `/gui/api/sandbox-sessions`        | サンドボックスセッション一覧           |
+| `POST`   | `/gui/api/sandbox-create`          | サンドボックスセッション作成           |
+| `GET`    | `/gui/api/sandbox-session/:id`     | サンドボックスセッション状態取得       |
+| `DELETE` | `/gui/api/sandbox-session/:id`     | サンドボックスセッション破棄           |
+| `POST`   | `/gui/api/sandbox-session/:id/mcp` | サンドボックス向け MCP プロキシ        |
+| `GET`    | `/gui/api/sandbox-session/:id/mcp` | `405` を返す                           |
 
-Direct dashboard access requires a GUI auth cookie or an explicit bearer/header
-token on API calls. For standalone operator access, open
-`/gui?authToken=<host-token>`; the worker validates the token, sets an HttpOnly
-`SameSite=Strict` cookie under `/gui`, and redirects to the clean URL. Session
-proxy tokens are accepted only through `Authorization: Bearer`, `X-Proxy-Token`,
-or an existing HttpOnly GUI cookie; `proxyToken` query authentication is
-rejected.
+ダッシュボード直接アクセスには GUI 認証 cookie または API 呼び出し時の明示的な
+bearer / ヘッダートークンが必要です。スタンドアロン運用者は
+`/gui?authToken=<host-token>` でアクセスでき、ワーカーがトークンを検証して
+HttpOnly `SameSite=Strict` cookie を `/gui` 配下に設定し、クリーン URL に
+リダイレクトします。セッションプロキシトークンは `Authorization: Bearer`、
+`X-Proxy-Token`、または HttpOnly GUI cookie からのみ受け付けます (`proxyToken`
+クエリ認証は拒否)。
 
-## Development
+## 開発
 
-### Prerequisites
+### 前提条件
 
 - [Deno](https://deno.land/) >= 2.0
-- [Docker](https://www.docker.com/) for building container images
-- [Wrangler](https://developers.cloudflare.com/workers/wrangler/) for Cloudflare
-  deploys
+- [Docker](https://www.docker.com/) — コンテナイメージビルド用
+- [Wrangler](https://developers.cloudflare.com/workers/wrangler/) — Cloudflare
+  デプロイ用
 
 ### Setup
 
@@ -155,130 +153,120 @@ deno task fmt
 deno task check:dist
 ```
 
-### Running Locally
+### ローカル起動
 
 ```bash
 cd apps/sandbox && deno task start
 ```
 
-The sandbox service listens on port 8080 by default.
+サンドボックスサービスはデフォルトでポート 8080 を待ち受けます。
 
-### Building Container Images
+### コンテナイメージのビルド
 
 ```bash
 docker build -f apps/sandbox/Dockerfile -t takos-sandbox .
 ```
 
-### Dashboard Development
+### ダッシュボード開発
 
 ```bash
 cd packages/dashboard
 deno task dev
 ```
 
-## Environment Variables
+## 環境変数
 
-| Variable                     | Default  | Description                                                                                                                                                                                               |
-| ---------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`                       | `8080`   | HTTP server listen port                                                                                                                                                                                   |
-| `PUBLISHED_MCP_AUTH_TOKEN`   | _(none)_ | Required bearer token for the published `/mcp` endpoint. Manifest deploys generate this from `auth.bearer.secretRef`; direct Wrangler deploys must configure it separately from `SANDBOX_HOST_AUTH_TOKEN` |
-| `SANDBOX_HOST_AUTH_TOKEN`    | _(none)_ | Required bearer token for sandbox-host admin/session routes; never injected into sandbox containers                                                                                                       |
-| `MCP_AUTH_TOKEN`             | _(none)_ | Required worker-to-container `/mcp` auth token; injected into the sandbox service but stripped from shell child processes                                                                                 |
-| `MCP_ALLOW_UNAUTHENTICATED`  | `false`  | Set to `true` only for local/dev sandbox-service `/mcp` access without `MCP_AUTH_TOKEN`                                                                                                                   |
-| `TAKOS_TOKEN`                | _(none)_ | Optional Takos CLI bearer token available to the sandbox service; shell child processes only inherit it when `allow_takos_token` is set                                                                   |
-| `TAKOS_API_URL`              | _(none)_ | Optional Takos API endpoint injected into sandbox containers as `TAKOS_API_URL`                                                                                                                           |
-| `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_ | Set to `1` only behind Takos dispatch so `X-Takos-Internal-Marker: 1` can authenticate routed GUI/API requests                                                                                            |
-| `SHUTDOWN_GRACE_MS`          | `15000`  | Grace period before force-exit on SIGTERM                                                                                                                                                                 |
+| Variable                     | デフォルト | 説明                                                                                                                      |
+| ---------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                       | `8080`     | HTTP サーバーの待ち受けポート                                                                                             |
+| `PUBLISHED_MCP_AUTH_TOKEN`   | _(none)_   | 公開 `/mcp` エンドポイントを保護する bearer トークン。マニフェストデプロイでは `auth.bearer.secretRef` から生成されます   |
+| `SANDBOX_HOST_AUTH_TOKEN`    | _(none)_   | サンドボックスホストの管理 / セッションルートを保護する bearer トークン。サンドボックスコンテナには注入しない             |
+| `MCP_AUTH_TOKEN`             | _(none)_   | ワーカー ↔ コンテナの `/mcp` 認証トークン。サンドボックスサービスに注入されるが、シェル子プロセスからは除去される         |
+| `MCP_ALLOW_UNAUTHENTICATED`  | `false`    | `true` でローカル / 開発時のみ `MCP_AUTH_TOKEN` 無しでサンドボックスサービス `/mcp` を許可                                |
+| `TAKOS_TOKEN`                | _(none)_   | サンドボックスサービスに渡せる Takos CLI bearer トークン。シェル子プロセスは `allow_takos_token` が設定された場合のみ継承 |
+| `TAKOS_API_URL`              | _(none)_   | サンドボックスコンテナに `TAKOS_API_URL` として注入される Takos API エンドポイント                                        |
+| `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_   | Takos dispatch 経由でルーティングされた GUI / API 要求の `X-Takos-Internal-Marker: 1` 認証を有効化する場合のみ `1` を設定 |
+| `SHUTDOWN_GRACE_MS`          | `15000`    | SIGTERM 時の強制終了までの猶予 (ms)                                                                                       |
 
 ## Cloudflare Worker Bindings
 
-| Binding             | Type           | Description                            |
-| ------------------- | -------------- | -------------------------------------- |
-| `SANDBOX_CONTAINER` | Durable Object | Sandbox session container namespace    |
-| `SESSION_INDEX`     | KV Namespace   | Session metadata index for GUI listing |
+| Binding             | Type           | 説明                                         |
+| ------------------- | -------------- | -------------------------------------------- |
+| `SANDBOX_CONTAINER` | Durable Object | サンドボックスセッションコンテナの namespace |
+| `SESSION_INDEX`     | KV Namespace   | GUI 一覧用のセッションメタデータインデックス |
 
-Consumer workers bind this deployed worker as `SANDBOX_HOST`; it is not a
-binding inside the sandbox-host worker itself.
+消費側ワーカーはこのデプロイ済みワーカーを `SANDBOX_HOST` としてバインドします
+(サンドボックスホストワーカー内部の binding ではありません)。
 
-## Deployment
+## デプロイ
 
-Deployment uses Wrangler with configuration files in `deploy/`.
+デプロイは `deploy/` 配下の Wrangler 設定ファイルで行います。
 
 ## Takosumi Install
 
-This repository includes `.takosumi/app.yml` for Git URL install through
-takosumi-git. The install metadata declares the app identity, OIDC binding,
-Takos resource AppGrants, the published MCP endpoint, and the Cloudflare Worker
-host bundle generated from `.takosumi/workflows/build.yml`.
+リポジトリには takosumi-git による Git URL install 用 `.takosumi/app.yml` が
+含まれています。インストールメタデータは、アプリ ID、OIDC binding、Takos
+リソースの AppGrants、公開 MCP エンドポイント、`.takosumi/workflows/build.yml`
+から生成される Cloudflare Worker ホストバンドルを宣言します。
 
-The kernel manifest models the host Worker as `worker@v1`. Cloudflare
-Containers, Durable Object binding, KV session index, and generated MCP tokens
-are recorded as provider-specific metadata because the current portable Takosumi
-shape catalog does not yet expose an attached-container binding.
+カーネルマニフェストはホスト Worker を `worker@v1` としてモデル化します。
+Cloudflare Containers、Durable Object binding、KV セッションインデックス、
+生成された MCP トークンは provider-specific メタデータとして記録されます。
 
-The checked-in `.takosumi/app.yml` declares install metadata, and
-`.takosumi/manifest.yml` builds the sandbox host worker, exposes the dashboard
-under `/gui`, exposes `/mcp`, and records the managed `SESSION_INDEX` KV
-namespace plus generated `SANDBOX_HOST_AUTH_TOKEN`, `MCP_AUTH_TOKEN`, and
-`PUBLISHED_MCP_AUTH_TOKEN` service env requirements. `PUBLISHED_MCP_AUTH_TOKEN`
-protects the published `/mcp` endpoint, `SANDBOX_HOST_AUTH_TOKEN` protects host
-admin/session routes, and `MCP_AUTH_TOKEN` protects MCP traffic between the
-worker and container. These tokens must be different. The manifest also consumes
-a managed Takos API key as `TAKOS_TOKEN`/`TAKOS_API_URL` for CLI use inside
-sandboxes and sets `TAKOS_TRUST_ROUTED_GUI_API=1` so dispatch-routed GUI/API
-calls can use Takos' stripped-and-injected `X-Takos-Internal-Marker` header. It
-declares the native Cloudflare Containers Durable Object binding for
-`SANDBOX_CONTAINER` (`SandboxSessionContainer`) and the
-`apps/sandbox/Dockerfile` container image metadata. `/readyz` is the manifest
-readiness path; `/healthz` remains a bootstrap-safe liveness probe.
+`.takosumi/manifest.yml` はサンドボックスホストワーカーをビルドし、
+ダッシュボードを `/gui` で、MCP を `/mcp` で公開します。managed `SESSION_INDEX`
+KV namespace と生成された `SANDBOX_HOST_AUTH_TOKEN`、
+`MCP_AUTH_TOKEN`、`PUBLISHED_MCP_AUTH_TOKEN` サービス env 要件も記録します。
 
-The published `/mcp` endpoint is the agent-facing static catalog entry. It wraps
-session lifecycle and forwards sandbox operations to the concrete
-`/session/:id/mcp` container endpoint. Direct session MCP still requires a
-session id and proxy token. If the sandbox needs to run Takos CLI commands,
-provide a downscoped `TAKOS_TOKEN` instead. `shell_exec` only forwards that
-token when `allow_takos_token: true` is supplied; otherwise the child process
-sees the safe default environment. Wrangler remains a fallback production
-deployment path for operators that want to deploy outside the Takos manifest
-flow.
+- `PUBLISHED_MCP_AUTH_TOKEN`: 公開 `/mcp` エンドポイントを保護
+- `SANDBOX_HOST_AUTH_TOKEN`: ホストの管理 / セッションルートを保護
+- `MCP_AUTH_TOKEN`: ワーカー ↔ コンテナ間の MCP トラフィックを保護
+
+これら 3 つのトークンはそれぞれ異なる値でなければなりません。マニフェストは
+サンドボックス内 CLI 用に managed Takos API キーを `TAKOS_TOKEN` /
+`TAKOS_API_URL` として消費し、`TAKOS_TRUST_ROUTED_GUI_API=1` を設定して dispatch
+ルーティング された GUI / API 呼び出しが Takos の `X-Takos-Internal-Marker`
+ヘッダーを使えるようにします。 ネイティブの Cloudflare Containers Durable Object
+binding `SANDBOX_CONTAINER` (`SandboxSessionContainer`)
+と、`apps/sandbox/Dockerfile` コンテナイメージ メタデータを宣言します。`/readyz`
+がマニフェストの readiness パス、`/healthz` は bootstrap-safe な liveness probe
+です。
+
+公開 `/mcp` エンドポイントはエージェント向けの静的カタログエントリで、
+セッションライフサイクルをラップしてサンドボックス操作を `/session/:id/mcp`
+コンテナエンドポイントに転送します。Wrangler は Takos マニフェストフロー外で
+デプロイしたい運用者向けのフォールバック経路です。
 
 ```bash
 wrangler deploy -c deploy/wrangler.sandbox-host.toml
 wrangler deploy -c deploy/wrangler.sandbox-host.toml --env staging
 ```
 
-### Generated Worker Bundles
+### 生成済み Worker バンドル
 
-`dist/sandbox-host.js` is a generated Worker bundle kept in git for artifact
-based Takos deploys. Source files under `packages/computer-hosts/src/` and the
-dashboard-generated GUI assets are the source of truth. `dist/` stays excluded
-from lint and format checks; run `deno task build:all` after source changes and
-`deno task check:dist` to detect bundle drift.
+`dist/sandbox-host.js` は git に保持される生成済み Worker バンドルで、
+artifact-based な Takos デプロイで使われます。ソースは
+`packages/computer-hosts/src/` 配下とダッシュボード生成 GUI
+アセットが真実の源です。`dist/` は lint / format の対象外で、ソース変更後は
+`deno task build:all` を実行し、`deno task check:dist`
+でバンドルのドリフトを検出します。
 
-`dist/browser-host.js` is a legacy generated bundle retained in the repository
-for now, but it is not a current deploy target.
+### コンテナ仕様
 
-### Container Specifications
-
-| Host         | Instance Type | vCPU | RAM   | Max Instances             |
+| Host         | Instance Type | vCPU | RAM   | 最大インスタンス数        |
 | ------------ | ------------- | ---- | ----- | ------------------------- |
 | sandbox-host | `basic`       | 0.25 | 1 GiB | 100 (prod) / 10 (staging) |
 
-Before deploying, replace placeholder IDs in the wrangler config files:
+デプロイ前に wrangler 設定ファイルのプレースホルダー ID を置き換えます。
 
 - `REPLACE_WITH_KV_NAMESPACE_ID`
 - `REPLACE_WITH_STAGING_KV_NAMESPACE_ID`
 
-Then provision the required sandbox-host secrets for each environment.
-`PUBLISHED_MCP_AUTH_TOKEN` protects the published `/mcp` endpoint and must be
-different from `SANDBOX_HOST_AUTH_TOKEN`. `SANDBOX_HOST_AUTH_TOKEN` protects
-host admin/session routes. `MCP_AUTH_TOKEN` protects host-to-container MCP
-traffic and is intentionally stripped from shell child processes. Use
-`TAKOS_TOKEN` for Takos CLI access inside the sandbox. Shell child processes
-inherit only a small safe environment allowlist by default; `TAKOS_TOKEN` is
-forwarded only when `shell_exec` is called with `allow_takos_token: true`, and
-`takos_token` can be supplied for a downscoped token. MCP and host admin tokens
-are stripped, and per-command `env` overrides reject sensitive variable names.
+そのあと、各環境にサンドボックスホストの secret を設定します。シェル子プロセスは
+デフォルトで小さな安全な環境変数のみを継承し、`TAKOS_TOKEN` は `shell_exec` を
+`allow_takos_token: true` で呼び出した場合のみ転送されます。`takos_token`
+で範囲を絞ったトークンを渡すこともできます。MCP / ホスト管理トークンは除去され、
+コマンド毎の `env` オーバーライドは機微な変数名を拒否します。
 
 ```bash
 wrangler secret put MCP_AUTH_TOKEN -c deploy/wrangler.sandbox-host.toml
@@ -291,7 +279,7 @@ wrangler secret put TAKOS_TOKEN -c deploy/wrangler.sandbox-host.toml
 wrangler secret put TAKOS_TOKEN -c deploy/wrangler.sandbox-host.toml --env staging
 ```
 
-## Key Technologies
+## 主要技術
 
 - Deno 2
 - Hono 4
@@ -300,6 +288,6 @@ wrangler secret put TAKOS_TOKEN -c deploy/wrangler.sandbox-host.toml --env stagi
 - Cloudflare Containers
 - SolidJS 1.9 + Vite 6.3
 
-## License
+## ライセンス
 
-See the repository root for license information.
+リポジトリルートを参照してください。
