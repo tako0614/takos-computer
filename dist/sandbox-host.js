@@ -960,6 +960,20 @@ var LocalHostContainerRuntime = class {
     this.ctx = ctx;
     this.env = env;
   }
+  /**
+   * `@cloudflare/containers`'s `Container` exposes a `container` field with
+   * a `getTcpPort()` method that proxies HTTP into the sandboxed container.
+   * Declaring it here keeps the structural type identical between the
+   * Cloudflare runtime and the local fallback so consumers never need a
+   * platform-shim cast. The local fallback throws because it cannot host a
+   * sidecar container; if this is invoked in local mode the operator
+   * configuration is wrong.
+   */
+  get container() {
+    throw new Error(
+      "container.getTcpPort is unavailable in LocalHostContainerRuntime; run inside Cloudflare Workers with @cloudflare/containers installed"
+    );
+  }
   async startAndWaitForPorts(_ports) {
   }
   renewActivityTimeout() {

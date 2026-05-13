@@ -16,6 +16,7 @@
     "build:all": "deno task --cwd packages/computer-hosts build:all",
     "check:dist": "deno run -A scripts/check-dist.ts",
     "check": "deno check packages/common/src/**/*.ts packages/cloudflare-compat/src/**/*.ts packages/dashboard/src/**/*.ts packages/dashboard/src/**/*.tsx packages/dashboard/scripts/**/*.ts packages/dashboard/vite.config.ts packages/computer-hosts/src/**/*.ts packages/computer-hosts/scripts/**/*.ts packages/sandbox-service/src/**/*.ts",
+    "dev:local": "deno task --cwd packages/computer-hosts dev:local",
     "test:all": "deno test --allow-all --parallel",
     "lint": "deno lint",
     "fmt": "deno fmt",

@@ -161,6 +161,25 @@ cd apps/sandbox && deno task start
 
 サンドボックスサービスはデフォルトでポート 8080 を待ち受けます。
 
+Cloudflare Containers / Durable Objects なしで Worker host と sandbox MCP を
+同一 Deno process につなぐ local simulator も使えます。これは開発用であり、
+本番と同じコンテナ分離を提供しません。セッションごとの workspace は
+`.takos-computer-local/workspaces/` 配下に作られます。
+
+```bash
+cd takos-apps/takos-computer
+deno task dev:local
+```
+
+既定では `http://127.0.0.1:8788` を待ち受けます。
+
+- Dashboard: `http://127.0.0.1:8788/gui?authToken=local-host-token`
+- Published MCP: `POST http://127.0.0.1:8788/mcp` with
+  `Authorization: Bearer local-published-mcp-token`
+
+`PORT`、`TAKOS_COMPUTER_LOCAL_WORKSPACE`、`SANDBOX_HOST_AUTH_TOKEN`、
+`PUBLISHED_MCP_AUTH_TOKEN`、`MCP_AUTH_TOKEN` で上書きできます。
+
 ### コンテナイメージのビルド
 
 ```bash

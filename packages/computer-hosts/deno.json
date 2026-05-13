@@ -4,6 +4,7 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
+    "./local-dev-simulator": "./src/local-dev-simulator.ts",
     "./sandbox-host": "./src/sandbox-host.ts",
     "./sandbox-session-types": "./src/sandbox-session-types.ts",
     "./proxy-token": "./src/proxy-token.ts"
@@ -16,6 +17,7 @@
   },
   "tasks": {
     "test": "deno test --allow-all src/",
+    "dev:local": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run src/local-dev-simulator.ts",
     "build:dashboard-assets": "cd ../dashboard && deno task build",
     "build:sandbox-host": "deno run -A scripts/build-host.ts sandbox",
     "build:all": "deno task build:dashboard-assets && deno task build:sandbox-host"
