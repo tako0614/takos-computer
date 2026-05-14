@@ -9,6 +9,7 @@
 import { HostContainerRuntime } from "./container-runtime.ts";
 import { generateProxyToken } from "./proxy-token.ts";
 import { constantTimeEqual } from "./crypto-utils.ts";
+import type { DurableObjectStub } from "./cf-types.ts";
 import type {
   CreateSandboxSessionPayload,
   SandboxHostEnv,
@@ -23,6 +24,14 @@ export function resolveContainerMcpAuthToken(
   env: SandboxHostEnv,
 ): string | undefined {
   return env.MCP_AUTH_TOKEN || undefined;
+}
+
+export function getDOStub(
+  env: SandboxHostEnv,
+  sessionId: string,
+): DurableObjectStub & SandboxSessionContainer {
+  const id = env.SANDBOX_CONTAINER.idFromName(sessionId);
+  return env.SANDBOX_CONTAINER.get(id);
 }
 
 export class SandboxSessionContainer

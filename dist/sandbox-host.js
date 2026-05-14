@@ -3738,6 +3738,10 @@ var SESSION_STATE_STORAGE_KEY = "sessionState";
 function resolveContainerMcpAuthToken(env) {
   return env.MCP_AUTH_TOKEN || void 0;
 }
+function getDOStub(env, sessionId) {
+  const id = env.SANDBOX_CONTAINER.idFromName(sessionId);
+  return env.SANDBOX_CONTAINER.get(id);
+}
 var SandboxSessionContainer = class extends HostContainerRuntime {
   defaultPort = 8080;
   sleepAfter = "10m";
@@ -3872,45 +3876,12 @@ var SandboxSessionContainer = class extends HostContainerRuntime {
   }
 };
 
-// src/sandbox-host.ts
-var MAX_MCP_FORWARD_BODY_BYTES = 1024 * 1024;
+// src/sandbox-host-auth.ts
 var GUI_ADMIN_COOKIE = "takos_computer_admin_token";
 var GUI_PROXY_COOKIE = "takos_computer_proxy_token";
 var GUI_AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60;
-var PUBLISHED_MCP_DEFAULT_SESSION_ID = "agent-default";
-var PUBLISHED_MCP_DEFAULT_SPACE_ID = "published-mcp";
-var PUBLISHED_MCP_DEFAULT_USER_ID = "takos-agent";
 function resolvePublishedMcpAuthToken(env) {
   return env.PUBLISHED_MCP_AUTH_TOKEN || void 0;
-}
-var app = new Hono2();
-function getDOStub(env, sessionId) {
-  const id = env.SANDBOX_CONTAINER.idFromName(sessionId);
-  return env.SANDBOX_CONTAINER.get(id);
-}
-function errorResponse(c, err) {
-  return c.json(
-    { error: err instanceof Error ? err.message : "Unknown error" },
-    500
-  );
-}
-function sessionIdParam(c) {
-  const sessionId = c.req.param("id");
-  if (!sessionId) return c.json({ error: "Missing session id" }, 400);
-  return sessionId;
-}
-function extractBearerToken(c) {
-  const authHeader = c.req.header("Authorization");
-  if (authHeader?.startsWith("Bearer ")) {
-    const token = authHeader.slice("Bearer ".length).trim();
-    return token || null;
-  }
-  const headerToken = c.req.header("X-Proxy-Token")?.trim();
-  if (headerToken) return headerToken;
-  if (isGuiPath(new URL(c.req.url).pathname)) {
-    return getCookie(c.req.header("Cookie"), GUI_ADMIN_COOKIE) ?? getCookie(c.req.header("Cookie"), GUI_PROXY_COOKIE);
-  }
-  return null;
 }
 function authError(c, status, message) {
   return c.json({ error: message }, status);
@@ -3932,6 +3903,19 @@ function getCookie(cookieHeader2, name) {
     } catch {
       return value;
     }
+  }
+  return null;
+}
+function extractBearerToken(c) {
+  const authHeader = c.req.header("Authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const token = authHeader.slice("Bearer ".length).trim();
+    return token || null;
+  }
+  const headerToken = c.req.header("X-Proxy-Token")?.trim();
+  if (headerToken) return headerToken;
+  if (isGuiPath(new URL(c.req.url).pathname)) {
+    return getCookie(c.req.header("Cookie"), GUI_ADMIN_COOKIE) ?? getCookie(c.req.header("Cookie"), GUI_PROXY_COOKIE);
   }
   return null;
 }
@@ -4023,6 +4007,69 @@ async function authorizeGuiApp(c) {
   }
   return authError(c, 401, "Unauthorized");
 }
+async function requireHostAdmin(c) {
+  if (isTrustedTakosRoutedRequest(c)) return null;
+  const token = extractBearerToken(c);
+  const expected = c.env.SANDBOX_HOST_AUTH_TOKEN;
+  if (token && expected && constantTimeEqual(token, expected)) {
+    return null;
+  }
+  if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
+    const auth = await requireGuiAppAuth(c.env, c.req.raw);
+    if (!auth) return null;
+    return auth;
+  }
+  if (!expected) {
+    return authError(c, 503, "Sandbox host auth token is not configured");
+  }
+  return authError(c, 401, "Unauthorized");
+}
+function requirePublishedMcpAuth(c) {
+  const expected = resolvePublishedMcpAuthToken(c.env);
+  if (!expected) {
+    return authError(c, 503, "Published MCP auth token is not configured");
+  }
+  const token = extractBearerToken(c);
+  if (!token || !constantTimeEqual(token, expected)) {
+    return authError(c, 401, "Unauthorized");
+  }
+  return null;
+}
+async function authorizeSessionAccess(c, sessionId, stub) {
+  if (isTrustedTakosRoutedRequest(c)) return null;
+  const token = extractBearerToken(c);
+  if (!token) {
+    if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
+      return await requireGuiAppAuth(c.env, c.req.raw);
+    }
+    return authError(c, 401, "Unauthorized");
+  }
+  const adminToken = c.env.SANDBOX_HOST_AUTH_TOKEN;
+  if (adminToken && constantTimeEqual(token, adminToken)) return null;
+  const tokenInfo = await stub.verifyProxyToken(token);
+  if (!tokenInfo || tokenInfo.sessionId !== sessionId) {
+    return authError(c, 401, "Unauthorized");
+  }
+  return null;
+}
+
+// src/sandbox-host.ts
+var MAX_MCP_FORWARD_BODY_BYTES = 1024 * 1024;
+var PUBLISHED_MCP_DEFAULT_SESSION_ID = "agent-default";
+var PUBLISHED_MCP_DEFAULT_SPACE_ID = "published-mcp";
+var PUBLISHED_MCP_DEFAULT_USER_ID = "takos-agent";
+var app = new Hono2();
+function errorResponse(c, err) {
+  return c.json(
+    { error: err instanceof Error ? err.message : "Unknown error" },
+    500
+  );
+}
+function sessionIdParam(c) {
+  const sessionId = c.req.param("id");
+  if (!sessionId) return c.json({ error: "Missing session id" }, 400);
+  return sessionId;
+}
 async function readRequestTextWithLimit(request, maxBytes) {
   const contentLength = request.headers.get("Content-Length");
   if (contentLength) {
@@ -4081,51 +4128,6 @@ async function readRequestTextWithLimit(request, maxBytes) {
       response: Response.json({ error: "Invalid UTF-8 body" }, { status: 400 })
     };
   }
-}
-async function requireHostAdmin(c) {
-  if (isTrustedTakosRoutedRequest(c)) return null;
-  const token = extractBearerToken(c);
-  const expected = c.env.SANDBOX_HOST_AUTH_TOKEN;
-  if (token && expected && constantTimeEqual(token, expected)) {
-    return null;
-  }
-  if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
-    const auth = await requireGuiAppAuth(c.env, c.req.raw);
-    if (!auth) return null;
-    return auth;
-  }
-  if (!expected) {
-    return authError(c, 503, "Sandbox host auth token is not configured");
-  }
-  return authError(c, 401, "Unauthorized");
-}
-function requirePublishedMcpAuth(c) {
-  const expected = resolvePublishedMcpAuthToken(c.env);
-  if (!expected) {
-    return authError(c, 503, "Published MCP auth token is not configured");
-  }
-  const token = extractBearerToken(c);
-  if (!token || !constantTimeEqual(token, expected)) {
-    return authError(c, 401, "Unauthorized");
-  }
-  return null;
-}
-async function authorizeSessionAccess(c, sessionId, stub) {
-  if (isTrustedTakosRoutedRequest(c)) return null;
-  const token = extractBearerToken(c);
-  if (!token) {
-    if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
-      return await requireGuiAppAuth(c.env, c.req.raw);
-    }
-    return authError(c, 401, "Unauthorized");
-  }
-  const adminToken = c.env.SANDBOX_HOST_AUTH_TOKEN;
-  if (adminToken && constantTimeEqual(token, adminToken)) return null;
-  const tokenInfo = await stub.verifyProxyToken(token);
-  if (!tokenInfo || tokenInfo.sessionId !== sessionId) {
-    return authError(c, 401, "Unauthorized");
-  }
-  return null;
 }
 function collectMissingRuntimeBindings(env) {
   const missing = [];
