@@ -331,7 +331,7 @@ function buildCommandEnv(
   return env;
 }
 
-function validateOverrideEnv(
+function assertSafeEnvShape(
   key: string,
   value: unknown,
 ): asserts value is string {
@@ -340,9 +340,6 @@ function validateOverrideEnv(
   }
   if (typeof value !== "string") {
     throw new Error(`Environment variable value must be a string: ${key}`);
-  }
-  if (CONTROL_PLANE_ENV_DENYLIST.has(key) || isSensitiveOverrideEnv(key)) {
-    throw new Error(`Sensitive environment variable is not allowed: ${key}`);
   }
   if (value.length > MAX_ENV_VALUE_LENGTH) {
     throw new Error(`Environment variable value too long: ${key}`);
@@ -352,22 +349,23 @@ function validateOverrideEnv(
   }
 }
 
+function validateOverrideEnv(
+  key: string,
+  value: unknown,
+): asserts value is string {
+  // Override env comes from untrusted caller input, so it must reject
+  // denylisted and pattern-sensitive keys in addition to shape validation.
+  if (CONTROL_PLANE_ENV_DENYLIST.has(key) || isSensitiveOverrideEnv(key)) {
+    throw new Error(`Sensitive environment variable is not allowed: ${key}`);
+  }
+  assertSafeEnvShape(key, value);
+}
+
 function validateDirectEnv(
   key: string,
   value: unknown,
 ): asserts value is string {
-  if (!ENV_NAME_PATTERN.test(key)) {
-    throw new Error(`Invalid environment variable name: ${key}`);
-  }
-  if (typeof value !== "string") {
-    throw new Error(`Environment variable value must be a string: ${key}`);
-  }
-  if (value.length > MAX_ENV_VALUE_LENGTH) {
-    throw new Error(`Environment variable value too long: ${key}`);
-  }
-  if (value.includes("\0") || value.includes("\r") || value.includes("\n")) {
-    throw new Error(`Environment variable contains invalid characters: ${key}`);
-  }
+  assertSafeEnvShape(key, value);
 }
 
 function isSensitiveOverrideEnv(key: string): boolean {
