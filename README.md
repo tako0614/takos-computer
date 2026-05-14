@@ -9,25 +9,14 @@ Takos ディストリビューションに同梱される 1st-party InstallableA
 Takosumi 上で動作します。サンドボックス / MCP 表面自体は Takos
 固有の結合を持たず、任意の MCP 対応エージェントホストから利用できます。
 
-## アーキテクチャ
+## 主要技術
 
-```
-                  Internet / Service Bindings
-                            |
-        +-------------------+-------------------+
-        |                                       |
-  Takos computer host worker             Takos sandbox host
-        |                                       |
-Dashboard + sandbox proxy              SandboxSessionContainer
-        |                                       |
-CF Worker routes /gui, /session        CF Container (basic)
-        |                                       |
- Dashboard UI + sandbox MCP            Deno runtime, shell tools
-```
-
-セッションのライフサイクルは Cloudflare Containers のサイドカーとして動作する
-Durable Object で管理されます。各セッションは個別のコンテナインスタンスを持ち、
-プロキシトークン認証と非アクティブ時の自動スリープを備えます。
+- Deno 2
+- Hono 4
+- MCP SDK
+- Zod
+- Cloudflare Containers
+- SolidJS 1.9 + Vite 6.3
 
 ## パッケージ構成
 
@@ -205,6 +194,26 @@ cd packages/dashboard
 deno task dev
 ```
 
+## アーキテクチャ
+
+```
+                  Internet / Service Bindings
+                            |
+        +-------------------+-------------------+
+        |                                       |
+  Takos computer host worker             Takos sandbox host
+        |                                       |
+Dashboard + sandbox proxy              SandboxSessionContainer
+        |                                       |
+CF Worker routes /gui, /session        CF Container (basic)
+        |                                       |
+ Dashboard UI + sandbox MCP            Deno runtime, shell tools
+```
+
+セッションのライフサイクルは Cloudflare Containers のサイドカーとして動作する
+Durable Object で管理されます。各セッションは個別のコンテナインスタンスを持ち、
+プロキシトークン認証と非アクティブ時の自動スリープを備えます。
+
 ## 環境変数
 
 | Variable                         | デフォルト  | 説明                                                                                                                      |
@@ -319,15 +328,6 @@ wrangler secret put SANDBOX_HOST_AUTH_TOKEN -c deploy/wrangler.sandbox-host.toml
 wrangler secret put TAKOS_TOKEN -c deploy/wrangler.sandbox-host.toml
 wrangler secret put TAKOS_TOKEN -c deploy/wrangler.sandbox-host.toml --env staging
 ```
-
-## 主要技術
-
-- Deno 2
-- Hono 4
-- MCP SDK
-- Zod
-- Cloudflare Containers
-- SolidJS 1.9 + Vite 6.3
 
 ## ライセンス
 
