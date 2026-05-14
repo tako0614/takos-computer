@@ -11,6 +11,31 @@ import type {
   SandboxSessionTokenInfo,
 } from "./sandbox-session-types.ts";
 
+/**
+ * Platform-shim bridges for the local Deno simulator.
+ *
+ * The simulator implements the runtime surface of Cloudflare Workers Durable
+ * Object stubs and namespaces using plain Deno classes. The classes implement
+ * the RPC methods of `SandboxSessionContainer` directly (no DO transport) and
+ * therefore do not satisfy the Cloudflare-shaped `fetch(input, init?)` /
+ * `DurableObjectStubOf<T>` contracts at the type level even though they are
+ * structurally interchangeable at runtime.
+ *
+ * These two helpers are the single named boundary between the Deno simulator
+ * and the Worker environment types. Production code never reaches them.
+ */
+function bridgeLocalSessionStub(
+  session: LocalSandboxSession,
+): DurableObjectStub & SandboxSessionContainer {
+  return session as unknown as DurableObjectStub & SandboxSessionContainer;
+}
+
+function bridgeLocalSandboxNamespace(
+  namespace: LocalSandboxSessionNamespace,
+): SandboxHostEnv["SANDBOX_CONTAINER"] {
+  return namespace as unknown as SandboxHostEnv["SANDBOX_CONTAINER"];
+}
+
 const DEFAULT_LOCAL_PORT = 8788;
 const DEFAULT_LOCAL_WORKSPACE_ROOT = ".takos-computer-local/workspaces";
 
@@ -212,7 +237,7 @@ export class LocalSandboxSessionNamespace {
       session = new LocalSandboxSession(id, this.env, this.workspaceRoot);
       this.sessions.set(name, session);
     }
-    return session as unknown as DurableObjectStub & SandboxSessionContainer;
+    return bridgeLocalSessionStub(session);
   }
 }
 
@@ -235,8 +260,7 @@ export function createLocalDevSandboxHost(
     env,
     options.workspaceRoot ?? DEFAULT_LOCAL_WORKSPACE_ROOT,
   );
-  env.SANDBOX_CONTAINER =
-    sandboxContainer as unknown as SandboxHostEnv["SANDBOX_CONTAINER"];
+  env.SANDBOX_CONTAINER = bridgeLocalSandboxNamespace(sandboxContainer);
 
   return {
     env,
