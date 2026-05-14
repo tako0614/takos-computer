@@ -1,3 +1,53 @@
+// DIVERGENT COPY: takos-apps/takos-computer/packages/computer-hosts/src/app-auth.ts
+//
+// This file started from the canonical takos-app app-auth.ts that is
+// byte-identical across takos-docs / takos-slide / takos-excel (see
+// `takos-apps/takos-docs/src/app-auth.ts`), but it has intentionally
+// diverged because takos-computer's GUI runs on a different surface and
+// against the Takosumi Accounts launch-token flow. Do NOT try to re-sync
+// this file with the canonical copy or include it in the
+// `check:takos-apps-dedupe` check — the divergence is structural, not drift.
+//
+// Material differences from the canonical takos-app file:
+//
+//   1. Mount path: cookies and routes live under `/gui` instead of `/`.
+//      Cookie names are `takos_computer_*` rather than `takos_app_*`.
+//   2. Env-var prefix: OIDC discovery uses `OIDC_*` (issuer / authorization /
+//      token / userinfo / JWKS / client / redirect) instead of the canonical
+//      `OAUTH_*`. The set of required env vars is also larger because OIDC
+//      discovery, JWKS signing, and the launch-token flow are all wired up.
+//   3. ID token verification: the canonical copy trusts the access_token and
+//      calls /userinfo. This copy performs full RFC 7519 / OIDC ID token
+//      verification: JWKS fetch, ES256 / RS256 signature verification with
+//      clock-skew, issuer / audience / azp / nonce / nbf / iat checks, and a
+//      consistency check between userinfo.sub and id_token.sub.
+//   4. Discovery: this copy reads `.well-known/openid-configuration` to
+//      resolve authorization / token / userinfo / JWKS endpoints (with env
+//      overrides). The canonical copy hardcodes `${issuer}/oauth/*` paths.
+//   5. PKCE + nonce: this copy adds an OIDC nonce alongside PKCE; the
+//      canonical copy uses PKCE only.
+//   6. Session payload: this copy carries Takosumi claims (account_id /
+//      space_id / app_id / role) in addition to sub / name. The canonical
+//      copy only carries sub / name.
+//   7. Launch-token flow: this copy exposes `/gui/api/auth/launch`, which
+//      consumes a single-use Takosumi Accounts launch token by POSTing to
+//      `ACCOUNTS_BASE_URL/v1/installations/<id>/launch-token/consume` and
+//      mints a GUI session directly (no OAuth redirect round-trip). The
+//      canonical copy has no launch-token concept.
+//   8. Function surface: this copy exports `guiAppAuthRequired`,
+//      `requireGuiAppAuth`, `requireGuiAppOrRedirect`, `readGuiSession`, and
+//      `registerGuiAuthRoutes` (named for the GUI scope, with a redirect
+//      variant for browser navigation). The canonical copy exports
+//      `requireAppAuth` and `registerAuthRoutes` (no redirect variant).
+//   9. Cookie parsing is URL-decoded (canonical is naive). Signature
+//      comparison uses `constantTimeEqual` (canonical uses `!==`).
+//
+// If shared OIDC primitives are ever extracted into a separately published
+// package, this file should be the consumer that drives the contract: it is
+// the more complete implementation. Until that package exists, importing
+// from the canonical copy is not viable because the divergence is in the
+// public surface (function names, return-type semantics, env var prefixes),
+// not just internal helpers.
 import type { Hono } from "hono";
 import { constantTimeEqual } from "./crypto-utils.ts";
 import type { SandboxHostEnv } from "./sandbox-session-types.ts";
