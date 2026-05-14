@@ -4053,232 +4053,10 @@ async function authorizeSessionAccess(c, sessionId, stub) {
   return null;
 }
 
-// src/sandbox-host.ts
-var MAX_MCP_FORWARD_BODY_BYTES = 1024 * 1024;
+// src/sandbox-host-published-mcp.ts
 var PUBLISHED_MCP_DEFAULT_SESSION_ID = "agent-default";
 var PUBLISHED_MCP_DEFAULT_SPACE_ID = "published-mcp";
 var PUBLISHED_MCP_DEFAULT_USER_ID = "takos-agent";
-var app = new Hono2();
-function errorResponse(c, err) {
-  return c.json(
-    { error: err instanceof Error ? err.message : "Unknown error" },
-    500
-  );
-}
-function sessionIdParam(c) {
-  const sessionId = c.req.param("id");
-  if (!sessionId) return c.json({ error: "Missing session id" }, 400);
-  return sessionId;
-}
-async function readRequestTextWithLimit(request, maxBytes) {
-  const contentLength = request.headers.get("Content-Length");
-  if (contentLength) {
-    const parsed = Number(contentLength);
-    if (!Number.isInteger(parsed) || parsed < 0) {
-      return {
-        ok: false,
-        response: Response.json({ error: "Invalid Content-Length" }, {
-          status: 400
-        })
-      };
-    }
-    if (parsed > maxBytes) {
-      return {
-        ok: false,
-        response: Response.json({ error: "MCP request body too large" }, {
-          status: 413
-        })
-      };
-    }
-  }
-  const reader = request.body?.getReader();
-  if (!reader) return { ok: true, body: "" };
-  const chunks = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel();
-      return {
-        ok: false,
-        response: Response.json({ error: "MCP request body too large" }, {
-          status: 413
-        })
-      };
-    }
-    chunks.push(value);
-  }
-  const body = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  try {
-    return {
-      ok: true,
-      body: new TextDecoder("utf-8", { fatal: true }).decode(body)
-    };
-  } catch {
-    return {
-      ok: false,
-      response: Response.json({ error: "Invalid UTF-8 body" }, { status: 400 })
-    };
-  }
-}
-function collectMissingRuntimeBindings(env) {
-  const missing = [];
-  if (!env.SANDBOX_CONTAINER) missing.push("SANDBOX_CONTAINER");
-  if (!env.SANDBOX_HOST_AUTH_TOKEN) missing.push("SANDBOX_HOST_AUTH_TOKEN");
-  if (!resolveContainerMcpAuthToken(env)) {
-    missing.push("MCP_AUTH_TOKEN");
-  }
-  if (!resolvePublishedMcpAuthToken(env)) {
-    missing.push("PUBLISHED_MCP_AUTH_TOKEN");
-  }
-  if (!env.SESSION_INDEX) missing.push("SESSION_INDEX");
-  if (guiAppAuthRequired(env)) {
-    for (const name of [
-      "APP_SESSION_SECRET",
-      "OIDC_ISSUER_URL",
-      "OIDC_CLIENT_ID",
-      "OIDC_CLIENT_SECRET",
-      "ACCOUNTS_BASE_URL",
-      "INSTALL_LAUNCH_INSTALLATION_ID",
-      "INSTALL_LAUNCH_CONSUME_PATH"
-    ]) {
-      if (!env[name]) missing.push(name);
-    }
-  }
-  return missing;
-}
-app.get("/healthz", (c) => {
-  const missing = collectMissingRuntimeBindings(c.env);
-  return c.json({
-    status: "ok",
-    service: "takos-sandbox-host",
-    ready: missing.length === 0,
-    missingBindings: missing
-  });
-});
-app.get("/health", (c) => {
-  const missing = collectMissingRuntimeBindings(c.env);
-  return c.json({
-    status: missing.length === 0 ? "ok" : "misconfigured",
-    service: "takos-sandbox-host",
-    missingBindings: missing
-  }, missing.length === 0 ? 200 : 503);
-});
-app.get("/readyz", (c) => {
-  const missing = collectMissingRuntimeBindings(c.env);
-  return c.json({
-    status: missing.length === 0 ? "ok" : "misconfigured",
-    service: "takos-sandbox-host",
-    missingBindings: missing
-  }, missing.length === 0 ? 200 : 503);
-});
-async function serveGuiApp(c) {
-  const auth = await authorizeGuiApp(c);
-  if (auth) return auth;
-  return new Response(appHtml, {
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store"
-    }
-  });
-}
-function serveGuiStyle() {
-  return new Response(styleCss, {
-    headers: {
-      "Content-Type": "text/css; charset=utf-8",
-      "Cache-Control": "public, max-age=300"
-    }
-  });
-}
-function serveComputerIcon() {
-  return new Response(computerIconSvg, {
-    headers: {
-      "Content-Type": "image/svg+xml",
-      "Cache-Control": "public, max-age=31536000, immutable"
-    }
-  });
-}
-app.get("/icons/computer.svg", serveComputerIcon);
-app.get("/gui/icons/computer.svg", serveComputerIcon);
-registerGuiAuthRoutes(app);
-app.get("/gui", serveGuiApp);
-app.get("/gui/", serveGuiApp);
-async function listSessions(c) {
-  const auth = await requireHostAdmin(c);
-  if (auth) return auth;
-  const kv = c.env.SESSION_INDEX;
-  if (!kv) return c.json({ sessions: [] });
-  const list = await kv.list({ prefix: "session:" });
-  const sessions = [];
-  for (const key of list.keys) {
-    const val = await kv.get(key.name, { type: "json" });
-    if (val) sessions.push(val);
-  }
-  return c.json({ sessions });
-}
-app.get("/gui/api/sessions", listSessions);
-app.get("/gui/api/sandbox-sessions", listSessions);
-async function createSession(c) {
-  const auth = await requireHostAdmin(c);
-  if (auth) return auth;
-  const payload = await c.req.json();
-  if (!payload.sessionId || !payload.spaceId || !payload.userId) {
-    return c.json({
-      error: "Missing required fields: sessionId, spaceId, userId"
-    }, 400);
-  }
-  try {
-    const stub = getDOStub(c.env, payload.sessionId);
-    const result = await stub.createSession(payload);
-    const state = await stub.getSessionState();
-    const kv = c.env.SESSION_INDEX;
-    if (kv && state) {
-      await kv.put(`session:${payload.sessionId}`, JSON.stringify(state));
-    }
-    return c.json(result, 201);
-  } catch (err) {
-    return errorResponse(c, err);
-  }
-}
-async function getSession(c) {
-  const sessionId = sessionIdParam(c);
-  if (sessionId instanceof Response) return sessionId;
-  const stub = getDOStub(c.env, sessionId);
-  const auth = await authorizeSessionAccess(c, sessionId, stub);
-  if (auth) return auth;
-  const state = await stub.getSessionState();
-  if (!state) return c.json({ error: "Session not found" }, 404);
-  return c.json(state);
-}
-async function destroySession(c) {
-  const sessionId = sessionIdParam(c);
-  if (sessionId instanceof Response) return sessionId;
-  const stub = getDOStub(c.env, sessionId);
-  try {
-    const auth = await authorizeSessionAccess(c, sessionId, stub);
-    if (auth) return auth;
-    await stub.destroySession();
-    const kv = c.env.SESSION_INDEX;
-    if (kv) await kv.delete(`session:${sessionId}`);
-    return c.json({ ok: true });
-  } catch (err) {
-    return errorResponse(c, err);
-  }
-}
-app.post("/create", createSession);
-app.post("/gui/api/sandbox-create", createSession);
-app.get("/session/:id", getSession);
-app.get("/gui/api/sandbox-session/:id", getSession);
-app.delete("/session/:id", destroySession);
-app.delete("/gui/api/sandbox-session/:id", destroySession);
 var publishedSessionInputProperties = {
   session_id: {
     type: "string",
@@ -4731,6 +4509,230 @@ async function handlePublishedMcp(c) {
     );
   }
 }
+
+// src/sandbox-host.ts
+var MAX_MCP_FORWARD_BODY_BYTES = 1024 * 1024;
+var app = new Hono2();
+function errorResponse(c, err) {
+  return c.json(
+    { error: err instanceof Error ? err.message : "Unknown error" },
+    500
+  );
+}
+function sessionIdParam(c) {
+  const sessionId = c.req.param("id");
+  if (!sessionId) return c.json({ error: "Missing session id" }, 400);
+  return sessionId;
+}
+async function readRequestTextWithLimit(request, maxBytes) {
+  const contentLength = request.headers.get("Content-Length");
+  if (contentLength) {
+    const parsed = Number(contentLength);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      return {
+        ok: false,
+        response: Response.json({ error: "Invalid Content-Length" }, {
+          status: 400
+        })
+      };
+    }
+    if (parsed > maxBytes) {
+      return {
+        ok: false,
+        response: Response.json({ error: "MCP request body too large" }, {
+          status: 413
+        })
+      };
+    }
+  }
+  const reader = request.body?.getReader();
+  if (!reader) return { ok: true, body: "" };
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      return {
+        ok: false,
+        response: Response.json({ error: "MCP request body too large" }, {
+          status: 413
+        })
+      };
+    }
+    chunks.push(value);
+  }
+  const body = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return {
+      ok: true,
+      body: new TextDecoder("utf-8", { fatal: true }).decode(body)
+    };
+  } catch {
+    return {
+      ok: false,
+      response: Response.json({ error: "Invalid UTF-8 body" }, { status: 400 })
+    };
+  }
+}
+function collectMissingRuntimeBindings(env) {
+  const missing = [];
+  if (!env.SANDBOX_CONTAINER) missing.push("SANDBOX_CONTAINER");
+  if (!env.SANDBOX_HOST_AUTH_TOKEN) missing.push("SANDBOX_HOST_AUTH_TOKEN");
+  if (!resolveContainerMcpAuthToken(env)) {
+    missing.push("MCP_AUTH_TOKEN");
+  }
+  if (!resolvePublishedMcpAuthToken(env)) {
+    missing.push("PUBLISHED_MCP_AUTH_TOKEN");
+  }
+  if (!env.SESSION_INDEX) missing.push("SESSION_INDEX");
+  if (guiAppAuthRequired(env)) {
+    for (const name of [
+      "APP_SESSION_SECRET",
+      "OIDC_ISSUER_URL",
+      "OIDC_CLIENT_ID",
+      "OIDC_CLIENT_SECRET",
+      "ACCOUNTS_BASE_URL",
+      "INSTALL_LAUNCH_INSTALLATION_ID",
+      "INSTALL_LAUNCH_CONSUME_PATH"
+    ]) {
+      if (!env[name]) missing.push(name);
+    }
+  }
+  return missing;
+}
+app.get("/healthz", (c) => {
+  const missing = collectMissingRuntimeBindings(c.env);
+  return c.json({
+    status: "ok",
+    service: "takos-sandbox-host",
+    ready: missing.length === 0,
+    missingBindings: missing
+  });
+});
+app.get("/health", (c) => {
+  const missing = collectMissingRuntimeBindings(c.env);
+  return c.json({
+    status: missing.length === 0 ? "ok" : "misconfigured",
+    service: "takos-sandbox-host",
+    missingBindings: missing
+  }, missing.length === 0 ? 200 : 503);
+});
+app.get("/readyz", (c) => {
+  const missing = collectMissingRuntimeBindings(c.env);
+  return c.json({
+    status: missing.length === 0 ? "ok" : "misconfigured",
+    service: "takos-sandbox-host",
+    missingBindings: missing
+  }, missing.length === 0 ? 200 : 503);
+});
+async function serveGuiApp(c) {
+  const auth = await authorizeGuiApp(c);
+  if (auth) return auth;
+  return new Response(appHtml, {
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+function serveGuiStyle() {
+  return new Response(styleCss, {
+    headers: {
+      "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": "public, max-age=300"
+    }
+  });
+}
+function serveComputerIcon() {
+  return new Response(computerIconSvg, {
+    headers: {
+      "Content-Type": "image/svg+xml",
+      "Cache-Control": "public, max-age=31536000, immutable"
+    }
+  });
+}
+app.get("/icons/computer.svg", serveComputerIcon);
+app.get("/gui/icons/computer.svg", serveComputerIcon);
+registerGuiAuthRoutes(app);
+app.get("/gui", serveGuiApp);
+app.get("/gui/", serveGuiApp);
+async function listSessions(c) {
+  const auth = await requireHostAdmin(c);
+  if (auth) return auth;
+  const kv = c.env.SESSION_INDEX;
+  if (!kv) return c.json({ sessions: [] });
+  const list = await kv.list({ prefix: "session:" });
+  const sessions = [];
+  for (const key of list.keys) {
+    const val = await kv.get(key.name, { type: "json" });
+    if (val) sessions.push(val);
+  }
+  return c.json({ sessions });
+}
+app.get("/gui/api/sessions", listSessions);
+app.get("/gui/api/sandbox-sessions", listSessions);
+async function createSession(c) {
+  const auth = await requireHostAdmin(c);
+  if (auth) return auth;
+  const payload = await c.req.json();
+  if (!payload.sessionId || !payload.spaceId || !payload.userId) {
+    return c.json({
+      error: "Missing required fields: sessionId, spaceId, userId"
+    }, 400);
+  }
+  try {
+    const stub = getDOStub(c.env, payload.sessionId);
+    const result = await stub.createSession(payload);
+    const state = await stub.getSessionState();
+    const kv = c.env.SESSION_INDEX;
+    if (kv && state) {
+      await kv.put(`session:${payload.sessionId}`, JSON.stringify(state));
+    }
+    return c.json(result, 201);
+  } catch (err) {
+    return errorResponse(c, err);
+  }
+}
+async function getSession(c) {
+  const sessionId = sessionIdParam(c);
+  if (sessionId instanceof Response) return sessionId;
+  const stub = getDOStub(c.env, sessionId);
+  const auth = await authorizeSessionAccess(c, sessionId, stub);
+  if (auth) return auth;
+  const state = await stub.getSessionState();
+  if (!state) return c.json({ error: "Session not found" }, 404);
+  return c.json(state);
+}
+async function destroySession(c) {
+  const sessionId = sessionIdParam(c);
+  if (sessionId instanceof Response) return sessionId;
+  const stub = getDOStub(c.env, sessionId);
+  try {
+    const auth = await authorizeSessionAccess(c, sessionId, stub);
+    if (auth) return auth;
+    await stub.destroySession();
+    const kv = c.env.SESSION_INDEX;
+    if (kv) await kv.delete(`session:${sessionId}`);
+    return c.json({ ok: true });
+  } catch (err) {
+    return errorResponse(c, err);
+  }
+}
+app.post("/create", createSession);
+app.post("/gui/api/sandbox-create", createSession);
+app.get("/session/:id", getSession);
+app.get("/gui/api/sandbox-session/:id", getSession);
+app.delete("/session/:id", destroySession);
+app.delete("/gui/api/sandbox-session/:id", destroySession);
 app.all("/mcp", handlePublishedMcp);
 function mcpMethodNotAllowed() {
   return new Response(
