@@ -12,8 +12,8 @@ components:
   web:
     kind: worker
     build:
-      command: deno task build
-      output: dist/worker.mjs
+      command: deno task build:all
+      output: dist/sandbox-host.js
     routes:
       - /mcp
       - /gui
@@ -27,18 +27,10 @@ components:
       - /session/:id
       - /session/:id/mcp
       - /icons/computer.svg
-    use:
-      auth:
-        mount: oidc
-
-  auth:
-    kind: oidc
-    redirectPaths:
       - /gui/api/auth/callback
-    scopes:
-      - openid
-      - profile
-      - email
+    listen:
+      operator.identity.oidc:
+        as: env
 
 interfaces:
   launch:
