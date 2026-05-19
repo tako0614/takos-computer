@@ -14,49 +14,21 @@ components:
     build:
       command: deno task build:all
       output: dist/sandbox-host.js
-    routes:
-      - /mcp
-      - /gui
-      - /gui/*
-      - /gui/api/auth/*
-      - /healthz
-      - /health
-      - /readyz
-      - /create
-      - /session
-      - /session/:id
-      - /session/:id/mcp
-      - /icons/computer.svg
-      - /gui/api/auth/callback
+    spec:
+      routes:
+        - /mcp
+        - /gui
+        - /gui/*
+        - /gui/api/auth/*
+        - /healthz
+        - /health
+        - /readyz
+        - /create
+        - /session
+        - /session/:id
+        - /session/:id/mcp
+        - /icons/computer.svg
+        - /gui/api/auth/callback
     listen:
       operator.identity.oidc:
         as: env
-
-interfaces:
-  launch:
-    target: web
-    path: /gui/api/auth/launch
-  mcp:
-    target: web
-    path: /mcp
-  health:
-    target: web
-    path: /readyz
-
-permissions:
-  requested:
-    - spaces:read
-    - files:read
-    - files:write
-    - memories:read
-    - memories:write
-    - threads:read
-    - threads:write
-    - runs:read
-    - runs:write
-    - agents:execute
-    - repos:read
-    - repos:write
-    - mcp:invoke
-    - events:subscribe
-    - logs.read.own
