@@ -10,10 +10,8 @@ metadata:
 components:
   web:
     kind: worker
-    build:
-      command: deno task build:all
-      output: dist/sandbox-host.js
     spec:
+      entrypoint: dist/sandbox-host.js
       routes:
         - /mcp
         - /gui
@@ -29,5 +27,6 @@ components:
         - /icons/computer.svg
         - /gui/api/auth/callback
     listen:
-      operator.identity.oidc:
+      oidc:
+        from: namespace:operator.identity.oidc
         as: env

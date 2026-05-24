@@ -1,0 +1,12 @@
+apiVersion: v1
+
+metadata:
+  id: jp.takos.computer.build
+  name: Takos Computer build
+
+components:
+  web:
+    kind: linux-container
+    spec:
+      image: denoland/deno:alpine
+      command: deno task build:all
