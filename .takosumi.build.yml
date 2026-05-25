@@ -4,9 +4,10 @@ metadata:
   id: jp.takos.computer.build
   name: Takos Computer build
 
-components:
+nodes:
   web:
     kind: linux-container
     spec:
       image: denoland/deno:alpine
       command: deno task build:all
+    dependsOn: []
