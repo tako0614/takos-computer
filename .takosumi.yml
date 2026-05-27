@@ -18,25 +18,19 @@ components:
     kind: worker
     spec:
       entrypoint: dist/sandbox-host.js
-    publish:
-      http:
-        as: http-endpoint
     listen:
       oidc:
-        from: operator.identity.oidc
-        as: secret-env
+        path: identity.primary.oidc
+        inject: secret-env
         prefix: OIDC
         required: true
 
   public:
     kind: gateway
-    listen:
+    connect:
       upstream:
-        from: web.http
-        as: upstream
-    publish:
-      public:
-        as: http-endpoint
+        output: web.http
+        inject: upstream
     spec:
       listeners:
         public:
@@ -45,3 +39,8 @@ components:
         - listener: public
           path: /
           to: upstream
+
+publish:
+  public:
+    output: public.public
+    path: takos-computer.http.public
