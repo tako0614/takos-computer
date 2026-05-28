@@ -12,9 +12,9 @@
     "vite-plugin-singlefile": "npm:vite-plugin-singlefile@^2.0.0"
   },
   "tasks": {
-    "dev": "deno run -A npm:vite",
-    "build": "deno run -A --node-modules-dir=none npm:vite build && deno run -A scripts/emit-assets.ts",
-    "preview": "deno run -A npm:vite preview"
+    "dev": "deno run --allow-read --allow-write --allow-env --allow-net --allow-run --allow-sys --allow-ffi npm:vite",
+    "build": "deno run --allow-read --allow-write --allow-env --allow-run --allow-sys --allow-ffi --node-modules-dir=none npm:vite build && deno run --allow-read --allow-write scripts/emit-assets.ts",
+    "preview": "deno run --allow-read --allow-write --allow-env --allow-net --allow-run --allow-sys --allow-ffi npm:vite preview"
   },
   "compilerOptions": {
     "lib": ["dom", "dom.iterable", "deno.ns"],

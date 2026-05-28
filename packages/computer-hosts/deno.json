@@ -19,7 +19,7 @@
     "test": "deno test --allow-all src/",
     "dev:local": "deno run --allow-net --allow-env --allow-read --allow-write --allow-run src/local-dev-simulator.ts",
     "build:dashboard-assets": "cd ../dashboard && deno task build",
-    "build:sandbox-host": "deno run -A scripts/build-host.ts sandbox",
+    "build:sandbox-host": "deno run --allow-read --allow-write --allow-env --allow-run --allow-sys scripts/build-host.ts sandbox",
     "build:all": "deno task build:dashboard-assets && deno task build:sandbox-host"
   }
 }

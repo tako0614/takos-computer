@@ -21,6 +21,7 @@ components:
     listen:
       oidc:
         path: identity.primary.oidc
+        kind: identity.oidc@v1
         inject: secret-env
         prefix: OIDC
         required: true
