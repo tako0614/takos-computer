@@ -11,8 +11,7 @@
  * - process_kill  — Kill a process
  */
 
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
+import { constantTimeEqual } from "@takos-computer/common/crypto";
 import type {
   ProcessSignal,
   ShellExecOptions,
@@ -67,15 +66,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function objectArgs(args: unknown): Record<string, unknown> {
   return isRecord(args) ? args : {};
-}
-
-function constantTimeEqual(a: string, b: string): boolean {
-  const maxLen = Math.max(a.length, b.length);
-  let result = a.length ^ b.length;
-  for (let i = 0; i < maxLen; i++) {
-    result |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  }
-  return result === 0;
 }
 
 function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
@@ -198,140 +188,6 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
       },
     },
   ];
-}
-
-export function createSandboxMcpServer(deps: McpServerDeps): McpServer {
-  const tools = createSandboxToolDefinitions(deps);
-  const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
-  const callTool = (name: string, args: unknown) => {
-    const tool = toolMap.get(name);
-    if (!tool) throw new Error(`Unknown tool: ${name}`);
-    return tool.handle(args, { signal: new AbortController().signal });
-  };
-
-  const server = new McpServer({
-    name: "takos-computer-sandbox",
-    version: "1.0.0",
-  });
-
-  // ---------------------------------------------------------------------------
-  // Shell tools
-  // ---------------------------------------------------------------------------
-
-  server.tool(
-    "shell_exec",
-    "Execute a shell command (bash -c). Returns stdout, stderr, and exit code.",
-    {
-      command: z.string().describe("Shell command to execute"),
-      timeout_ms: z.number().optional().describe(
-        "Timeout in milliseconds (default: 30000)",
-      ),
-      cwd: z.string().optional().describe("Working directory"),
-      env: z.record(z.string()).optional().describe(
-        "Additional environment variables",
-      ),
-      allow_takos_token: z.boolean().optional().describe(
-        "Set to true to include TAKOS_TOKEN in the child process environment",
-      ),
-      takos_token: z.string().optional().describe(
-        "Optional explicit TAKOS token to pass instead of the container token",
-      ),
-    },
-    (args: ShellExecOptions) => callTool("shell_exec", args),
-  );
-
-  // ---------------------------------------------------------------------------
-  // Filesystem tools
-  // ---------------------------------------------------------------------------
-
-  server.tool(
-    "file_read",
-    "Read file contents. Returns content, size, and truncation status.",
-    {
-      path: z.string().describe(
-        "Workspace-relative path or absolute path inside /home/sandbox/workspace",
-      ),
-      offset: z.number().optional().describe(
-        "Byte offset to start reading from",
-      ),
-      limit: z.number().optional().describe(
-        "Max bytes to read (default/max: 256KB)",
-      ),
-      encoding: z.enum(["utf-8", "base64"]).optional().describe(
-        "Output encoding (default: utf-8)",
-      ),
-    },
-    (args: FileReadOptions) => callTool("file_read", args),
-  );
-
-  server.tool(
-    "file_write",
-    "Write content to a file. Creates the file if it does not exist.",
-    {
-      path: z.string().describe(
-        "Workspace-relative path or absolute path inside /home/sandbox/workspace",
-      ),
-      content: z.string().describe("Content to write"),
-      encoding: z.enum(["utf-8", "base64"]).optional().describe(
-        "Input encoding (default: utf-8)",
-      ),
-      create_dirs: z.boolean().optional().describe(
-        "Create parent directories if missing (default: false)",
-      ),
-    },
-    (args: FileWriteOptions) => callTool("file_write", args),
-  );
-
-  server.tool(
-    "file_list",
-    "List directory contents. Returns name, type, size, and modification time.",
-    {
-      path: z.string().describe(
-        "Workspace-relative directory path or absolute path inside /home/sandbox/workspace",
-      ),
-      recursive: z.boolean().optional().describe(
-        "Recurse into subdirectories (default: false)",
-      ),
-      glob: z.string().optional().describe(
-        'Filter entries by glob pattern (e.g. "*.ts")',
-      ),
-    },
-    (args: FileListOptions) => callTool("file_list", args),
-  );
-
-  server.tool(
-    "file_info",
-    "Get file or directory metadata: existence, type, size, modification time, permissions.",
-    {
-      path: z.string().describe(
-        "Workspace-relative path or absolute path inside /home/sandbox/workspace",
-      ),
-    },
-    (args: { path: string }) => callTool("file_info", args),
-  );
-
-  // ---------------------------------------------------------------------------
-  // Process tools
-  // ---------------------------------------------------------------------------
-
-  server.tool(
-    "process_list",
-    "List running processes (via ps aux).",
-    {},
-    () => callTool("process_list", {}),
-  );
-
-  server.tool(
-    "process_kill",
-    "Kill a process by PID if ShellManager is tracking it. Sends SIGTERM by default.",
-    {
-      pid: z.number().describe("Process ID to kill"),
-      signal: z.string().optional().describe("Signal name (default: SIGTERM)"),
-    },
-    (args: { pid: number; signal?: string }) => callTool("process_kill", args),
-  );
-
-  return server;
 }
 
 function jsonRpcResponse(id: unknown, result: unknown): Response {

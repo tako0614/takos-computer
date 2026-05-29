@@ -148,10 +148,12 @@ function createEnv(
   };
 
   let currentSessionId = "";
+  const doNames: string[] = [];
   const env = {
     SANDBOX_CONTAINER: {
       idFromName(name: string) {
         currentSessionId = name;
+        doNames.push(name);
         return name;
       },
       get() {
@@ -188,7 +190,7 @@ function createEnv(
     env.INSTALL_LAUNCH_CONSUME_PATH = "/gui/api/auth/launch";
   }
 
-  return { env, mcpCalls };
+  return { env, mcpCalls, doNames };
 }
 
 function fetchWorker(
@@ -1270,4 +1272,95 @@ Deno.test("sandbox host published MCP auto-creates a session and proxies tool ca
       },
     },
   }]);
+});
+
+Deno.test("sandbox host published MCP scopes the DO name to the token but reports the logical session id", async () => {
+  const { env, doNames } = createEnv();
+
+  const response = await fetchWorker(env, "/mcp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...publishedMcpAuthHeaders(),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "computer_session_create",
+        arguments: { session_id: "agent-session-1", space_id: "space-1" },
+      },
+    }),
+  });
+
+  assertEquals(response.status, 200);
+  const body = await response.json() as {
+    result: { content: Array<{ type: string; text: string }> };
+  };
+  const state = JSON.parse(body.result.content[0]!.text) as {
+    session_id: string;
+  };
+  // Caller sees the logical id they passed.
+  assertEquals(state.session_id, "agent-session-1");
+  // But the Durable Object is addressed by a token-scoped name, never the
+  // raw caller-supplied session id.
+  if (doNames.length === 0) {
+    throw new Error("Expected at least one DO name to be resolved");
+  }
+  for (const name of doNames) {
+    if (name === "agent-session-1") {
+      throw new Error(
+        "Published MCP must not address the DO by the raw caller session id",
+      );
+    }
+    if (!name.startsWith("pmcp-") || !name.endsWith(":agent-session-1")) {
+      throw new Error(`Unexpected DO name shape: ${name}`);
+    }
+  }
+});
+
+Deno.test("sandbox host published MCP isolates sessions across distinct tokens with the same session id", async () => {
+  // Two callers holding different published tokens use the same logical
+  // session id; they must resolve to different Durable Objects so neither
+  // can address or destroy the other's session.
+  const a = createEnv({ publishedMcpAuthToken: "token-a" });
+  const b = createEnv({ publishedMcpAuthToken: "token-b" });
+
+  const callDestroy = (env: SandboxHostEnv, token: string) =>
+    fetchWorker(env, "/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: {
+          name: "computer_session_destroy",
+          arguments: { session_id: "shared-id" },
+        },
+      }),
+    });
+
+  const resA = await callDestroy(a.env, "token-a");
+  const resB = await callDestroy(b.env, "token-b");
+  assertEquals(resA.status, 200);
+  assertEquals(resB.status, 200);
+
+  const nameA = a.doNames.at(-1);
+  const nameB = b.doNames.at(-1);
+  if (!nameA || !nameB) {
+    throw new Error("Expected both callers to resolve a DO name");
+  }
+  if (nameA === nameB) {
+    throw new Error(
+      `Distinct tokens must not share a DO name for the same session id: ${nameA}`,
+    );
+  }
+  if (!nameA.endsWith(":shared-id") || !nameB.endsWith(":shared-id")) {
+    throw new Error("Both names should carry the logical session id suffix");
+  }
 });

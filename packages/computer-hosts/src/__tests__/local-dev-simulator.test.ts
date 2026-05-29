@@ -140,10 +140,37 @@ Deno.test("local dev simulator published MCP auto-creates a local session", asyn
     };
     assertEquals(result.bytes_written, "published local".length);
 
-    const state = await host.sessionIndex.get("session:published-session", {
+    // The published session is indexed under a token-scoped key
+    // (`session:pmcp-<hash>:published-session`), never the raw logical id, so
+    // sessions with the same logical id under different tokens cannot collide.
+    const indexed = await host.sessionIndex.list({ prefix: "session:" });
+    const scopedKey = indexed.keys
+      .map((k) => k.name)
+      .find((name) =>
+        name.startsWith("session:pmcp-") &&
+        name.endsWith(":published-session")
+      );
+    if (!scopedKey) {
+      throw new Error(
+        `Expected a token-scoped published session index entry, got: ${
+          indexed.keys.map((k) => k.name).join(", ")
+        }`,
+      );
+    }
+    // The raw logical id must NOT be a standalone index key — the admin GUI
+    // would otherwise try (and fail) to address the DO by it.
+    if (indexed.keys.some((k) => k.name === "session:published-session")) {
+      throw new Error(
+        "Published session must not be indexed under the raw logical id",
+      );
+    }
+    const state = await host.sessionIndex.get(scopedKey, {
       type: "json",
-    }) as { status: string };
+    }) as { status: string; sessionId: string };
     assertEquals(state.status, "active");
+    // The stored addressing id matches the index key suffix so the admin GUI
+    // list -> get/destroy round-trips against the same scoped DO/KV entry.
+    assertEquals(state.sessionId, scopedKey.slice("session:".length));
   } finally {
     await Deno.remove(workspaceRoot, { recursive: true });
   }

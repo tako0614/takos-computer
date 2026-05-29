@@ -4,6 +4,7 @@
   "license": "MIT",
   "exports": {
     ".": "./src/index.ts",
+    "./crypto": "./src/crypto.ts",
     "./id": "./src/id.ts",
     "./validation": "./src/validation.ts",
     "./errors": "./src/errors.ts",

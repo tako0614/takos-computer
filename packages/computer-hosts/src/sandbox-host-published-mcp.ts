@@ -12,11 +12,26 @@
  *
  * Auth: callers present `PUBLISHED_MCP_AUTH_TOKEN` as a Bearer token; the
  * gate lives in `sandbox-host-auth.ts`.
+ *
+ * Session scoping: the published surface has no per-user principal — every
+ * caller authenticates with the same shared `PUBLISHED_MCP_AUTH_TOKEN`. To
+ * stop one token holder from addressing or destroying sessions created by a
+ * holder of a *different* token, every caller-supplied `session_id` is
+ * resolved into the namespace derived from the presented token
+ * (`<tokenNamespace>:<logicalSessionId>`) before it is used to address a
+ * Durable Object or KV index entry. A caller therefore can only ever reach
+ * sessions under their own token's namespace; a raw `session_id` minted under
+ * another token is unreachable because its namespace prefix cannot be forged
+ * without that token. The caller-facing `session_id` reported back in tool
+ * results stays the logical id the caller passed.
  */
 
 import type { Context } from "hono";
 import type { DurableObjectStub } from "./cf-types.ts";
-import { requirePublishedMcpAuth } from "./sandbox-host-auth.ts";
+import {
+  requirePublishedMcpAuth,
+  resolvePublishedMcpAuthToken,
+} from "./sandbox-host-auth.ts";
 import {
   getDOStub,
   resolveContainerMcpAuthToken,
@@ -83,8 +98,8 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       properties: publishedSessionInputProperties,
     },
     handle: async (args, c) => {
-      const { state } = await ensurePublishedMcpSession(c, args);
-      return publishedMcpJson(toPublishedSessionState(state));
+      const { state, sessionId } = await ensurePublishedMcpSession(c, args);
+      return publishedMcpJson(toPublishedSessionState(state, sessionId));
     },
   },
   {
@@ -95,11 +110,14 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       properties: publishedSessionInputProperties,
     },
     handle: async (args, c) => {
-      const { sessionId } = resolvePublishedMcpSessionArgs(args);
-      const state = await getDOStub(c.env, sessionId).getSessionState();
+      const { sessionId, scopedId } = await resolvePublishedMcpSessionArgs(
+        c,
+        args,
+      );
+      const state = await getDOStub(c.env, scopedId).getSessionState();
       return publishedMcpJson(
         state
-          ? toPublishedSessionState(state)
+          ? toPublishedSessionState(state, sessionId)
           : { session_id: sessionId, status: "missing" },
       );
     },
@@ -113,10 +131,13 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       properties: publishedSessionInputProperties,
     },
     handle: async (args, c) => {
-      const { sessionId } = resolvePublishedMcpSessionArgs(args);
-      await getDOStub(c.env, sessionId).destroySession();
+      const { sessionId, scopedId } = await resolvePublishedMcpSessionArgs(
+        c,
+        args,
+      );
+      await getDOStub(c.env, scopedId).destroySession();
       const kv = c.env.SESSION_INDEX;
-      if (kv) await kv.delete(`session:${sessionId}`);
+      if (kv) await kv.delete(`session:${scopedId}`);
       return publishedMcpJson({ ok: true, session_id: sessionId });
     },
   },
@@ -352,17 +373,50 @@ function nonEmptyStringArg(
   return fallback;
 }
 
-function resolvePublishedMcpSessionArgs(args: Record<string, unknown>): {
+/**
+ * Derive a stable, non-reversible namespace prefix from the presented auth
+ * token. Sessions are addressed under this prefix so a token holder can only
+ * reach their own sessions. Returns a hex SHA-256 prefix; throws (fail-closed)
+ * if no token is configured — `requirePublishedMcpAuth` already rejects those
+ * requests before tool handlers run, so this is a defensive guard.
+ */
+async function publishedMcpTokenNamespace(c: AppContext): Promise<string> {
+  const token = resolvePublishedMcpAuthToken(c.env);
+  if (!token) {
+    throw new Error("Published MCP auth token is not configured");
+  }
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(token),
+  );
+  const hex = Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `pmcp-${hex.slice(0, 16)}`;
+}
+
+type ResolvedPublishedMcpSession = {
+  /** Logical session id the caller passed / sees in responses. */
   sessionId: string;
+  /** Namespaced DO name + KV key — scoped to the caller's token. */
+  scopedId: string;
   spaceId: string;
   userId: string;
-} {
+};
+
+async function resolvePublishedMcpSessionArgs(
+  c: AppContext,
+  args: Record<string, unknown>,
+): Promise<ResolvedPublishedMcpSession> {
+  const sessionId = nonEmptyStringArg(
+    args,
+    ["session_id", "sessionId"],
+    PUBLISHED_MCP_DEFAULT_SESSION_ID,
+  );
+  const namespace = await publishedMcpTokenNamespace(c);
   return {
-    sessionId: nonEmptyStringArg(
-      args,
-      ["session_id", "sessionId"],
-      PUBLISHED_MCP_DEFAULT_SESSION_ID,
-    ),
+    sessionId,
+    scopedId: `${namespace}:${sessionId}`,
     spaceId: nonEmptyStringArg(
       args,
       ["space_id", "spaceId"],
@@ -395,12 +449,13 @@ function stripPublishedMcpSessionArgs(
   return stripped;
 }
 
-function toPublishedSessionState(state: SandboxSessionState): Record<
-  string,
-  unknown
-> {
+function toPublishedSessionState(
+  state: SandboxSessionState,
+  /** Logical id to report; defaults to the stored (logical) sessionId. */
+  logicalSessionId: string = state.sessionId,
+): Record<string, unknown> {
   return {
-    session_id: state.sessionId,
+    session_id: logicalSessionId,
     space_id: state.spaceId,
     user_id: state.userId,
     status: state.status,
@@ -410,10 +465,26 @@ function toPublishedSessionState(state: SandboxSessionState): Record<
 
 async function indexPublishedMcpSession(
   c: AppContext,
+  scopedId: string,
   state: SandboxSessionState,
 ): Promise<void> {
   const kv = c.env.SESSION_INDEX;
-  if (kv) await kv.put(`session:${state.sessionId}`, JSON.stringify(state));
+  if (!kv) return;
+  // Index under the token-scoped id so sessions with the same logical id but
+  // different token namespaces do not collide or leak across token holders.
+  //
+  // The Durable Object owning this session is addressed by `scopedId`, so the
+  // stored `sessionId` must also be the `scopedId` rather than the logical id.
+  // The admin GUI lists these entries and then drives get/destroy/viewer
+  // through `/session/:id`, which addresses the DO by the raw id it was given;
+  // if the stored id were the logical id, the admin would address a DO that
+  // does not exist (404 on get, silent no-op on destroy) while the real scoped
+  // session and its KV entry leaked. Storing the `scopedId` keeps the
+  // list -> get -> destroy -> viewer round-trip pointing at the same DO/KV key
+  // the published surface owns. The logical id is still what the published
+  // caller sees in tool results (see `toPublishedSessionState`).
+  const indexedState: SandboxSessionState = { ...state, sessionId: scopedId };
+  await kv.put(`session:${scopedId}`, JSON.stringify(indexedState));
 }
 
 async function ensurePublishedMcpSession(
@@ -422,14 +493,18 @@ async function ensurePublishedMcpSession(
 ): Promise<{
   stub: DurableObjectStub & SandboxSessionContainer;
   state: SandboxSessionState;
+  sessionId: string;
 }> {
-  const { sessionId, spaceId, userId } = resolvePublishedMcpSessionArgs(args);
-  const stub = getDOStub(c.env, sessionId);
+  const { sessionId, scopedId, spaceId, userId } =
+    await resolvePublishedMcpSessionArgs(c, args);
+  const stub = getDOStub(c.env, scopedId);
   const existing = await stub.getSessionState();
   if (existing && existing.status !== "stopped") {
-    return { stub, state: existing };
+    return { stub, state: existing, sessionId };
   }
 
+  // Store the logical sessionId in the session state/proxy token so the
+  // caller-facing id is preserved; the DO is addressed by the scoped id.
   await stub.createSession({ sessionId, spaceId, userId });
   const state = await stub.getSessionState() ?? {
     sessionId,
@@ -438,8 +513,8 @@ async function ensurePublishedMcpSession(
     status: "active" as const,
     createdAt: new Date().toISOString(),
   };
-  await indexPublishedMcpSession(c, state);
-  return { stub, state };
+  await indexPublishedMcpSession(c, scopedId, state);
+  return { stub, state, sessionId };
 }
 
 async function callSandboxToolThroughPublishedMcp(

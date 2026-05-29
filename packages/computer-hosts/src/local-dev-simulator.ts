@@ -153,7 +153,7 @@ class LocalSandboxSession {
     payload: CreateSandboxSessionPayload,
   ): Promise<{ ok: true; proxyToken: string }> {
     const sessionWorkspace = `${this.workspaceRoot}/${
-      safePathSegment(payload.sessionId)
+      safePathSegment(this.id.name ?? this.id.toString())
     }`;
     await Deno.mkdir(sessionWorkspace, { recursive: true });
 
