@@ -13,6 +13,28 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import process from "node:process";
+import { createRequire } from "node:module";
+
+// Bun migration: some framework runtime-adapter code (e.g.
+// src/kernel/shared/runtime/node.ts) resolves `node:fs` synchronously through a
+// `globalThis.require` when one is present (its documented "CommonJS bootstrap
+// exposes one" path), falling back to an async-warmed createRequire otherwise.
+// Under `bun test`, the async warm-up has not resolved by the time a lazy
+// synchronous descriptor read runs, so the adapter throws "node:fs synchronous
+// read not available". Installing a real `require` on the global here (before any
+// module evaluates, via the bunfig preload) lights up the adapter's existing
+// synchronous path with identical behavior — we do not edit framework code.
+{
+  const g = globalThis as { require?: (specifier: string) => unknown };
+  if (typeof g.require !== "function") {
+    try {
+      g.require = createRequire(import.meta.url);
+    } catch {
+      // Runtime without node:module support — leave require unset; the adapter's
+      // documented fallback then surfaces its normal "not available" error.
+    }
+  }
+}
 
 type StdioStr = "piped" | "inherit" | "null";
 
@@ -98,94 +120,75 @@ class DenoCommand {
 
   spawn() {
     const o = this.#opts;
+    // Deno's Command.spawn() exposes stdin/stdout/stderr as WHATWG web streams
+    // (stdin is a WritableStream with getWriter(); stdout/stderr are
+    // ReadableStreams). It is NOT detached. We model that here so call sites that
+    // do `child.stdin.getWriter()` (e.g. piping a tar archive to a subprocess)
+    // behave the same under bun as under Deno.
     const child = spawn(this.#cmd, o.args ?? [], {
       cwd: o.cwd instanceof URL ? o.cwd.pathname : o.cwd,
       env: buildEnv(o),
       stdio: [mapStdio(o.stdin), mapStdio(o.stdout), mapStdio(o.stderr)],
       signal: o.signal,
     });
-    // Deno's ChildProcess exposes stdout/stderr as web ReadableStream and stdin
-    // as a web WritableStream; consumers call .getReader()/.getWriter(). Adapt
-    // the node streams (only present when the matching stdio is "piped").
-    // Buffer chunks EAGERLY at spawn time rather than lazily in the stream's
-    // start(). Under `bun test`, the test runner intercepts child stdio and a
-    // short-lived child can emit+end its node stream before a lazily-attached
-    // consumer (ShellManager calls getReader() only after closing stdin), which
-    // dropped output. Attaching the data listener synchronously here captures it
-    // regardless of when the web-stream consumer attaches.
-    const toReadable = (
-      ns: NodeJS.ReadableStream | null,
-    ): ReadableStream<Uint8Array> | null => {
-      if (!ns) return null;
-      const chunks: Uint8Array[] = [];
-      let ended = false;
-      let errored: unknown = null;
-      let wake: (() => void) | null = null;
-      const signal = () => {
-        const w = wake;
-        wake = null;
-        w?.();
-      };
-      ns.on("data", (c: Buffer) => {
-        chunks.push(new Uint8Array(c));
-        signal();
-      });
-      ns.on("end", () => {
-        ended = true;
-        signal();
-      });
-      ns.on("error", (e) => {
-        errored = e;
-        ended = true;
-        signal();
-      });
-      return new ReadableStream<Uint8Array>({
-        async pull(controller) {
-          while (chunks.length === 0 && !ended) {
-            await new Promise<void>((res) => (wake = res));
-          }
-          if (chunks.length > 0) {
-            controller.enqueue(chunks.shift()!);
-            return;
-          }
-          if (errored) controller.error(errored);
-          else controller.close();
-        },
-        cancel() {
-          (ns as { destroy?: () => void }).destroy?.();
-        },
-      });
-    };
-    const toWritable = (
-      nw: NodeJS.WritableStream | null,
-    ): WritableStream<Uint8Array> | null => {
-      if (!nw) return null;
-      return new WritableStream<Uint8Array>({
+
+    const stdin: WritableStream<Uint8Array> | null = child.stdin
+      ? new WritableStream<Uint8Array>({
         write(chunk) {
-          return new Promise((res, rej) => {
-            nw.write(chunk, (e) => (e ? rej(e) : res()));
+          return new Promise<void>((resolve, reject) => {
+            child.stdin!.write(chunk, (err) => (err ? reject(err) : resolve()));
           });
         },
         close() {
-          return new Promise((res) => (nw as { end: (cb: () => void) => void }).end(res));
+          return new Promise<void>((resolve) => child.stdin!.end(() => resolve()));
+        },
+        abort() {
+          child.stdin!.destroy();
+        },
+      })
+      : null;
+
+    function toReadable(
+      stream: NodeJS.ReadableStream | null,
+    ): ReadableStream<Uint8Array> | null {
+      if (!stream) return null;
+      return new ReadableStream<Uint8Array>({
+        start(controller) {
+          stream.on("data", (c: Buffer) => controller.enqueue(new Uint8Array(c)));
+          stream.on("end", () => controller.close());
+          stream.on("error", (e) => controller.error(e));
+        },
+        cancel() {
+          (stream as { destroy?: () => void }).destroy?.();
         },
       });
-    };
-    const status = new Promise<
-      { code: number; success: boolean; signal: string | null }
-    >((res) =>
-      child.on(
-        "close",
-        (code, sig) => res({ code: code ?? 0, success: (code ?? 0) === 0, signal: sig }),
-      )
+    }
+
+    const status = new Promise<{ code: number; success: boolean; signal: string | null }>(
+      (res) => child.on("close", (code, sig) => res({ code: code ?? 0, success: (code ?? 0) === 0, signal: sig })),
     );
+
     return {
       pid: child.pid,
+      stdin,
       stdout: toReadable(child.stdout),
       stderr: toReadable(child.stderr),
-      stdin: toWritable(child.stdin),
       status,
-      output: () => status.then(() => ({})),
+      output: () =>
+        new Promise<CommandOutput>((resolve) => {
+          const out: Uint8Array[] = [];
+          const err: Uint8Array[] = [];
+          child.stdout?.on("data", (c: Buffer) => out.push(c));
+          child.stderr?.on("data", (c: Buffer) => err.push(c));
+          child.on("close", (code, sig) =>
+            resolve({
+              code: code ?? 0,
+              signal: sig,
+              success: (code ?? 0) === 0,
+              stdout: out.length ? new Uint8Array(Buffer.concat(out)) : new Uint8Array(),
+              stderr: err.length ? new Uint8Array(Buffer.concat(err)) : new Uint8Array(),
+            }));
+        }),
       kill: (sig?: NodeJS.Signals) => child.kill(sig),
       unref: () => child.unref?.(),
       ref: () => child.ref?.(),
@@ -331,90 +334,34 @@ const DenoCompat = {
     }
   },
 
-  copyFile: (from: string | URL, to: string | URL): Promise<void> =>
-    fsp.copyFile(from, to).catch((e) => Promise.reject(remap(e))),
-  rename: (from: string | URL, to: string | URL): Promise<void> =>
-    fsp.rename(from, to).catch((e) => Promise.reject(remap(e))),
-  symlink: (
-    target: string | URL,
-    p: string | URL,
-    opts?: { type?: "file" | "dir" | "junction" },
-  ): Promise<void> =>
-    fsp.symlink(target, p, opts?.type === "dir" ? "dir" : opts?.type)
-      .catch((e) => Promise.reject(remap(e))),
-  chmod: (p: string | URL, mode: number): Promise<void> =>
-    fsp.chmod(p, mode).catch((e) => Promise.reject(remap(e))),
-  // realPath must remap ENOENT -> Deno.errors.NotFound: callers (fs-manager's
-  // resolveExistingPath) rely on `instanceof Deno.errors.NotFound` to convert a
-  // missing path into a clean "File not found". Bare fsp.realpath throws a raw
-  // node Error, which slipped past the guard.
-  realPath: (p: string | URL): Promise<string> =>
-    fsp.realpath(p).catch((e) => Promise.reject(remap(e))),
-
-  // Deno.open returns a FsFile. takos-computer's fs-manager uses read()
-  // (returns bytes-read or null at EOF), seek(), write(), and close().
-  SeekMode: { Start: 0, Current: 1, End: 2 },
-  open: async (
-    p: string | URL,
-    opts?: {
-      read?: boolean;
-      write?: boolean;
-      append?: boolean;
-      create?: boolean;
-      createNew?: boolean;
-      truncate?: boolean;
-    },
-  ) => {
-    let flags = "r";
-    if (opts?.write && opts?.read) flags = opts?.createNew ? "wx+" : opts?.create === false ? "r+" : "w+";
-    else if (opts?.write) flags = opts?.append ? "a" : opts?.createNew ? "wx" : "w";
-    else if (opts?.append) flags = "a";
-    let fh: fsp.FileHandle;
+  readDirSync: function* (p: string | URL): IterableIterator<DirEntry> {
+    let ents: fs.Dirent[];
     try {
-      fh = await fsp.open(p, flags);
+      ents = fs.readdirSync(p, { withFileTypes: true });
     } catch (e) {
       throw remap(e);
     }
-    return makeFsFile(fh);
+    for (const e of ents) {
+      yield { name: e.name, isFile: e.isFile(), isDirectory: e.isDirectory(), isSymlink: e.isSymbolicLink() };
+    }
   },
-  create: async (p: string | URL) => makeFsFile(await fsp.open(p, "w+")),
+
+  lstatSync: (p: string | URL) => {
+    try {
+      return toFileInfo(fs.lstatSync(p));
+    } catch (e) {
+      throw remap(e);
+    }
+  },
+
+  copyFile: (from: string | URL, to: string | URL): Promise<void> => fsp.copyFile(from, to),
+  rename: (from: string | URL, to: string | URL): Promise<void> => fsp.rename(from, to),
+  symlink: (target: string | URL, p: string | URL): Promise<void> => fsp.symlink(target, p),
+  chmod: (p: string | URL, mode: number): Promise<void> => fsp.chmod(p, mode),
+  realPath: (p: string | URL): Promise<string> => fsp.realpath(p),
 
   Command: DenoCommand,
 };
-
-function makeFsFile(fh: fsp.FileHandle) {
-  let pos = 0;
-  return {
-    async read(buf: Uint8Array): Promise<number | null> {
-      const { bytesRead } = await fh.read(buf, 0, buf.byteLength, pos);
-      if (bytesRead === 0) return null;
-      pos += bytesRead;
-      return bytesRead;
-    },
-    async write(buf: Uint8Array): Promise<number> {
-      const { bytesWritten } = await fh.write(buf, 0, buf.byteLength, pos);
-      pos += bytesWritten;
-      return bytesWritten;
-    },
-    seek(offset: number | bigint, whence: number): Promise<number> {
-      const off = Number(offset);
-      if (whence === 0) pos = off;
-      else if (whence === 1) pos += off;
-      else pos = off; // End: best-effort (size unknown here)
-      return Promise.resolve(pos);
-    },
-    truncate(len?: number): Promise<void> {
-      return fh.truncate(len);
-    },
-    stat: () => fh.stat().then(toFileInfo),
-    close(): void {
-      void fh.close();
-    },
-    get readable(): ReadableStream<Uint8Array> {
-      return fh.readableWebStream() as unknown as ReadableStream<Uint8Array>;
-    },
-  };
-}
 
 function toFileInfo(s: fs.Stats) {
   return {
@@ -433,84 +380,5 @@ function toFileInfo(s: fs.Stats) {
 // or the test preload that adds Deno.test on top of this runtime).
 const g = globalThis as unknown as { Deno?: Record<string, unknown> };
 g.Deno = Object.assign({}, DenoCompat, g.Deno ?? {});
-
-// HTTP/WebSocket surface for the takos-computer sandbox container entry points
-// (Deno.serve in local-dev-simulator / app entry). Not exercised by bun:test
-// (server entry is never imported by a *.test.ts), but lets the container run on
-// `bun`. Backed by Bun.serve. Upstream candidate for the canonical shim.
-type DenoServeHandler = (req: Request, info?: unknown) => Response | Promise<Response>;
-interface DenoServeOptions {
-  port?: number;
-  hostname?: string;
-  signal?: AbortSignal;
-  onListen?: (addr: { hostname: string; port: number }) => void;
-}
-const BunRef = (globalThis as Record<string, unknown>).Bun as
-  | { serve: (opts: Record<string, unknown>) => { hostname: string; port: number; stop?: () => void; upgrade?: (req: Request, opts?: unknown) => boolean } }
-  | undefined;
-(g.Deno as Record<string, unknown>).serve = (
-  a: DenoServeOptions | DenoServeHandler,
-  b?: DenoServeHandler,
-) => {
-  const opts: DenoServeOptions = typeof a === "function" ? {} : a;
-  const handler: DenoServeHandler = (typeof a === "function" ? a : b)!;
-  if (!BunRef) throw new Error("Deno.serve shim requires the Bun runtime");
-  const server = BunRef.serve({
-    port: opts.port ?? 8000,
-    hostname: opts.hostname ?? "0.0.0.0",
-    signal: opts.signal,
-    websocket: {
-      message(ws: { data?: { onmessage?: (e: unknown) => void } }, msg: unknown) {
-        ws.data?.onmessage?.({ data: msg });
-      },
-      open(ws: { data?: { onopen?: () => void } }) {
-        ws.data?.onopen?.();
-      },
-      close(ws: { data?: { onclose?: () => void } }) {
-        ws.data?.onclose?.();
-      },
-    },
-    fetch: (req: Request, srv: unknown) => {
-      (req as unknown as Record<string, unknown>).__bunServer = srv;
-      return handler(req, {});
-    },
-  });
-  opts.onListen?.({
-    hostname: server.hostname ?? opts.hostname ?? "0.0.0.0",
-    port: server.port ?? opts.port ?? 8000,
-  });
-  return {
-    finished: Promise.resolve(),
-    shutdown: () => {
-      server.stop?.();
-      return Promise.resolve();
-    },
-    addr: { hostname: server.hostname, port: server.port },
-  };
-};
-(g.Deno as Record<string, unknown>).upgradeWebSocket = (req: Request) => {
-  const srv = (req as unknown as { __bunServer?: { upgrade?: (req: Request, o?: unknown) => boolean } }).__bunServer;
-  const data: Record<string, unknown> = {};
-  const socket = {
-    readyState: 0,
-    send: (_m: unknown) => {},
-    close: () => {},
-    set onopen(fn: () => void) {
-      data.onopen = fn;
-    },
-    set onmessage(fn: (e: unknown) => void) {
-      data.onmessage = fn;
-    },
-    set onclose(fn: () => void) {
-      data.onclose = fn;
-    },
-    set onerror(_fn: (e: unknown) => void) {},
-  };
-  const ok = srv?.upgrade?.(req, { data });
-  const response = ok
-    ? new Response(null, { status: 101 })
-    : new Response("upgrade failed", { status: 426 });
-  return { socket, response };
-};
 
 export {};
