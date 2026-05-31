@@ -2,9 +2,6 @@ import { fileURLToPath } from "node:url";
 
 const rootUrl = new URL("../", import.meta.url);
 const root = fileURLToPath(rootUrl);
-const computerHostsDir = fileURLToPath(
-  new URL("packages/computer-hosts/", rootUrl),
-);
 const expectedPath = fileURLToPath(new URL("dist/sandbox-host.js", rootUrl));
 async function main(): Promise<number> {
   const tempDir = await Deno.makeTempDir({
@@ -16,14 +13,14 @@ async function main(): Promise<number> {
   try {
     const build = new Deno.Command(Deno.execPath(), {
       args: [
-        "run",
-        "-A",
-        "scripts/build-host.ts",
+        "--preload",
+        "./shims/deno-compat.ts",
+        "packages/computer-hosts/scripts/build-host.ts",
         "sandbox",
         "--outfile",
         generatedPath,
       ],
-      cwd: computerHostsDir,
+      cwd: root,
       stdout: "piped",
       stderr: "piped",
     });
@@ -41,7 +38,7 @@ async function main(): Promise<number> {
     ]);
     if (expected !== generated) {
       console.error(
-        "dist/sandbox-host.js is out of date. Run `deno task build:all` and commit the generated bundle.",
+        "dist/sandbox-host.js is out of date. Run `bun run build:all` and commit the generated bundle.",
       );
       return 1;
     }

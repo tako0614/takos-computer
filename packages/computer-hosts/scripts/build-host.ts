@@ -13,7 +13,7 @@ const targets: Record<TargetName, { entry: string; outfile: string }> = {
 
 const targetName = Deno.args[0] as TargetName | undefined;
 if (!targetName || !(targetName in targets)) {
-  throw new Error("Usage: deno task build:sandbox-host [--outfile <path>]");
+  throw new Error("Usage: bun run build:sandbox-host -- [--outfile <path>]");
 }
 
 const target = targets[targetName];
@@ -40,7 +40,7 @@ if (
   generatedAssetsSource.includes("Keep this placeholder in sync")
 ) {
   throw new Error(
-    "Dashboard assets are still placeholders. Run `cd ../dashboard && deno task build` before `deno task build:sandbox-host`.",
+    "Dashboard assets are still placeholders. Run `bun run build:dashboard` before `bun run build:sandbox-host`.",
   );
 }
 

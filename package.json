@@ -10,13 +10,20 @@
   ],
   "scripts": {
     "dev": "bun run --filter '*' dev",
+    "dev:local": "bun --preload ./shims/deno-compat.ts packages/computer-hosts/src/local-dev-simulator.ts",
+    "build:dashboard": "bunx vite build packages/dashboard --config packages/dashboard/vite.config.ts && bun --preload ./shims/deno-compat.ts packages/dashboard/scripts/emit-assets.ts",
+    "build:sandbox-host": "bun --preload ./shims/deno-compat.ts packages/computer-hosts/scripts/build-host.ts sandbox",
+    "build:all": "bun run build:dashboard && bun run build:sandbox-host",
     "test": "LC_ALL=C bun test packages/common/src && LC_ALL=C bun test packages/cloudflare-compat/src && LC_ALL=C bun test packages/computer-hosts/src && LC_ALL=C bun test packages/sandbox-service/src",
     "test:all": "bun run test",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "check:dist": "bun --preload ./shims/deno-compat.ts scripts/check-dist.ts"
   },
   "dependencies": {
+    "@cloudflare/containers": "^0.1.1",
     "@cloudflare/workers-types": "^4.20241127.0",
-    "@libsql/client": "^0.14.0"
+    "@libsql/client": "^0.14.0",
+    "hono": "^4.12.9"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
