@@ -1,43 +1,156 @@
-/**
- * Tests for sandbox-session-container helpers
- */
-import { expect, test } from "bun:test";
-import { SandboxSessionContainer } from "../sandbox-session-container.ts";
+import { test } from "bun:test";
+import type { HostContainerContext } from "../container-runtime.ts";
+import { SandboxSessionContainer } from "../sandbox-host.ts";
+import type {
+  CreateSandboxSessionPayload,
+  SandboxHostEnv,
+  SandboxSessionTokenInfo,
+} from "../sandbox-session-types.ts";
 
-test("SandboxSessionContainer: constructs with defaults", () => {
-  const container = new SandboxSessionContainer();
-  expect(container instanceof SandboxSessionContainer).toBeTruthy();
+function assert(condition: unknown, message: string): asserts condition {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function assertEquals(actual: unknown, expected: unknown): void {
+  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(
+      `Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+    );
+  }
+}
+
+type HostContainerStorage = HostContainerContext["storage"];
+
+class MemoryStorage implements HostContainerStorage {
+  private values = new Map<string, unknown>();
+
+  get<T = unknown>(key: string): Promise<T | undefined> {
+    return Promise.resolve(this.values.get(key) as T | undefined);
+  }
+
+  put(key: string, value: unknown): Promise<void> {
+    this.values.set(key, structuredClone(value));
+    return Promise.resolve();
+  }
+
+  delete(key: string): Promise<boolean> {
+    return Promise.resolve(this.values.delete(key));
+  }
+}
+
+class TestSandboxSessionContainer extends SandboxSessionContainer {
+  startPorts: Array<number | number[] | undefined> = [];
+  destroyCalls = 0;
+
+  override startAndWaitForPorts(
+    ports?: number | number[],
+  ): Promise<void> {
+    this.startPorts.push(ports);
+    return Promise.resolve();
+  }
+
+  override destroy(): Promise<void> {
+    this.destroyCalls += 1;
+    return Promise.resolve();
+  }
+}
+
+const MCP_AUTH_TOKEN = "test-mcp-token";
+const TAKOS_TOKEN = "test-takos-token";
+const TAKOS_API_URL = "https://takos.test";
+
+function createEnv(): SandboxHostEnv {
+  return {
+    MCP_AUTH_TOKEN,
+    TAKOS_API_URL,
+    TAKOS_TOKEN,
+    SANDBOX_CONTAINER: {
+      idFromName(name: string) {
+        return name as never;
+      },
+      idFromString(name: string) {
+        return name as never;
+      },
+      newUniqueId() {
+        return "unique-id" as never;
+      },
+      get() {
+        throw new Error("not used in direct DO tests");
+      },
+    } as SandboxHostEnv["SANDBOX_CONTAINER"],
+  };
+}
+
+function createPayload(
+  overrides: Partial<CreateSandboxSessionPayload> = {},
+): CreateSandboxSessionPayload {
+  return {
+    sessionId: "session-1",
+    spaceId: "space-1",
+    userId: "user-1",
+    ...overrides,
+  };
+}
+
+test("sandbox session container passes MCP auth token into the container env", async () => {
+  const ctx: HostContainerContext = { storage: new MemoryStorage() };
+  const container = new TestSandboxSessionContainer(ctx, createEnv());
+
+  await container.createSession(createPayload());
+
+  assertEquals(container.pingEndpoint, "internal/healthz");
+  assertEquals(container.envVars, {
+    MCP_AUTH_TOKEN,
+    TAKOS_TOKEN,
+    TAKOS_API_URL,
+    TAKOS_SPACE_ID: "space-1",
+  });
+  assertEquals(container.startPorts, [[8080]]);
 });
 
-test("SandboxSessionContainer: tracks session id", () => {
-  const container = new SandboxSessionContainer();
-  expect(container.sessionId).toEqual(undefined);
+test("sandbox session container does not use host auth token as MCP fallback", async () => {
+  const ctx: HostContainerContext = { storage: new MemoryStorage() };
+  const env = createEnv();
+  env.SANDBOX_HOST_AUTH_TOKEN = "host-admin-token";
+  delete env.MCP_AUTH_TOKEN;
+  const container = new TestSandboxSessionContainer(ctx, env);
+
+  await container.createSession(createPayload());
+
+  assertEquals(container.envVars, {
+    TAKOS_TOKEN,
+    TAKOS_API_URL,
+    TAKOS_SPACE_ID: "space-1",
+  });
 });
 
-test("SandboxSessionContainer: setSessionId updates id", () => {
-  const container = new SandboxSessionContainer();
-  container.setSessionId("sess-123");
-  expect(container.sessionId).toEqual("sess-123");
-});
+test("sandbox session container hydrates persisted session state and clears it on destroy", async () => {
+  const ctx: HostContainerContext = { storage: new MemoryStorage() };
+  const first = new TestSandboxSessionContainer(ctx, createEnv());
 
-test("SandboxSessionContainer: clearSessionId resets id", () => {
-  const container = new SandboxSessionContainer();
-  container.setSessionId("sess-123");
-  container.clearSessionId();
-  expect(container.sessionId).toEqual(undefined);
-});
+  const payload = createPayload();
+  const result = await first.createSession(payload);
+  const createdState = await first.getSessionState();
+  assert(createdState, "expected session state after create");
 
-test("SandboxSessionContainer: isActive reflects state", () => {
-  const container = new SandboxSessionContainer();
-  expect(container.isActive).toEqual(false);
-  container.setSessionId("sess-1");
-  expect(container.isActive).toEqual(true);
-});
+  const second = new TestSandboxSessionContainer(ctx, createEnv());
 
-test("SandboxSessionContainer: reset clears all state", () => {
-  const container = new SandboxSessionContainer();
-  container.setSessionId("sess-1");
-  container.reset();
-  expect(container.isActive).toEqual(false);
-  expect(container.sessionId).toEqual(undefined);
+  assertEquals(await second.getSessionState(), createdState);
+  assertEquals(
+    await second.verifyProxyToken(result.proxyToken),
+    {
+      sessionId: payload.sessionId,
+      spaceId: payload.spaceId,
+      userId: payload.userId,
+    } satisfies SandboxSessionTokenInfo,
+  );
+
+  await second.destroySession();
+
+  const third = new TestSandboxSessionContainer(ctx, createEnv());
+  assertEquals(await third.getSessionState(), null);
+  assertEquals(await third.verifyProxyToken(result.proxyToken), null);
+  assertEquals(second.destroyCalls, 1);
 });
