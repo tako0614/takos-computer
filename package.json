@@ -6,8 +6,8 @@
   "private": true,
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "bun test packages/common/src && bun test packages/cloudflare-compat/src && bun test packages/computer-hosts/src && bun test packages/sandbox-service/src",
-    "test:all": "bun test packages/common/src && bun test packages/cloudflare-compat/src && bun test packages/computer-hosts/src && bun test packages/sandbox-service/src"
+    "test": "LC_ALL=C bun test packages/common/src && LC_ALL=C bun test packages/cloudflare-compat/src && LC_ALL=C bun test packages/computer-hosts/src && LC_ALL=C bun test packages/sandbox-service/src",
+    "test:all": "LC_ALL=C bun test packages/common/src && LC_ALL=C bun test packages/cloudflare-compat/src && LC_ALL=C bun test packages/computer-hosts/src && LC_ALL=C bun test packages/sandbox-service/src"
   },
   "dependencies": {
     "@cloudflare/containers": "^0.1.1",
