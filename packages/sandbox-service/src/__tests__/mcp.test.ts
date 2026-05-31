@@ -1,4 +1,5 @@
-import { assert, assertEquals } from "@std/assert";
+import { expect, test } from "bun:test";
+
 import { FsManager } from "../fs-manager.ts";
 import { createMcpRequestHandler } from "../mcp.ts";
 import { ShellManager } from "../shell-manager.ts";
@@ -16,7 +17,7 @@ function createRequest(body: unknown, token = MCP_AUTH_TOKEN): Request {
   });
 }
 
-Deno.test("MCP process_kill rejects signal injection before execution", async () => {
+test("MCP process_kill rejects signal injection before execution", async () => {
   const handler = createMcpRequestHandler(
     { shell: new ShellManager("/tmp"), fs: new FsManager() },
     MCP_AUTH_TOKEN,
@@ -35,15 +36,15 @@ Deno.test("MCP process_kill rejects signal injection before execution", async ()
     id: 1,
   }));
 
-  assertEquals(res.status, 200);
+  expect(res.status).toEqual(200);
   const body = await res.json() as {
     error?: { code: number; message: string };
   };
-  assertEquals(body.error?.code, -32603);
-  assert(body.error?.message.includes("Unsupported signal"));
+  expect(body.error?.code).toEqual(-32603);
+  expect(body.error?.message.includes("Unsupported signal")).toBeTruthy();
 });
 
-Deno.test("MCP process_kill rejects unmanaged pids", async () => {
+test("MCP process_kill rejects unmanaged pids", async () => {
   const handler = createMcpRequestHandler(
     { shell: new ShellManager("/tmp"), fs: new FsManager() },
     MCP_AUTH_TOKEN,
@@ -67,7 +68,7 @@ Deno.test("MCP process_kill rejects unmanaged pids", async () => {
       id: 2,
     }));
 
-    assertEquals(res.status, 200);
+    expect(res.status).toEqual(200);
     const body = await res.json() as {
       result?: { content: Array<{ type: "text"; text: string }> };
     };
@@ -76,9 +77,9 @@ Deno.test("MCP process_kill rejects unmanaged pids", async () => {
       error?: string;
       pid?: number;
     };
-    assertEquals(payload.pid, proc.pid);
-    assertEquals(payload.killed, false);
-    assert(payload.error?.includes("not managed"));
+    expect(payload.pid).toEqual(proc.pid);
+    expect(payload.killed).toEqual(false);
+    expect(payload.error?.includes("not managed")).toBeTruthy();
   } finally {
     try {
       proc.kill("SIGKILL");

@@ -1,3 +1,4 @@
+import { expect, test } from "bun:test";
 /**
  * Tests for @takos/cloudflare-compat
  *
@@ -6,35 +7,34 @@
  * aliases (VectorizeQueryResult, D1RawOptions, R2ObjectMetadata) are
  * structurally correct.
  */
-import { assert, assertEquals } from "@std/assert";
 
-Deno.test("@takos/cloudflare-compat exports - module loads without error", async () => {
+test("@takos/cloudflare-compat exports - module loads without error", async () => {
   const mod = await import("../index.ts");
-  assert(mod !== undefined);
+  expect(mod !== undefined).toBeTruthy();
 });
 
-Deno.test("@takos/cloudflare-compat exports - exports can be imported (type-level verification)", async () => {
+test("@takos/cloudflare-compat exports - exports can be imported (type-level verification)", async () => {
   // If the module has syntax errors or broken re-exports, this import will throw.
   const mod = await import("../index.ts");
   // The module is primarily types -- the runtime export is the module object itself.
-  assertEquals(typeof mod, "object");
+  expect(typeof mod).toEqual("object");
 });
 
 // ---------------------------------------------------------------------------
 // Structural type tests
 // ---------------------------------------------------------------------------
 
-Deno.test("D1RawOptions structural contract - accepts columnNames: true", () => {
+test("D1RawOptions structural contract - accepts columnNames: true", () => {
   const opts: import("../index.ts").D1RawOptions = { columnNames: true };
-  assertEquals(opts.columnNames, true);
+  expect(opts.columnNames).toEqual(true);
 });
 
-Deno.test("D1RawOptions structural contract - accepts columnNames: false", () => {
+test("D1RawOptions structural contract - accepts columnNames: false", () => {
   const opts: import("../index.ts").D1RawOptions = { columnNames: false };
-  assertEquals(opts.columnNames, false);
+  expect(opts.columnNames).toEqual(false);
 });
 
-Deno.test("D1RawOptions structural contract - accepts omitted columnNames", () => {
+test("D1RawOptions structural contract - accepts omitted columnNames", () => {
   const opts: import("../index.ts").D1RawOptions = {};
-  assert(opts !== undefined);
+  expect(opts !== undefined).toBeTruthy();
 });

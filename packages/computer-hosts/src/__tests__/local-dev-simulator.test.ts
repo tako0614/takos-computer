@@ -1,4 +1,5 @@
-import { assertEquals } from "@std/assert";
+import { expect, test } from "bun:test";
+
 import {
   createLocalDevSandboxHost,
   LOCAL_DEV_DEFAULTS,
@@ -8,7 +9,7 @@ const HOST_AUTH_TOKEN = "test-host-token";
 const PUBLISHED_MCP_AUTH_TOKEN = "test-published-mcp-token";
 const MCP_AUTH_TOKEN = "test-mcp-token";
 
-Deno.test("local dev simulator exposes a ready sandbox host env", async () => {
+test("local dev simulator exposes a ready sandbox host env", async () => {
   const workspaceRoot = await Deno.makeTempDir({
     prefix: "takos-computer-local-",
   });
@@ -22,8 +23,8 @@ Deno.test("local dev simulator exposes a ready sandbox host env", async () => {
 
     const response = await host.fetch(new Request("http://local/readyz"));
 
-    assertEquals(response.status, 200);
-    assertEquals(await response.json(), {
+    expect(response.status).toEqual(200);
+    expect(await response.json()).toEqual({
       status: "ok",
       service: "takos-sandbox-host",
       missingBindings: [],
@@ -33,7 +34,7 @@ Deno.test("local dev simulator exposes a ready sandbox host env", async () => {
   }
 });
 
-Deno.test("local dev simulator creates sessions and proxies MCP to sandbox service", async () => {
+test("local dev simulator creates sessions and proxies MCP to sandbox service", async () => {
   const workspaceRoot = await Deno.makeTempDir({
     prefix: "takos-computer-local-",
   });
@@ -59,7 +60,7 @@ Deno.test("local dev simulator creates sessions and proxies MCP to sandbox servi
         }),
       }),
     );
-    assertEquals(createResponse.status, 201);
+    expect(createResponse.status).toEqual(201);
     const createBody = await createResponse.json() as { proxyToken: string };
 
     const writeResult = await callSessionMcp(
@@ -68,7 +69,7 @@ Deno.test("local dev simulator creates sessions and proxies MCP to sandbox servi
       "file_write",
       { path: "hello.txt", content: "hello local", create_dirs: true },
     );
-    assertEquals(writeResult.bytes_written, "hello local".length);
+    expect(writeResult.bytes_written).toEqual("hello local".length);
 
     const readResult = await callSessionMcp(
       host.fetch,
@@ -76,7 +77,7 @@ Deno.test("local dev simulator creates sessions and proxies MCP to sandbox servi
       "file_read",
       { path: "hello.txt" },
     );
-    assertEquals(readResult.content, "hello local");
+    expect(readResult.content).toEqual("hello local");
 
     const indexedState = await host.sessionIndex.get("session:session-1", {
       type: "json",
@@ -87,7 +88,7 @@ Deno.test("local dev simulator creates sessions and proxies MCP to sandbox servi
       status: string;
       createdAt: string;
     };
-    assertEquals(indexedState, {
+    expect(indexedState).toEqual({
       sessionId: "session-1",
       spaceId: "space-1",
       userId: "user-1",
@@ -99,7 +100,7 @@ Deno.test("local dev simulator creates sessions and proxies MCP to sandbox servi
   }
 });
 
-Deno.test("local dev simulator published MCP auto-creates a local session", async () => {
+test("local dev simulator published MCP auto-creates a local session", async () => {
   const workspaceRoot = await Deno.makeTempDir({
     prefix: "takos-computer-local-",
   });
@@ -131,14 +132,14 @@ Deno.test("local dev simulator published MCP auto-creates a local session", asyn
       }),
     );
 
-    assertEquals(response.status, 200);
+    expect(response.status).toEqual(200);
     const body = await response.json() as {
       result: { content: Array<{ text: string }> };
     };
     const result = JSON.parse(body.result.content[0].text) as {
       bytes_written: number;
     };
-    assertEquals(result.bytes_written, "published local".length);
+    expect(result.bytes_written).toEqual("published local".length);
 
     // The published session is indexed under a token-scoped key
     // (`session:pmcp-<hash>:published-session`), never the raw logical id, so
@@ -167,10 +168,10 @@ Deno.test("local dev simulator published MCP auto-creates a local session", asyn
     const state = await host.sessionIndex.get(scopedKey, {
       type: "json",
     }) as { status: string; sessionId: string };
-    assertEquals(state.status, "active");
+    expect(state.status).toEqual("active");
     // The stored addressing id matches the index key suffix so the admin GUI
     // list -> get/destroy round-trips against the same scoped DO/KV entry.
-    assertEquals(state.sessionId, scopedKey.slice("session:".length));
+    expect(state.sessionId).toEqual(scopedKey.slice("session:".length));
   } finally {
     await Deno.remove(workspaceRoot, { recursive: true });
   }
@@ -197,7 +198,7 @@ async function callSessionMcp(
       }),
     }),
   );
-  assertEquals(response.status, 200);
+  expect(response.status).toEqual(200);
   const body = await response.json() as {
     result: { content: Array<{ text: string }> };
   };

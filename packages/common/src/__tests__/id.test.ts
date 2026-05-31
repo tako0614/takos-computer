@@ -1,38 +1,36 @@
-import { assert, assertEquals, assertNotEquals } from "@std/assert";
+import { expect, test } from "bun:test";
+
 import { generateId } from "../id.ts";
 
-Deno.test("generateId: default length is 12 characters", () => {
+test("generateId: default length is 12 characters", () => {
   const id = generateId();
-  assertEquals(id.length, 12);
+  expect(id.length).toEqual(12);
 });
 
-Deno.test("generateId: custom length", () => {
-  assertEquals(generateId(6).length, 6);
-  assertEquals(generateId(24).length, 24);
-  assertEquals(generateId(1).length, 1);
-  assertEquals(generateId(100).length, 100);
+test("generateId: custom length", () => {
+  expect(generateId(6).length).toEqual(6);
+  expect(generateId(24).length).toEqual(24);
+  expect(generateId(1).length).toEqual(1);
+  expect(generateId(100).length).toEqual(100);
 });
 
-Deno.test("generateId: only contains lowercase alphanumeric", () => {
+test("generateId: only contains lowercase alphanumeric", () => {
   for (let i = 0; i < 50; i++) {
     const id = generateId(24);
-    assert(
-      /^[a-z0-9]+$/.test(id),
-      `ID contains invalid characters: ${id}`,
-    );
+    expect(/^[a-z0-9]+$/.test(id)).toBeTruthy();
   }
 });
 
-Deno.test("generateId: two calls produce different IDs", () => {
+test("generateId: two calls produce different IDs", () => {
   const id1 = generateId();
   const id2 = generateId();
-  assertNotEquals(id1, id2);
+  expect(id1).not.toEqual(id2);
 });
 
-Deno.test("generateId: generates unique IDs across many calls", () => {
+test("generateId: generates unique IDs across many calls", () => {
   const ids = new Set<string>();
   for (let i = 0; i < 200; i++) {
     ids.add(generateId());
   }
-  assertEquals(ids.size, 200, "All 200 generated IDs should be unique");
+  expect(ids.size).toEqual(200);
 });

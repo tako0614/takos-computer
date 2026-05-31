@@ -1,3 +1,4 @@
+import { expect, test } from "bun:test";
 import worker from "../sandbox-host.ts";
 import type {
   CreateSandboxSessionPayload,
@@ -11,7 +12,7 @@ type WorkerFetch = (
   env: SandboxHostEnv,
 ) => Promise<Response>;
 
-function assertEquals(actual: unknown, expected: unknown): void {
+function expect(actual: unknown).toEqual(expected: unknown): void {
   if (JSON.stringify(actual) !== JSON.stringify(expected)) {
     throw new Error(
       `Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
@@ -267,18 +268,18 @@ function sessionCookieFromSetCookie(setCookie: string | null): string {
   return match[0];
 }
 
-Deno.test("sandbox host serves published GUI app routes", async () => {
+test("sandbox host serves published GUI app routes", async () => {
   const { env } = createEnv();
 
   const unauthenticatedResponse = await fetchWorker(env, "/gui");
-  assertEquals(unauthenticatedResponse.status, 401);
+  expect(unauthenticatedResponse.status).toEqual(401);
 
   const authResponse = await fetchWorker(
     env,
     `/gui?authToken=${encodeURIComponent(HOST_AUTH_TOKEN)}`,
   );
-  assertEquals(authResponse.status, 302);
-  assertEquals(authResponse.headers.get("location"), "/gui");
+  expect(authResponse.status).toEqual(302);
+  expect(authResponse.headers.get("location")).toEqual("/gui");
   const cookie = authResponse.headers.get("set-cookie");
   if (!cookie?.includes("takos_computer_admin_token=")) {
     throw new Error("Expected GUI admin auth cookie");
@@ -287,11 +288,8 @@ Deno.test("sandbox host serves published GUI app routes", async () => {
   const indexResponse = await fetchWorker(env, "/gui", {
     headers: { Cookie: cookie },
   });
-  assertEquals(indexResponse.status, 200);
-  assertEquals(
-    indexResponse.headers.get("content-type"),
-    "text/html; charset=utf-8",
-  );
+  expect(indexResponse.status).toEqual(200);
+  expect(indexResponse.headers.get("content-type")).toEqual("text/html; charset=utf-8");
   const html = await indexResponse.text();
   if (!html.includes('<div id="app"></div>')) {
     throw new Error("Expected GUI HTML shell");
@@ -300,63 +298,51 @@ Deno.test("sandbox host serves published GUI app routes", async () => {
   const fallbackResponse = await fetchWorker(env, "/gui/sessions/session-1", {
     headers: { Cookie: cookie },
   });
-  assertEquals(fallbackResponse.status, 200);
-  assertEquals(
-    fallbackResponse.headers.get("content-type"),
-    "text/html; charset=utf-8",
-  );
+  expect(fallbackResponse.status).toEqual(200);
+  expect(fallbackResponse.headers.get("content-type")).toEqual("text/html; charset=utf-8");
 
   const styleResponse = await fetchWorker(env, "/gui/style.css");
-  assertEquals(styleResponse.status, 200);
-  assertEquals(
-    styleResponse.headers.get("content-type"),
-    "text/css; charset=utf-8",
-  );
+  expect(styleResponse.status).toEqual(200);
+  expect(styleResponse.headers.get("content-type")).toEqual("text/css; charset=utf-8");
 
   const iconResponse = await fetchWorker(env, "/icons/computer.svg");
-  assertEquals(iconResponse.status, 200);
-  assertEquals(iconResponse.headers.get("content-type"), "image/svg+xml");
+  expect(iconResponse.status).toEqual(200);
+  expect(iconResponse.headers.get("content-type")).toEqual("image/svg+xml");
   const iconBody = await iconResponse.text();
   if (!iconBody.includes('aria-label="Computer"')) {
     throw new Error("Expected computer icon SVG");
   }
 });
 
-Deno.test("sandbox host rejects routed marker header without GUI auth", async () => {
+test("sandbox host rejects routed marker header without GUI auth", async () => {
   const { env } = createEnv();
   const response = await fetchWorker(env, "/gui", {
     headers: { "X-Takos-Internal-Marker": "1" },
   });
 
-  assertEquals(response.status, 401);
+  expect(response.status).toEqual(401);
 });
 
-Deno.test("sandbox host accepts trusted Takos-routed GUI requests when enabled", async () => {
+test("sandbox host accepts trusted Takos-routed GUI requests when enabled", async () => {
   const { env } = createEnv({ trustRoutedGuiApi: true });
   const response = await fetchWorker(env, "/gui", {
     headers: { "X-Takos-Internal-Marker": "1" },
   });
 
-  assertEquals(response.status, 200);
-  assertEquals(
-    response.headers.get("content-type"),
-    "text/html; charset=utf-8",
-  );
+  expect(response.status).toEqual(200);
+  expect(response.headers.get("content-type")).toEqual("text/html; charset=utf-8");
 });
 
-Deno.test("sandbox host redirects GUI users to OIDC login when app auth is required", async () => {
+test("sandbox host redirects GUI users to OIDC login when app auth is required", async () => {
   const { env } = createEnv({ appAuthRequired: true });
 
   const response = await fetchWorker(env, "/gui");
 
-  assertEquals(response.status, 302);
-  assertEquals(
-    response.headers.get("location"),
-    "/gui/api/auth/login?return_to=%2Fgui",
-  );
+  expect(response.status).toEqual(302);
+  expect(response.headers.get("location")).toEqual("/gui/api/auth/login?return_to=%2Fgui");
 });
 
-Deno.test("sandbox host OIDC login creates state cookie and PKCE redirect", async () => {
+test("sandbox host OIDC login creates state cookie and PKCE redirect", async () => {
   const { env } = createEnv({ appAuthRequired: true });
 
   await withFetch((request) => {
@@ -379,20 +365,14 @@ Deno.test("sandbox host OIDC login creates state cookie and PKCE redirect", asyn
       "/gui/api/auth/login?return_to=https%3A%2F%2Fevil.example%2F",
     );
 
-    assertEquals(response.status, 302);
+    expect(response.status).toEqual(302);
     const location = new URL(response.headers.get("location")!);
-    assertEquals(location.origin, OIDC_ISSUER_URL);
-    assertEquals(location.pathname, "/oauth/authorize");
-    assertEquals(location.searchParams.get("response_type"), "code");
-    assertEquals(location.searchParams.get("client_id"), OIDC_CLIENT_ID);
-    assertEquals(
-      location.searchParams.get("redirect_uri"),
-      "https://sandbox-host.test/gui/api/auth/callback",
-    );
-    assertEquals(
-      location.searchParams.get("code_challenge_method"),
-      "S256",
-    );
+    expect(location.origin).toEqual(OIDC_ISSUER_URL);
+    expect(location.pathname).toEqual("/oauth/authorize");
+    expect(location.searchParams.get("response_type")).toEqual("code");
+    expect(location.searchParams.get("client_id")).toEqual(OIDC_CLIENT_ID);
+    expect(location.searchParams.get("redirect_uri")).toEqual("https://sandbox-host.test/gui/api/auth/callback");
+    expect(location.searchParams.get("code_challenge_method")).toEqual("S256");
     if (!location.searchParams.get("state")) {
       throw new Error("Expected OAuth state");
     }
@@ -412,7 +392,7 @@ Deno.test("sandbox host OIDC login creates state cookie and PKCE redirect", asyn
   });
 });
 
-Deno.test("sandbox host OIDC callback verifies id token and creates GUI session", async () => {
+test("sandbox host OIDC callback verifies id token and creates GUI session", async () => {
   const { env } = createEnv({ appAuthRequired: true });
   const keyPair = await crypto.subtle.generateKey(
     { name: "ECDSA", namedCurve: "P-256" },
@@ -488,8 +468,8 @@ Deno.test("sandbox host OIDC callback verifies id token and creates GUI session"
       { headers: { Cookie: stateCookie } },
     );
 
-    assertEquals(callbackResponse.status, 302);
-    assertEquals(callbackResponse.headers.get("location"), "/gui");
+    expect(callbackResponse.status).toEqual(302);
+    expect(callbackResponse.headers.get("location")).toEqual("/gui");
     const setCookie = callbackResponse.headers.get("set-cookie");
     if (
       !setCookie?.includes("takos_computer_session=") ||
@@ -499,10 +479,7 @@ Deno.test("sandbox host OIDC callback verifies id token and creates GUI session"
     ) {
       throw new Error(`Unexpected callback cookies: ${setCookie}`);
     }
-    assertEquals(
-      tokenParams?.get("redirect_uri"),
-      "https://sandbox-host.test/gui/api/auth/callback",
-    );
+    expect(tokenParams?.get("redirect_uri")).toEqual("https://sandbox-host.test/gui/api/auth/callback");
     if (!tokenParams?.get("code_verifier")) {
       throw new Error("Expected PKCE code verifier");
     }
@@ -511,8 +488,8 @@ Deno.test("sandbox host OIDC callback verifies id token and creates GUI session"
     const meResponse = await fetchWorker(env, "/gui/api/auth/me", {
       headers: { Cookie: sessionCookie },
     });
-    assertEquals(meResponse.status, 200);
-    assertEquals(await meResponse.json(), {
+    expect(meResponse.status).toEqual(200);
+    expect(await meResponse.json()).toEqual({
       authenticated: true,
       subject: "subject-1",
       name: "Ada",
@@ -524,7 +501,7 @@ Deno.test("sandbox host OIDC callback verifies id token and creates GUI session"
   });
 });
 
-Deno.test("sandbox host OIDC callback rejects invalid state", async () => {
+test("sandbox host OIDC callback rejects invalid state", async () => {
   const { env } = createEnv({ appAuthRequired: true });
 
   const response = await fetchWorker(
@@ -532,19 +509,19 @@ Deno.test("sandbox host OIDC callback rejects invalid state", async () => {
     "/gui/api/auth/callback?code=code-1&state=bad-state",
   );
 
-  assertEquals(response.status, 400);
-  assertEquals(await response.json(), { error: "Invalid OAuth state" });
+  expect(response.status).toEqual(400);
+  expect(await response.json()).toEqual({ error: "Invalid OAuth state" });
 });
 
-Deno.test("sandbox host reports missing OIDC env when app auth is required", async () => {
+test("sandbox host reports missing OIDC env when app auth is required", async () => {
   const { env } = createEnv({
     appAuthRequired: true,
     appAuthConfig: false,
   });
 
   const loginResponse = await fetchWorker(env, "/gui/api/auth/login");
-  assertEquals(loginResponse.status, 503);
-  assertEquals(await loginResponse.json(), {
+  expect(loginResponse.status).toEqual(503);
+  expect(await loginResponse.json()).toEqual({
     error: "GUI app auth is not configured",
     missing: [
       "APP_SESSION_SECRET",
@@ -555,14 +532,14 @@ Deno.test("sandbox host reports missing OIDC env when app auth is required", asy
   });
 
   const readyResponse = await fetchWorker(env, "/readyz");
-  assertEquals(readyResponse.status, 503);
+  expect(readyResponse.status).toEqual(503);
   const readyBody = await readyResponse.json() as { missingBindings: string[] };
   if (!readyBody.missingBindings.includes("APP_SESSION_SECRET")) {
     throw new Error("Expected app auth env in readyz missing bindings");
   }
 });
 
-Deno.test("sandbox host consumes launch token into GUI session", async () => {
+test("sandbox host consumes launch token into GUI session", async () => {
   const { env } = createEnv({ appAuthRequired: true });
   let consumedUrl = "";
   let consumedBody: Record<string, unknown> | null = null;
@@ -590,21 +567,15 @@ Deno.test("sandbox host consumes launch token into GUI session", async () => {
       "/gui/api/auth/launch?return_to=%2Fgui%2Fsandbox%2Fsession-1&launch_token=launch-1",
     );
 
-    assertEquals(response.status, 302);
-    assertEquals(response.headers.get("location"), "/gui/sandbox/session-1");
-    assertEquals(
-      consumedUrl,
-      `${OIDC_ISSUER_URL}/v1/installations/${INSTALLATION_ID}/launch-token/consume`,
-    );
-    assertEquals(consumedBody?.token, "launch-1");
+    expect(response.status).toEqual(302);
+    expect(response.headers.get("location")).toEqual("/gui/sandbox/session-1");
+    expect(consumedUrl).toEqual(`${OIDC_ISSUER_URL}/v1/installations/${INSTALLATION_ID}/launch-token/consume`);
+    expect(consumedBody?.token).toEqual("launch-1");
     const redirectUri = new URL(String(consumedBody?.redirect_uri));
-    assertEquals(redirectUri.origin, "https://sandbox-host.test");
-    assertEquals(redirectUri.pathname, "/gui/api/auth/launch");
-    assertEquals(
-      redirectUri.searchParams.get("return_to"),
-      "/gui/sandbox/session-1",
-    );
-    assertEquals(redirectUri.searchParams.has("launch_token"), false);
+    expect(redirectUri.origin).toEqual("https://sandbox-host.test");
+    expect(redirectUri.pathname).toEqual("/gui/api/auth/launch");
+    expect(redirectUri.searchParams.get("return_to")).toEqual("/gui/sandbox/session-1");
+    expect(redirectUri.searchParams.has("launch_token")).toEqual(false);
 
     const sessionCookie = sessionCookieFromSetCookie(
       response.headers.get("set-cookie"),
@@ -612,11 +583,11 @@ Deno.test("sandbox host consumes launch token into GUI session", async () => {
     const listResponse = await fetchWorker(env, "/gui/api/sandbox-sessions", {
       headers: { Cookie: sessionCookie },
     });
-    assertEquals(listResponse.status, 200);
+    expect(listResponse.status).toEqual(200);
   });
 });
 
-Deno.test("sandbox host does not create session for invalid launch token", async () => {
+test("sandbox host does not create session for invalid launch token", async () => {
   const { env } = createEnv({ appAuthRequired: true });
 
   await withFetch((request) => {
@@ -635,16 +606,13 @@ Deno.test("sandbox host does not create session for invalid launch token", async
       "/gui/api/auth/launch?return_to=%2Fgui&launch_token=replayed",
     );
 
-    assertEquals(response.status, 302);
-    assertEquals(
-      response.headers.get("location"),
-      "/gui/api/auth/login?return_to=%2Fgui",
-    );
-    assertEquals(response.headers.get("set-cookie"), null);
+    expect(response.status).toEqual(302);
+    expect(response.headers.get("location")).toEqual("/gui/api/auth/login?return_to=%2Fgui");
+    expect(response.headers.get("set-cookie")).toEqual(null);
   });
 });
 
-Deno.test("sandbox host health reports missing required bindings", async () => {
+test("sandbox host health reports missing required bindings", async () => {
   const { env } = createEnv({
     hostAuthToken: null,
     mcpAuthToken: null,
@@ -654,8 +622,8 @@ Deno.test("sandbox host health reports missing required bindings", async () => {
 
   const response = await fetchWorker(env, "/health");
 
-  assertEquals(response.status, 503);
-  assertEquals(await response.json(), {
+  expect(response.status).toEqual(503);
+  expect(await response.json()).toEqual({
     status: "misconfigured",
     service: "takos-sandbox-host",
     missingBindings: [
@@ -667,7 +635,7 @@ Deno.test("sandbox host health reports missing required bindings", async () => {
   });
 });
 
-Deno.test("sandbox host healthz is bootstrap-safe while readyz is strict", async () => {
+test("sandbox host healthz is bootstrap-safe while readyz is strict", async () => {
   const { env } = createEnv({
     hostAuthToken: null,
     mcpAuthToken: null,
@@ -676,8 +644,8 @@ Deno.test("sandbox host healthz is bootstrap-safe while readyz is strict", async
   delete env.SESSION_INDEX;
 
   const healthzResponse = await fetchWorker(env, "/healthz");
-  assertEquals(healthzResponse.status, 200);
-  assertEquals(await healthzResponse.json(), {
+  expect(healthzResponse.status).toEqual(200);
+  expect(await healthzResponse.json()).toEqual({
     status: "ok",
     service: "takos-sandbox-host",
     ready: false,
@@ -690,36 +658,36 @@ Deno.test("sandbox host healthz is bootstrap-safe while readyz is strict", async
   });
 
   const readyzResponse = await fetchWorker(env, "/readyz");
-  assertEquals(readyzResponse.status, 503);
+  expect(readyzResponse.status).toEqual(503);
 });
 
-Deno.test("sandbox host does not use host auth token as container MCP auth fallback", async () => {
+test("sandbox host does not use host auth token as container MCP auth fallback", async () => {
   const { env } = createEnv({ mcpAuthToken: null });
 
   const response = await fetchWorker(env, "/health");
 
-  assertEquals(response.status, 503);
-  assertEquals(await response.json(), {
+  expect(response.status).toEqual(503);
+  expect(await response.json()).toEqual({
     status: "misconfigured",
     service: "takos-sandbox-host",
     missingBindings: ["MCP_AUTH_TOKEN"],
   });
 });
 
-Deno.test("sandbox host readyz fails when published MCP auth token is missing", async () => {
+test("sandbox host readyz fails when published MCP auth token is missing", async () => {
   const { env } = createEnv({ publishedMcpAuthToken: null });
 
   const response = await fetchWorker(env, "/readyz");
 
-  assertEquals(response.status, 503);
-  assertEquals(await response.json(), {
+  expect(response.status).toEqual(503);
+  expect(await response.json()).toEqual({
     status: "misconfigured",
     service: "takos-sandbox-host",
     missingBindings: ["PUBLISHED_MCP_AUTH_TOKEN"],
   });
 });
 
-Deno.test("sandbox host supports published GUI compatibility routes", async () => {
+test("sandbox host supports published GUI compatibility routes", async () => {
   const { env } = createEnv();
 
   const createResponse = await fetchWorker(env, "/gui/api/sandbox-create", {
@@ -731,8 +699,8 @@ Deno.test("sandbox host supports published GUI compatibility routes", async () =
       userId: "user-1",
     }),
   });
-  assertEquals(createResponse.status, 201);
-  assertEquals(await createResponse.json(), {
+  expect(createResponse.status).toEqual(201);
+  expect(await createResponse.json()).toEqual({
     ok: true,
     proxyToken: SESSION_PROXY_TOKEN,
   });
@@ -740,29 +708,29 @@ Deno.test("sandbox host supports published GUI compatibility routes", async () =
   const listResponse = await fetchWorker(env, "/gui/api/sandbox-sessions", {
     headers: hostAuthHeaders(),
   });
-  assertEquals(listResponse.status, 200);
+  expect(listResponse.status).toEqual(200);
   const listBody = await listResponse.json() as { sessions: unknown[] };
-  assertEquals(listBody.sessions.length, 1);
+  expect(listBody.sessions.length).toEqual(1);
 
   const getResponse = await fetchWorker(
     env,
     "/gui/api/sandbox-session/session-1",
     { headers: hostAuthHeaders() },
   );
-  assertEquals(getResponse.status, 200);
+  expect(getResponse.status).toEqual(200);
   const getBody = await getResponse.json() as { sessionId: string };
-  assertEquals(getBody.sessionId, "session-1");
+  expect(getBody.sessionId).toEqual("session-1");
 
   const deleteResponse = await fetchWorker(
     env,
     "/gui/api/sandbox-session/session-1",
     { method: "DELETE", headers: hostAuthHeaders() },
   );
-  assertEquals(deleteResponse.status, 200);
-  assertEquals(await deleteResponse.json(), { ok: true });
+  expect(deleteResponse.status).toEqual(200);
+  expect(await deleteResponse.json()).toEqual({ ok: true });
 });
 
-Deno.test("sandbox host accepts GUI admin auth cookie for dashboard APIs", async () => {
+test("sandbox host accepts GUI admin auth cookie for dashboard APIs", async () => {
   const { env } = createEnv();
   const cookie = `takos_computer_admin_token=${
     encodeURIComponent(HOST_AUTH_TOKEN)
@@ -777,17 +745,17 @@ Deno.test("sandbox host accepts GUI admin auth cookie for dashboard APIs", async
       userId: "user-1",
     }),
   });
-  assertEquals(createResponse.status, 201);
+  expect(createResponse.status).toEqual(201);
 
   const listResponse = await fetchWorker(env, "/gui/api/sandbox-sessions", {
     headers: { Cookie: cookie },
   });
-  assertEquals(listResponse.status, 200);
+  expect(listResponse.status).toEqual(200);
   const listBody = await listResponse.json() as { sessions: unknown[] };
-  assertEquals(listBody.sessions.length, 1);
+  expect(listBody.sessions.length).toEqual(1);
 });
 
-Deno.test("sandbox host rejects unauthenticated session create", async () => {
+test("sandbox host rejects unauthenticated session create", async () => {
   const { env } = createEnv();
 
   const response = await fetchWorker(env, "/create", {
@@ -800,10 +768,10 @@ Deno.test("sandbox host rejects unauthenticated session create", async () => {
     }),
   });
 
-  assertEquals(response.status, 401);
+  expect(response.status).toEqual(401);
 });
 
-Deno.test("sandbox host rejects routed marker header without API auth", async () => {
+test("sandbox host rejects routed marker header without API auth", async () => {
   const { env, mcpCalls } = createEnv();
   const createResponse = await fetchWorker(env, "/gui/api/sandbox-create", {
     method: "POST",
@@ -817,7 +785,7 @@ Deno.test("sandbox host rejects routed marker header without API auth", async ()
       userId: "user-1",
     }),
   });
-  assertEquals(createResponse.status, 401);
+  expect(createResponse.status).toEqual(401);
 
   const mcpResponse = await fetchWorker(
     env,
@@ -831,11 +799,11 @@ Deno.test("sandbox host rejects routed marker header without API auth", async ()
       body: JSON.stringify({ jsonrpc: "2.0", method: "process_list" }),
     },
   );
-  assertEquals(mcpResponse.status, 401);
-  assertEquals(mcpCalls, []);
+  expect(mcpResponse.status).toEqual(401);
+  expect(mcpCalls).toEqual([]);
 });
 
-Deno.test("sandbox host accepts trusted Takos-routed dashboard API and MCP requests", async () => {
+test("sandbox host accepts trusted Takos-routed dashboard API and MCP requests", async () => {
   const { env, mcpCalls } = createEnv({ trustRoutedGuiApi: true });
   const trustedHeaders = {
     "Content-Type": "application/json",
@@ -850,21 +818,21 @@ Deno.test("sandbox host accepts trusted Takos-routed dashboard API and MCP reque
       userId: "user-1",
     }),
   });
-  assertEquals(createResponse.status, 201);
+  expect(createResponse.status).toEqual(201);
 
   const listResponse = await fetchWorker(env, "/gui/api/sandbox-sessions", {
     headers: { "X-Takos-Internal-Marker": "1" },
   });
-  assertEquals(listResponse.status, 200);
+  expect(listResponse.status).toEqual(200);
   const listBody = await listResponse.json() as { sessions: unknown[] };
-  assertEquals(listBody.sessions.length, 1);
+  expect(listBody.sessions.length).toEqual(1);
 
   const sessionResponse = await fetchWorker(env, "/session/session-1", {
     headers: { "X-Takos-Internal-Marker": "1" },
   });
-  assertEquals(sessionResponse.status, 200);
+  expect(sessionResponse.status).toEqual(200);
   const sessionBody = await sessionResponse.json() as { sessionId: string };
-  assertEquals(sessionBody.sessionId, "session-1");
+  expect(sessionBody.sessionId).toEqual("session-1");
 
   const mcpResponse = await fetchWorker(
     env,
@@ -875,8 +843,8 @@ Deno.test("sandbox host accepts trusted Takos-routed dashboard API and MCP reque
       body: JSON.stringify({ jsonrpc: "2.0", method: "process_list" }),
     },
   );
-  assertEquals(mcpResponse.status, 200);
-  assertEquals(mcpCalls, [{
+  expect(mcpResponse.status).toEqual(200);
+  expect(mcpCalls).toEqual([{
     path: "/mcp",
     authorization: `Bearer ${MCP_AUTH_TOKEN}`,
     body: { jsonrpc: "2.0", method: "process_list" },
@@ -891,8 +859,8 @@ Deno.test("sandbox host accepts trusted Takos-routed dashboard API and MCP reque
       body: JSON.stringify({ jsonrpc: "2.0", method: "file_list" }),
     },
   );
-  assertEquals(sessionMcpResponse.status, 200);
-  assertEquals(mcpCalls, [
+  expect(sessionMcpResponse.status).toEqual(200);
+  expect(mcpCalls).toEqual([
     {
       path: "/mcp",
       authorization: `Bearer ${MCP_AUTH_TOKEN}`,
@@ -906,7 +874,7 @@ Deno.test("sandbox host accepts trusted Takos-routed dashboard API and MCP reque
   ]);
 });
 
-Deno.test("sandbox host fails closed when host auth token is missing", async () => {
+test("sandbox host fails closed when host auth token is missing", async () => {
   const { env } = createEnv({ hostAuthToken: null });
 
   const response = await fetchWorker(env, "/create", {
@@ -919,10 +887,10 @@ Deno.test("sandbox host fails closed when host auth token is missing", async () 
     }),
   });
 
-  assertEquals(response.status, 503);
+  expect(response.status).toEqual(503);
 });
 
-Deno.test("sandbox host supports published GUI MCP compatibility route", async () => {
+test("sandbox host supports published GUI MCP compatibility route", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(
@@ -938,20 +906,20 @@ Deno.test("sandbox host supports published GUI MCP compatibility route", async (
     },
   );
 
-  assertEquals(response.status, 200);
-  assertEquals(await response.json(), {
+  expect(response.status).toEqual(200);
+  expect(await response.json()).toEqual({
     ok: true,
     path: "/mcp",
     body: { jsonrpc: "2.0", method: "process_list" },
   });
-  assertEquals(mcpCalls, [{
+  expect(mcpCalls).toEqual([{
     path: "/mcp",
     authorization: `Bearer ${MCP_AUTH_TOKEN}`,
     body: { jsonrpc: "2.0", method: "process_list" },
   }]);
 });
 
-Deno.test("sandbox host accepts GUI session proxy cookie for MCP route", async () => {
+test("sandbox host accepts GUI session proxy cookie for MCP route", async () => {
   const { env, mcpCalls } = createEnv();
 
   const cookie = `takos_computer_proxy_token=${
@@ -971,15 +939,15 @@ Deno.test("sandbox host accepts GUI session proxy cookie for MCP route", async (
     },
   );
 
-  assertEquals(response.status, 200);
-  assertEquals(mcpCalls, [{
+  expect(response.status).toEqual(200);
+  expect(mcpCalls).toEqual([{
     path: "/mcp",
     authorization: `Bearer ${MCP_AUTH_TOKEN}`,
     body: { jsonrpc: "2.0", method: "process_list" },
   }]);
 });
 
-Deno.test("sandbox host rejects proxyToken query auth for GUI session bootstrap", async () => {
+test("sandbox host rejects proxyToken query auth for GUI session bootstrap", async () => {
   const { env } = createEnv();
 
   const response = await fetchWorker(
@@ -989,11 +957,11 @@ Deno.test("sandbox host rejects proxyToken query auth for GUI session bootstrap"
     }`,
   );
 
-  assertEquals(response.status, 401);
-  assertEquals(response.headers.get("set-cookie"), null);
+  expect(response.status).toEqual(401);
+  expect(response.headers.get("set-cookie")).toEqual(null);
 });
 
-Deno.test("sandbox host rejects proxyToken query auth for MCP route", async () => {
+test("sandbox host rejects proxyToken query auth for MCP route", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(
@@ -1010,11 +978,11 @@ Deno.test("sandbox host rejects proxyToken query auth for MCP route", async () =
     },
   );
 
-  assertEquals(response.status, 401);
-  assertEquals(mcpCalls, []);
+  expect(response.status).toEqual(401);
+  expect(mcpCalls).toEqual([]);
 });
 
-Deno.test("sandbox host accepts explicit proxy token header for MCP route", async () => {
+test("sandbox host accepts explicit proxy token header for MCP route", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(
@@ -1030,15 +998,15 @@ Deno.test("sandbox host accepts explicit proxy token header for MCP route", asyn
     },
   );
 
-  assertEquals(response.status, 200);
-  assertEquals(mcpCalls, [{
+  expect(response.status).toEqual(200);
+  expect(mcpCalls).toEqual([{
     path: "/mcp",
     authorization: `Bearer ${MCP_AUTH_TOKEN}`,
     body: { jsonrpc: "2.0", method: "process_list" },
   }]);
 });
 
-Deno.test("sandbox host rejects session MCP GET stream requests without proxying", async () => {
+test("sandbox host rejects session MCP GET stream requests without proxying", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(
@@ -1052,16 +1020,16 @@ Deno.test("sandbox host rejects session MCP GET stream requests without proxying
     },
   );
 
-  assertEquals(response.status, 405);
-  assertEquals(response.headers.get("allow"), "POST, OPTIONS");
-  assertEquals(await response.json(), {
+  expect(response.status).toEqual(405);
+  expect(response.headers.get("allow")).toEqual("POST, OPTIONS");
+  expect(await response.json()).toEqual({
     error:
       "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this endpoint",
   });
-  assertEquals(mcpCalls, []);
+  expect(mcpCalls).toEqual([]);
 });
 
-Deno.test("sandbox host rejects GUI MCP GET stream requests without proxying", async () => {
+test("sandbox host rejects GUI MCP GET stream requests without proxying", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(
@@ -1075,16 +1043,16 @@ Deno.test("sandbox host rejects GUI MCP GET stream requests without proxying", a
     },
   );
 
-  assertEquals(response.status, 405);
-  assertEquals(response.headers.get("allow"), "POST, OPTIONS");
-  assertEquals(await response.json(), {
+  expect(response.status).toEqual(405);
+  expect(response.headers.get("allow")).toEqual("POST, OPTIONS");
+  expect(await response.json()).toEqual({
     error:
       "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this endpoint",
   });
-  assertEquals(mcpCalls, []);
+  expect(mcpCalls).toEqual([]);
 });
 
-Deno.test("sandbox host allows session MCP OPTIONS without proxying", async () => {
+test("sandbox host allows session MCP OPTIONS without proxying", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(
@@ -1093,12 +1061,12 @@ Deno.test("sandbox host allows session MCP OPTIONS without proxying", async () =
     { method: "OPTIONS" },
   );
 
-  assertEquals(response.status, 204);
-  assertEquals(response.headers.get("allow"), "POST, OPTIONS");
-  assertEquals(mcpCalls, []);
+  expect(response.status).toEqual(204);
+  expect(response.headers.get("allow")).toEqual("POST, OPTIONS");
+  expect(mcpCalls).toEqual([]);
 });
 
-Deno.test("sandbox host rejects MCP without a valid session proxy token", async () => {
+test("sandbox host rejects MCP without a valid session proxy token", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(
@@ -1111,11 +1079,11 @@ Deno.test("sandbox host rejects MCP without a valid session proxy token", async 
     },
   );
 
-  assertEquals(response.status, 401);
-  assertEquals(mcpCalls, []);
+  expect(response.status).toEqual(401);
+  expect(mcpCalls).toEqual([]);
 });
 
-Deno.test("sandbox host fails closed when no container MCP auth token source is configured", async () => {
+test("sandbox host fails closed when no container MCP auth token source is configured", async () => {
   const { env, mcpCalls } = createEnv({
     mcpAuthToken: null,
   });
@@ -1133,11 +1101,11 @@ Deno.test("sandbox host fails closed when no container MCP auth token source is 
     },
   );
 
-  assertEquals(response.status, 503);
-  assertEquals(mcpCalls, []);
+  expect(response.status).toEqual(503);
+  expect(mcpCalls).toEqual([]);
 });
 
-Deno.test("sandbox host published MCP lists computer tools with published auth", async () => {
+test("sandbox host published MCP lists computer tools with published auth", async () => {
   const { env } = createEnv();
 
   const response = await fetchWorker(env, "/mcp", {
@@ -1153,7 +1121,7 @@ Deno.test("sandbox host published MCP lists computer tools with published auth",
     }),
   });
 
-  assertEquals(response.status, 200);
+  expect(response.status).toEqual(200);
   const body = await response.json() as {
     result: { tools: Array<{ name: string }> };
   };
@@ -1166,7 +1134,7 @@ Deno.test("sandbox host published MCP lists computer tools with published auth",
   }
 });
 
-Deno.test("sandbox host published MCP requires published auth", async () => {
+test("sandbox host published MCP requires published auth", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(env, "/mcp", {
@@ -1179,11 +1147,11 @@ Deno.test("sandbox host published MCP requires published auth", async () => {
     }),
   });
 
-  assertEquals(response.status, 401);
-  assertEquals(mcpCalls, []);
+  expect(response.status).toEqual(401);
+  expect(mcpCalls).toEqual([]);
 });
 
-Deno.test("sandbox host published MCP rejects host auth token", async () => {
+test("sandbox host published MCP rejects host auth token", async () => {
   const { env, mcpCalls } = createEnv();
 
   const hostTokenResponse = await fetchWorker(env, "/mcp", {
@@ -1198,11 +1166,11 @@ Deno.test("sandbox host published MCP rejects host auth token", async () => {
       method: "tools/list",
     }),
   });
-  assertEquals(hostTokenResponse.status, 401);
-  assertEquals(mcpCalls, []);
+  expect(hostTokenResponse.status).toEqual(401);
+  expect(mcpCalls).toEqual([]);
 });
 
-Deno.test("sandbox host published MCP fails closed when publication auth token is missing", async () => {
+test("sandbox host published MCP fails closed when publication auth token is missing", async () => {
   const { env, mcpCalls } = createEnv({ publishedMcpAuthToken: null });
 
   const response = await fetchWorker(env, "/mcp", {
@@ -1218,14 +1186,14 @@ Deno.test("sandbox host published MCP fails closed when publication auth token i
     }),
   });
 
-  assertEquals(response.status, 503);
-  assertEquals(await response.json(), {
+  expect(response.status).toEqual(503);
+  expect(await response.json()).toEqual({
     error: "Published MCP auth token is not configured",
   });
-  assertEquals(mcpCalls, []);
+  expect(mcpCalls).toEqual([]);
 });
 
-Deno.test("sandbox host published MCP auto-creates a session and proxies tool calls", async () => {
+test("sandbox host published MCP auto-creates a session and proxies tool calls", async () => {
   const { env, mcpCalls } = createEnv();
 
   const response = await fetchWorker(env, "/mcp", {
@@ -1250,16 +1218,16 @@ Deno.test("sandbox host published MCP auto-creates a session and proxies tool ca
     }),
   });
 
-  assertEquals(response.status, 200);
+  expect(response.status).toEqual(200);
   const body = await response.json() as {
     result: { content: Array<{ type: string; text: string }> };
   };
-  assertEquals(body.result.content[0]?.type, "text");
-  assertEquals(JSON.parse(body.result.content[0]!.text), {
+  expect(body.result.content[0]?.type).toEqual("text");
+  expect(JSON.parse(body.result.content[0]!.text)).toEqual({
     tool: "shell_exec",
     arguments: { command: "pwd" },
   });
-  assertEquals(mcpCalls, [{
+  expect(mcpCalls).toEqual([{
     path: "/mcp",
     authorization: `Bearer ${MCP_AUTH_TOKEN}`,
     body: {
@@ -1274,7 +1242,7 @@ Deno.test("sandbox host published MCP auto-creates a session and proxies tool ca
   }]);
 });
 
-Deno.test("sandbox host published MCP scopes the DO name to the token but reports the logical session id", async () => {
+test("sandbox host published MCP scopes the DO name to the token but reports the logical session id", async () => {
   const { env, doNames } = createEnv();
 
   const response = await fetchWorker(env, "/mcp", {
@@ -1294,7 +1262,7 @@ Deno.test("sandbox host published MCP scopes the DO name to the token but report
     }),
   });
 
-  assertEquals(response.status, 200);
+  expect(response.status).toEqual(200);
   const body = await response.json() as {
     result: { content: Array<{ type: string; text: string }> };
   };
@@ -1302,7 +1270,7 @@ Deno.test("sandbox host published MCP scopes the DO name to the token but report
     session_id: string;
   };
   // Caller sees the logical id they passed.
-  assertEquals(state.session_id, "agent-session-1");
+  expect(state.session_id).toEqual("agent-session-1");
   // But the Durable Object is addressed by a token-scoped name, never the
   // raw caller-supplied session id.
   if (doNames.length === 0) {
@@ -1320,7 +1288,7 @@ Deno.test("sandbox host published MCP scopes the DO name to the token but report
   }
 });
 
-Deno.test("sandbox host published MCP isolates sessions across distinct tokens with the same session id", async () => {
+test("sandbox host published MCP isolates sessions across distinct tokens with the same session id", async () => {
   // Two callers holding different published tokens use the same logical
   // session id; they must resolve to different Durable Objects so neither
   // can address or destroy the other's session.
@@ -1347,8 +1315,8 @@ Deno.test("sandbox host published MCP isolates sessions across distinct tokens w
 
   const resA = await callDestroy(a.env, "token-a");
   const resB = await callDestroy(b.env, "token-b");
-  assertEquals(resA.status, 200);
-  assertEquals(resB.status, 200);
+  expect(resA.status).toEqual(200);
+  expect(resB.status).toEqual(200);
 
   const nameA = a.doNames.at(-1);
   const nameB = b.doNames.at(-1);

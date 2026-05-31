@@ -1,4 +1,5 @@
-import { assert, assertEquals } from "@std/assert";
+import { expect, test } from "bun:test";
+
 import {
   AppError,
   AuthenticationError,
@@ -16,171 +17,168 @@ import {
 
 // ---------- AppError ----------
 
-Deno.test("AppError: code, statusCode, message", () => {
+test("AppError: code, statusCode, message", () => {
   const err = new AppError("something broke", ErrorCodes.INTERNAL_ERROR, 500);
-  assertEquals(err.message, "something broke");
-  assertEquals(err.code, "INTERNAL_ERROR");
-  assertEquals(err.statusCode, 500);
-  assert(err instanceof Error);
+  expect(err.message).toEqual("something broke");
+  expect(err.code).toEqual("INTERNAL_ERROR");
+  expect(err.statusCode).toEqual(500);
+  expect(err instanceof Error).toBeTruthy();
 });
 
-Deno.test("AppError: toResponse()", () => {
+test("AppError: toResponse()", () => {
   const err = new AppError("bad", ErrorCodes.BAD_REQUEST, 400, { field: "x" });
   const resp = err.toResponse();
-  assertEquals(resp.error.code, "BAD_REQUEST");
-  assertEquals(resp.error.message, "bad");
-  assertEquals((resp.error.details as { field: string }).field, "x");
+  expect(resp.error.code).toEqual("BAD_REQUEST");
+  expect(resp.error.message).toEqual("bad");
+  expect((resp.error.details as { field: string }).field).toEqual("x");
 });
 
-Deno.test("AppError: toResponse() without details omits details field", () => {
+test("AppError: toResponse() without details omits details field", () => {
   const err = new AppError("oops", ErrorCodes.INTERNAL_ERROR, 500);
   const resp = err.toResponse();
-  assertEquals(resp.error.code, "INTERNAL_ERROR");
-  assertEquals(resp.error.message, "oops");
-  assertEquals(resp.error.details, undefined);
+  expect(resp.error.code).toEqual("INTERNAL_ERROR");
+  expect(resp.error.message).toEqual("oops");
+  expect(resp.error.details).toEqual(undefined);
 });
 
 // ---------- Subclasses ----------
 
-Deno.test("BadRequestError: status 400", () => {
+test("BadRequestError: status 400", () => {
   const err = new BadRequestError("invalid input");
-  assertEquals(err.statusCode, 400);
-  assertEquals(err.code, "BAD_REQUEST");
-  assertEquals(err.message, "invalid input");
-  assert(err instanceof AppError);
+  expect(err.statusCode).toEqual(400);
+  expect(err.code).toEqual("BAD_REQUEST");
+  expect(err.message).toEqual("invalid input");
+  expect(err instanceof AppError).toBeTruthy();
 });
 
-Deno.test("BadRequestError: default message", () => {
+test("BadRequestError: default message", () => {
   const err = new BadRequestError();
-  assertEquals(err.message, "Bad request");
+  expect(err.message).toEqual("Bad request");
 });
 
-Deno.test("AuthenticationError: status 401", () => {
+test("AuthenticationError: status 401", () => {
   const err = new AuthenticationError();
-  assertEquals(err.statusCode, 401);
-  assertEquals(err.code, "UNAUTHORIZED");
-  assertEquals(err.message, "Authentication required");
+  expect(err.statusCode).toEqual(401);
+  expect(err.code).toEqual("UNAUTHORIZED");
+  expect(err.message).toEqual("Authentication required");
 });
 
-Deno.test("AuthorizationError: status 403", () => {
+test("AuthorizationError: status 403", () => {
   const err = new AuthorizationError();
-  assertEquals(err.statusCode, 403);
-  assertEquals(err.code, "FORBIDDEN");
-  assertEquals(err.message, "Access denied");
+  expect(err.statusCode).toEqual(403);
+  expect(err.code).toEqual("FORBIDDEN");
+  expect(err.message).toEqual("Access denied");
 });
 
-Deno.test("NotFoundError: status 404", () => {
+test("NotFoundError: status 404", () => {
   const err = new NotFoundError("User");
-  assertEquals(err.statusCode, 404);
-  assertEquals(err.code, "NOT_FOUND");
-  assertEquals(err.message, "User not found");
+  expect(err.statusCode).toEqual(404);
+  expect(err.code).toEqual("NOT_FOUND");
+  expect(err.message).toEqual("User not found");
 });
 
-Deno.test("NotFoundError: default resource name", () => {
+test("NotFoundError: default resource name", () => {
   const err = new NotFoundError();
-  assertEquals(err.message, "Resource not found");
+  expect(err.message).toEqual("Resource not found");
 });
 
-Deno.test("ValidationError: status 422 with field errors", () => {
+test("ValidationError: status 422 with field errors", () => {
   const err = new ValidationError("Validation failed", [
     { field: "email", message: "invalid format" },
   ]);
-  assertEquals(err.statusCode, 422);
-  assertEquals(err.code, "VALIDATION_ERROR");
-  assertEquals(err.fieldErrors.length, 1);
-  assertEquals(err.fieldErrors[0].field, "email");
+  expect(err.statusCode).toEqual(422);
+  expect(err.code).toEqual("VALIDATION_ERROR");
+  expect(err.fieldErrors.length).toEqual(1);
+  expect(err.fieldErrors[0].field).toEqual("email");
 });
 
-Deno.test("ConflictError: status 409", () => {
+test("ConflictError: status 409", () => {
   const err = new ConflictError("duplicate");
-  assertEquals(err.statusCode, 409);
-  assertEquals(err.code, "CONFLICT");
+  expect(err.statusCode).toEqual(409);
+  expect(err.code).toEqual("CONFLICT");
 });
 
-Deno.test("InternalError: status 500", () => {
+test("InternalError: status 500", () => {
   const err = new InternalError();
-  assertEquals(err.statusCode, 500);
-  assertEquals(err.code, "INTERNAL_ERROR");
+  expect(err.statusCode).toEqual(500);
+  expect(err.code).toEqual("INTERNAL_ERROR");
 });
 
 // ---------- isAppError ----------
 
-Deno.test("isAppError: returns true for AppError", () => {
-  assertEquals(isAppError(new AppError("test")), true);
+test("isAppError: returns true for AppError", () => {
+  expect(isAppError(new AppError("test"))).toEqual(true);
 });
 
-Deno.test("isAppError: returns true for subclasses", () => {
-  assertEquals(isAppError(new BadRequestError()), true);
-  assertEquals(isAppError(new NotFoundError()), true);
+test("isAppError: returns true for subclasses", () => {
+  expect(isAppError(new BadRequestError())).toEqual(true);
+  expect(isAppError(new NotFoundError())).toEqual(true);
 });
 
-Deno.test("isAppError: returns false for plain Error", () => {
-  assertEquals(isAppError(new Error("test")), false);
+test("isAppError: returns false for plain Error", () => {
+  expect(isAppError(new Error("test"))).toEqual(false);
 });
 
-Deno.test("isAppError: returns false for non-error values", () => {
-  assertEquals(isAppError("string"), false);
-  assertEquals(isAppError(null), false);
-  assertEquals(isAppError(undefined), false);
-  assertEquals(isAppError(42), false);
+test("isAppError: returns false for non-error values", () => {
+  expect(isAppError("string")).toEqual(false);
+  expect(isAppError(null)).toEqual(false);
+  expect(isAppError(undefined)).toEqual(false);
+  expect(isAppError(42)).toEqual(false);
 });
 
 // ---------- normalizeError ----------
 
-Deno.test("normalizeError: AppError passes through", () => {
+test("normalizeError: AppError passes through", () => {
   const original = new BadRequestError("original");
   const normalized = normalizeError(original);
-  assertEquals(normalized, original);
+  expect(normalized).toEqual(original);
 });
 
-Deno.test("normalizeError: plain Error becomes InternalError", () => {
+test("normalizeError: plain Error becomes InternalError", () => {
   const normalized = normalizeError(new Error("oops"));
-  assert(isAppError(normalized));
-  assertEquals(normalized.statusCode, 500);
-  assertEquals(normalized.message, "An unexpected error occurred");
+  expect(isAppError(normalized)).toBeTruthy();
+  expect(normalized.statusCode).toEqual(500);
+  expect(normalized.message).toEqual("An unexpected error occurred");
 });
 
-Deno.test("normalizeError: string becomes InternalError", () => {
+test("normalizeError: string becomes InternalError", () => {
   const normalized = normalizeError("some string");
-  assert(isAppError(normalized));
-  assertEquals(normalized.statusCode, 500);
+  expect(isAppError(normalized)).toBeTruthy();
+  expect(normalized.statusCode).toEqual(500);
 });
 
-Deno.test("normalizeError: null becomes InternalError", () => {
+test("normalizeError: null becomes InternalError", () => {
   const normalized = normalizeError(null);
-  assert(isAppError(normalized));
-  assertEquals(normalized.statusCode, 500);
+  expect(isAppError(normalized)).toBeTruthy();
+  expect(normalized.statusCode).toEqual(500);
 });
 
 // ---------- getErrorMessage ----------
 
-Deno.test("getErrorMessage: extracts Error message", () => {
-  assertEquals(getErrorMessage(new Error("test msg")), "test msg");
+test("getErrorMessage: extracts Error message", () => {
+  expect(getErrorMessage(new Error("test msg"))).toEqual("test msg");
 });
 
-Deno.test("getErrorMessage: returns string directly", () => {
-  assertEquals(getErrorMessage("direct string"), "direct string");
+test("getErrorMessage: returns string directly", () => {
+  expect(getErrorMessage("direct string")).toEqual("direct string");
 });
 
-Deno.test("getErrorMessage: uses fallback for non-meaningful values", () => {
-  assertEquals(getErrorMessage(null, "fallback"), "fallback");
-  assertEquals(getErrorMessage(undefined, "fallback"), "fallback");
-  assertEquals(getErrorMessage("", "fallback"), "fallback");
-  assertEquals(getErrorMessage("  ", "fallback"), "fallback");
+test("getErrorMessage: uses fallback for non-meaningful values", () => {
+  expect(getErrorMessage(null, "fallback")).toEqual("fallback");
+  expect(getErrorMessage(undefined, "fallback")).toEqual("fallback");
+  expect(getErrorMessage("", "fallback")).toEqual("fallback");
+  expect(getErrorMessage("  ", "fallback")).toEqual("fallback");
 });
 
-Deno.test("getErrorMessage: without fallback stringifies value", () => {
-  assertEquals(getErrorMessage(42), "42");
-  assertEquals(getErrorMessage(null), "null");
+test("getErrorMessage: without fallback stringifies value", () => {
+  expect(getErrorMessage(42)).toEqual("42");
+  expect(getErrorMessage(null)).toEqual("null");
 });
 
-Deno.test("getErrorMessage: extracts message from object with message property", () => {
-  assertEquals(getErrorMessage({ message: "obj msg" }), "obj msg");
+test("getErrorMessage: extracts message from object with message property", () => {
+  expect(getErrorMessage({ message: "obj msg" })).toEqual("obj msg");
 });
 
-Deno.test("getErrorMessage: AppError message extracted", () => {
-  assertEquals(
-    getErrorMessage(new BadRequestError("bad input")),
-    "bad input",
-  );
+test("getErrorMessage: AppError message extracted", () => {
+  expect(getErrorMessage(new BadRequestError("bad input"))).toEqual("bad input");
 });

@@ -1,32 +1,33 @@
-import { assert, assertEquals } from "@std/assert";
+import { expect, test } from "bun:test";
+
 import { createSandboxServiceApp } from "../app.ts";
 
 const MCP_AUTH_TOKEN = "test-mcp-token";
 
-Deno.test("createSandboxServiceApp: creates app successfully", () => {
+test("createSandboxServiceApp: creates app successfully", () => {
   const { app, shell, fs, logger } = createSandboxServiceApp({
     serviceName: "test-sandbox",
     mcpAuthToken: MCP_AUTH_TOKEN,
   });
-  assert(app !== undefined);
-  assert(shell !== undefined);
-  assert(fs !== undefined);
-  assert(logger !== undefined);
+  expect(app !== undefined).toBeTruthy();
+  expect(shell !== undefined).toBeTruthy();
+  expect(fs !== undefined).toBeTruthy();
+  expect(logger !== undefined).toBeTruthy();
 });
 
-Deno.test("createSandboxServiceApp: health endpoint returns 200", async () => {
+test("createSandboxServiceApp: health endpoint returns 200", async () => {
   const { app } = createSandboxServiceApp({ serviceName: "test-sandbox" });
 
   const req = new Request("http://localhost/healthz");
   const res = await app.fetch(req);
-  assertEquals(res.status, 200);
+  expect(res.status).toEqual(200);
 
   const body = await res.json() as { service: string; status: string };
-  assertEquals(body.status, "ok");
-  assertEquals(body.service, "test-sandbox");
+  expect(body.status).toEqual("ok");
+  expect(body.service).toEqual("test-sandbox");
 });
 
-Deno.test("createSandboxServiceApp: MCP endpoint handles tools/call", async () => {
+test("createSandboxServiceApp: MCP endpoint handles tools/call", async () => {
   const { app } = createSandboxServiceApp({
     serviceName: "test-sandbox",
     workspaceRoot: Deno.cwd(),
@@ -50,7 +51,7 @@ Deno.test("createSandboxServiceApp: MCP endpoint handles tools/call", async () =
     }),
   });
   const res = await app.fetch(req);
-  assertEquals(res.status, 200);
+  expect(res.status).toEqual(200);
   const body = await res.json() as {
     result: { content: Array<{ type: string; text: string }> };
   };
@@ -58,11 +59,11 @@ Deno.test("createSandboxServiceApp: MCP endpoint handles tools/call", async () =
     stdout: string;
     exit_code: number;
   };
-  assertEquals(result.stdout, "sandbox-ok");
-  assertEquals(result.exit_code, 0);
+  expect(result.stdout).toEqual("sandbox-ok");
+  expect(result.exit_code).toEqual(0);
 });
 
-Deno.test("createSandboxServiceApp: MCP endpoint requires configured auth", async () => {
+test("createSandboxServiceApp: MCP endpoint requires configured auth", async () => {
   const { app } = createSandboxServiceApp({
     serviceName: "test-sandbox",
     mcpAuthToken: null,
@@ -79,10 +80,10 @@ Deno.test("createSandboxServiceApp: MCP endpoint requires configured auth", asyn
   });
 
   const res = await app.fetch(req);
-  assertEquals(res.status, 503);
+  expect(res.status).toEqual(503);
 });
 
-Deno.test("createSandboxServiceApp: MCP endpoint rejects missing bearer token", async () => {
+test("createSandboxServiceApp: MCP endpoint rejects missing bearer token", async () => {
   const { app } = createSandboxServiceApp({
     serviceName: "test-sandbox",
     mcpAuthToken: MCP_AUTH_TOKEN,
@@ -99,10 +100,10 @@ Deno.test("createSandboxServiceApp: MCP endpoint rejects missing bearer token", 
   });
 
   const res = await app.fetch(req);
-  assertEquals(res.status, 401);
+  expect(res.status).toEqual(401);
 });
 
-Deno.test("createSandboxServiceApp: MCP endpoint rejects GET streams explicitly", async () => {
+test("createSandboxServiceApp: MCP endpoint rejects GET streams explicitly", async () => {
   const { app } = createSandboxServiceApp({
     serviceName: "test-sandbox",
     mcpAuthToken: MCP_AUTH_TOKEN,
@@ -114,19 +115,19 @@ Deno.test("createSandboxServiceApp: MCP endpoint rejects GET streams explicitly"
   });
 
   const res = await app.fetch(req);
-  assertEquals(res.status, 405);
-  assertEquals(res.headers.get("allow"), "POST, OPTIONS");
-  assertEquals(await res.json(), {
+  expect(res.status).toEqual(405);
+  expect(res.headers.get("allow")).toEqual("POST, OPTIONS");
+  expect(await res.json()).toEqual({
     error:
       "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this sandbox endpoint",
   });
 });
 
-Deno.test("createSandboxServiceApp: default service name is 'sandbox'", async () => {
+test("createSandboxServiceApp: default service name is 'sandbox'", async () => {
   const { app } = createSandboxServiceApp();
 
   const req = new Request("http://localhost/healthz");
   const res = await app.fetch(req);
   const body = await res.json() as { service: string };
-  assertEquals(body.service, "sandbox");
+  expect(body.service).toEqual("sandbox");
 });

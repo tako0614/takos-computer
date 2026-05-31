@@ -1,6 +1,7 @@
+import { expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
 import * as crypto from "node:crypto";
-import { assert, assertEquals, assertNotEquals } from "@std/assert";
+
 import { verifyServiceToken } from "../jwt.ts";
 
 function generateTestKeyPair(modulusLength = 1024) {
@@ -94,7 +95,7 @@ function decodeToken(
   }
 }
 
-Deno.test("service JWT - signs and verifies a valid RS256 token", () => {
+test("service JWT - signs and verifies a valid RS256 token", () => {
   const { privateKey, publicKey } = generateTestKeyPair(1024);
 
   const token = signTestToken({
@@ -113,12 +114,12 @@ Deno.test("service JWT - signs and verifies a valid RS256 token", () => {
     expectedIssuer: "takos-control",
   });
 
-  assertEquals(result.valid, true);
-  assertEquals(result.payload?.sub, "service-runtime");
-  assertEquals(result.payload?.role, "internal");
+  expect(result.valid).toEqual(true);
+  expect(result.payload?.sub).toEqual("service-runtime");
+  expect(result.payload?.role).toEqual("internal");
 });
 
-Deno.test("service JWT - rejects token when audience mismatches", () => {
+test("service JWT - rejects token when audience mismatches", () => {
   const { privateKey, publicKey } = generateTestKeyPair(1024);
 
   const token = signTestToken({
@@ -135,11 +136,11 @@ Deno.test("service JWT - rejects token when audience mismatches", () => {
     expectedIssuer: "takos-control",
   });
 
-  assertEquals(result.valid, false);
-  assert(result.error?.includes("Invalid audience"));
+  expect(result.valid).toEqual(false);
+  expect(result.error?.includes("Invalid audience")).toBeTruthy();
 });
 
-Deno.test("service JWT - rejects tampered token payload", () => {
+test("service JWT - rejects tampered token payload", () => {
   const { privateKey, publicKey } = generateTestKeyPair(1024);
 
   const token = signTestToken({
@@ -162,16 +163,16 @@ Deno.test("service JWT - rejects tampered token payload", () => {
     expectedIssuer: "takos-control",
   });
 
-  assertEquals(result.valid, false);
-  assertEquals(result.error, "Invalid signature");
-  assertNotEquals(payload, tamperedPayload);
+  expect(result.valid).toEqual(false);
+  expect(result.error).toEqual("Invalid signature");
+  expect(payload).not.toEqual(tamperedPayload);
 });
 
-Deno.test("service JWT - returns null for malformed token in decodeToken", () => {
-  assertEquals(decodeToken("not-a-jwt"), null);
+test("service JWT - returns null for malformed token in decodeToken", () => {
+  expect(decodeToken("not-a-jwt")).toEqual(null);
 });
 
-Deno.test("service JWT - does not allow reserved claims to be overridden by customClaims", () => {
+test("service JWT - does not allow reserved claims to be overridden by customClaims", () => {
   const { privateKey, publicKey } = generateTestKeyPair(1024);
 
   const token = signTestToken({
@@ -192,20 +193,20 @@ Deno.test("service JWT - does not allow reserved claims to be overridden by cust
   });
 
   const decoded = decodeToken(token);
-  assert(decoded !== null);
+  expect(decoded !== null).toBeTruthy();
 
   const payload = decoded?.payload as Record<string, unknown>;
 
-  assertEquals(payload.iss, "takos-control");
-  assertEquals(payload.sub, "service-runtime");
-  assertEquals(payload.aud, "takos-runtime");
-  assertNotEquals(payload.jti, "evil-jti");
-  assertNotEquals(payload.iat, 1);
-  assertNotEquals(payload.exp, 1);
-  assertEquals(payload.exp, (payload.iat as number) + 120);
+  expect(payload.iss).toEqual("takos-control");
+  expect(payload.sub).toEqual("service-runtime");
+  expect(payload.aud).toEqual("takos-runtime");
+  expect(payload.jti).not.toEqual("evil-jti");
+  expect(payload.iat).not.toEqual(1);
+  expect(payload.exp).not.toEqual(1);
+  expect(payload.exp).toEqual((payload.iat as number) + 120);
 
   // Non-reserved custom claims still pass through.
-  assertEquals(payload.role, "internal");
+  expect(payload.role).toEqual("internal");
 
   const verified = verifyServiceToken({
     token,
@@ -214,6 +215,6 @@ Deno.test("service JWT - does not allow reserved claims to be overridden by cust
     expectedIssuer: "takos-control",
   });
 
-  assertEquals(verified.valid, true);
-  assertEquals(verified.payload?.role, "internal");
+  expect(verified.valid).toEqual(true);
+  expect(verified.payload?.role).toEqual("internal");
 });

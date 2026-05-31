@@ -1,40 +1,41 @@
-import { assertEquals } from "@std/assert";
+import { expect, test } from "bun:test";
+
 import { constantTimeEqual } from "../crypto-utils.ts";
 
-Deno.test("constantTimeEqual: equal strings return true", () => {
-  assertEquals(constantTimeEqual("hello", "hello"), true);
+test("constantTimeEqual: equal strings return true", () => {
+  expect(constantTimeEqual("hello", "hello")).toEqual(true);
 });
 
-Deno.test("constantTimeEqual: different strings return false", () => {
-  assertEquals(constantTimeEqual("hello", "world"), false);
+test("constantTimeEqual: different strings return false", () => {
+  expect(constantTimeEqual("hello", "world")).toEqual(false);
 });
 
-Deno.test("constantTimeEqual: different length strings return false", () => {
-  assertEquals(constantTimeEqual("short", "a longer string"), false);
+test("constantTimeEqual: different length strings return false", () => {
+  expect(constantTimeEqual("short", "a longer string")).toEqual(false);
 });
 
-Deno.test("constantTimeEqual: empty strings return true", () => {
-  assertEquals(constantTimeEqual("", ""), true);
+test("constantTimeEqual: empty strings return true", () => {
+  expect(constantTimeEqual("", "")).toEqual(true);
 });
 
-Deno.test("constantTimeEqual: case sensitivity", () => {
-  assertEquals(constantTimeEqual("Hello", "hello"), false);
-  assertEquals(constantTimeEqual("ABC", "abc"), false);
+test("constantTimeEqual: case sensitivity", () => {
+  expect(constantTimeEqual("Hello", "hello")).toEqual(false);
+  expect(constantTimeEqual("ABC", "abc")).toEqual(false);
 });
 
-Deno.test("constantTimeEqual: one empty one non-empty returns false", () => {
-  assertEquals(constantTimeEqual("", "a"), false);
-  assertEquals(constantTimeEqual("a", ""), false);
+test("constantTimeEqual: one empty one non-empty returns false", () => {
+  expect(constantTimeEqual("", "a")).toEqual(false);
+  expect(constantTimeEqual("a", "")).toEqual(false);
 });
 
-Deno.test("constantTimeEqual: same single character", () => {
-  assertEquals(constantTimeEqual("a", "a"), true);
+test("constantTimeEqual: same single character", () => {
+  expect(constantTimeEqual("a", "a")).toEqual(true);
 });
 
-Deno.test("constantTimeEqual: hex token strings", () => {
+test("constantTimeEqual: hex token strings", () => {
   const a = "abcdef0123456789abcdef0123456789";
   const b = "abcdef0123456789abcdef0123456789";
   const c = "abcdef0123456789abcdef0123456780";
-  assertEquals(constantTimeEqual(a, b), true);
-  assertEquals(constantTimeEqual(a, c), false);
+  expect(constantTimeEqual(a, b)).toEqual(true);
+  expect(constantTimeEqual(a, c)).toEqual(false);
 });
