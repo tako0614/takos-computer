@@ -1,100 +1,327 @@
-// Bun migration: minimal, self-installing `globalThis.Deno` runtime compat.
+// deno-compat.ts — canonical Deno -> Bun runtime shim.
 //
-// Implements the RUNTIME subset of the Deno namespace this CLI uses, backed by
-// Bun / node: APIs. Importing this module installs the global as a side effect
-// (idempotent). It does NOT provide `Deno.test` (that is test-only and added by
-// shims/deno-test-preload.ts) and deliberately omits the Deno permission model
-// (no Node/Bun equivalent).
+// Installs a `globalThis.Deno` good enough to run Deno-authored library /
+// service code on Bun. Loaded as a Bun preload (see bunfig.toml) so that
+// `Deno.*` references resolve before any module under test executes.
 //
-// This is the canonical pattern reused across the ecosystem's Bun migration.
-import { spawn, spawnSync } from "node:child_process";
-import * as fs from "node:fs";
-import * as fsp from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
-import process from "node:process";
-import { createRequire } from "node:module";
+// Covered surface (intentionally minimal + behaviour-preserving):
+//   - Deno.env (get/set/delete/has/toObject)
+//   - Deno.args / Deno.pid / Deno.build / Deno.cwd / Deno.chdir / Deno.exit /
+//     Deno.execPath / Deno.addSignalListener / Deno.removeSignalListener
+//   - Deno.Command (output/outputSync/spawn) with web-stream stdin/out/err
+//   - Deno.serve (Bun.serve adapter returning { finished, shutdown, addr }) and
+//     Deno.upgradeWebSocket
+//   - filesystem: readTextFile(Sync) / writeTextFile(Sync) / readFile(Sync) /
+//     writeFile(Sync) / mkdir(Sync) / remove(Sync) / stat(Sync) / lstat(Sync) /
+//     readDir(Sync) / makeTempDir(Sync) / makeTempFile(Sync) / realPath(Sync) /
+//     rename(Sync) / copyFile(Sync) / symlink / chmod
+//   - Deno.open / Deno.create / Deno.SeekMode (FsFile with read/seek/write/
+//     truncate/stat/close) — required by takos-computer's FsManager
+//   - Deno.errors (NotFound / AlreadyExists / PermissionDenied / NotADirectory)
+//
+// EVERY fs entry remaps node errno errors to Deno.errors.* so that callers that
+// branch on `instanceof Deno.errors.NotFound` (e.g. FsManager.resolveExistingPath)
+// behave identically to Deno.
+//
+// Sync fs is implemented via createRequire("node:fs") so that this file works
+// when itself loaded as an ESM preload.
 
-// Bun migration: some framework runtime-adapter code (e.g.
-// src/kernel/shared/runtime/node.ts) resolves `node:fs` synchronously through a
-// `globalThis.require` when one is present (its documented "CommonJS bootstrap
-// exposes one" path), falling back to an async-warmed createRequire otherwise.
-// Under `bun test`, the async warm-up has not resolved by the time a lazy
-// synchronous descriptor read runs, so the adapter throws "node:fs synchronous
-// read not available". Installing a real `require` on the global here (before any
-// module evaluates, via the bunfig preload) lights up the adapter's existing
-// synchronous path with identical behavior — we do not edit framework code.
-{
-  const g = globalThis as { require?: (specifier: string) => unknown };
-  if (typeof g.require !== "function") {
-    try {
-      g.require = createRequire(import.meta.url);
-    } catch {
-      // Runtime without node:module support — leave require unset; the adapter's
-      // documented fallback then surfaces its normal "not available" error.
-    }
+import { createRequire } from "node:module";
+import { spawn, spawnSync } from "node:child_process";
+
+const require = createRequire(import.meta.url);
+const nodeFs = require("node:fs") as typeof import("node:fs");
+const nodeFsp = require("node:fs/promises") as typeof import("node:fs/promises");
+const nodeOs = require("node:os") as typeof import("node:os");
+const nodePath = require("node:path") as typeof import("node:path");
+const nodeProcess = require("node:process") as typeof import("node:process");
+
+// ---------------------------------------------------------------------------
+// errors
+// ---------------------------------------------------------------------------
+class DenoError extends Error {}
+class NotFound extends DenoError {
+  override name = "NotFound";
+}
+class AlreadyExists extends DenoError {
+  override name = "AlreadyExists";
+}
+class PermissionDenied extends DenoError {
+  override name = "PermissionDenied";
+}
+class NotADirectory extends DenoError {
+  override name = "NotADirectory";
+}
+
+function mapNodeError(err: unknown): Error {
+  const e = err as NodeJS.ErrnoException;
+  if (e && e.code === "ENOENT") {
+    return Object.assign(new NotFound(e.message), { cause: e });
+  }
+  if (e && e.code === "EEXIST") {
+    return Object.assign(new AlreadyExists(e.message), { cause: e });
+  }
+  if (e && (e.code === "EACCES" || e.code === "EPERM")) {
+    return Object.assign(new PermissionDenied(e.message), { cause: e });
+  }
+  if (e && e.code === "ENOTDIR") {
+    return Object.assign(new NotADirectory(e.message), { cause: e });
+  }
+  return e instanceof Error ? e : new Error(String(err));
+}
+
+function wrapSync<T>(fn: () => T): T {
+  try {
+    return fn();
+  } catch (err) {
+    throw mapNodeError(err);
   }
 }
 
-type StdioStr = "piped" | "inherit" | "null";
-
-function mapStdio(v: StdioStr | undefined): "pipe" | "inherit" | "ignore" {
-  if (v === "inherit") return "inherit";
-  if (v === "null") return "ignore";
-  return "pipe";
+async function wrapAsync<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    throw mapNodeError(err);
+  }
 }
+
+// ---------------------------------------------------------------------------
+// FileInfo
+// ---------------------------------------------------------------------------
+function toFileInfo(st: import("node:fs").Stats) {
+  return {
+    isFile: st.isFile(),
+    isDirectory: st.isDirectory(),
+    isSymlink: st.isSymbolicLink(),
+    size: st.size,
+    mtime: st.mtime,
+    atime: st.atime,
+    birthtime: st.birthtime,
+    dev: st.dev,
+    ino: st.ino,
+    mode: st.mode,
+    nlink: st.nlink,
+    uid: st.uid,
+    gid: st.gid,
+    rdev: st.rdev,
+    blksize: st.blksize,
+    blocks: st.blocks,
+    isBlockDevice: st.isBlockDevice(),
+    isCharDevice: st.isCharacterDevice(),
+    isFifo: st.isFIFO(),
+    isSocket: st.isSocket(),
+  };
+}
+
+function toDirEntry(d: import("node:fs").Dirent) {
+  return {
+    name: d.name,
+    isFile: d.isFile(),
+    isDirectory: d.isDirectory(),
+    isSymlink: d.isSymbolicLink(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Command
+// ---------------------------------------------------------------------------
+type DenoStdio = "inherit" | "piped" | "null";
 
 interface CommandOptions {
   args?: string[];
   cwd?: string | URL;
   env?: Record<string, string>;
   clearEnv?: boolean;
-  stdin?: StdioStr;
-  stdout?: StdioStr;
-  stderr?: StdioStr;
+  stdin?: DenoStdio;
+  stdout?: DenoStdio;
+  stderr?: DenoStdio;
   signal?: AbortSignal;
 }
 
-interface CommandOutput {
-  code: number;
-  signal: string | null;
-  success: boolean;
-  stdout: Uint8Array;
-  stderr: Uint8Array;
+function stdioFlag(v: DenoStdio | undefined, fallback: DenoStdio) {
+  const m = v ?? fallback;
+  if (m === "inherit") return "inherit";
+  if (m === "null") return "ignore";
+  return "pipe";
 }
 
 function buildEnv(opts: CommandOptions): NodeJS.ProcessEnv {
   if (opts.clearEnv) return { ...(opts.env ?? {}) };
-  return { ...process.env, ...(opts.env ?? {}) };
+  return { ...nodeProcess.env, ...(opts.env ?? {}) };
 }
 
-class DenoCommand {
+function resolveCwd(cwd: string | URL | undefined): string | undefined {
+  if (cwd === undefined) return undefined;
+  return cwd instanceof URL ? cwd.pathname : cwd;
+}
+
+// Adapt a node Readable to a web ReadableStream. Buffers chunks EAGERLY via the
+// "data" listener attached synchronously here rather than lazily in start():
+// under `bun test` a short-lived child can emit+end its node stream before a
+// lazily-attached consumer (ShellManager calls getReader() only after closing
+// stdin), which would otherwise drop output.
+function nodeReadableToWeb(
+  stream: NodeJS.ReadableStream | null,
+): ReadableStream<Uint8Array> | null {
+  if (!stream) return null;
+  const chunks: Uint8Array[] = [];
+  let ended = false;
+  let errored: unknown = null;
+  let wake: (() => void) | null = null;
+  const signal = () => {
+    const w = wake;
+    wake = null;
+    w?.();
+  };
+  stream.on("data", (chunk: Buffer | string) => {
+    chunks.push(
+      typeof chunk === "string"
+        ? new TextEncoder().encode(chunk)
+        : new Uint8Array(chunk),
+    );
+    signal();
+  });
+  stream.on("end", () => {
+    ended = true;
+    signal();
+  });
+  stream.on("error", (err) => {
+    errored = err;
+    ended = true;
+    signal();
+  });
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      while (chunks.length === 0 && !ended) {
+        await new Promise<void>((res) => (wake = res));
+      }
+      if (chunks.length > 0) {
+        controller.enqueue(chunks.shift()!);
+        return;
+      }
+      if (errored) controller.error(errored);
+      else controller.close();
+    },
+    cancel() {
+      (stream as { destroy?: () => void }).destroy?.();
+    },
+  });
+}
+
+function webWritableToNode(
+  stream: NodeJS.WritableStream | null,
+): WritableStream<Uint8Array> | null {
+  if (!stream) return null;
+  return new WritableStream<Uint8Array>({
+    write(chunk) {
+      return new Promise((resolve, reject) => {
+        stream.write(Buffer.from(chunk), (err) =>
+          err ? reject(err) : resolve());
+      });
+    },
+    close() {
+      return new Promise((resolve) => {
+        (stream as { end: (cb: () => void) => void }).end(() => resolve());
+      });
+    },
+  });
+}
+
+class ChildProcess {
+  #child: import("node:child_process").ChildProcess;
+  #status: Promise<{ success: boolean; code: number; signal: string | null }>;
+  readonly stdin: WritableStream<Uint8Array> | null;
+  readonly stdout: ReadableStream<Uint8Array> | null;
+  readonly stderr: ReadableStream<Uint8Array> | null;
+  readonly pid: number;
+
+  constructor(cmd: string, opts: CommandOptions) {
+    const child = spawn(cmd, opts.args ?? [], {
+      cwd: resolveCwd(opts.cwd),
+      env: buildEnv(opts),
+      signal: opts.signal,
+      stdio: [
+        stdioFlag(opts.stdin, "null"),
+        stdioFlag(opts.stdout, "piped"),
+        stdioFlag(opts.stderr, "piped"),
+      ],
+    });
+    this.#child = child;
+    this.pid = child.pid ?? -1;
+    this.stdin = webWritableToNode(child.stdin);
+    this.stdout = nodeReadableToWeb(child.stdout);
+    this.stderr = nodeReadableToWeb(child.stderr);
+    this.#status = new Promise((resolve, reject) => {
+      child.on("error", (err) => reject(mapNodeError(err)));
+      child.on("close", (code, signal) => {
+        resolve({
+          success: code === 0,
+          code: code ?? (signal ? 128 : 1),
+          signal: signal ?? null,
+        });
+      });
+    });
+  }
+
+  get status() {
+    return this.#status;
+  }
+
+  output() {
+    return this.#status.then(() => ({}));
+  }
+
+  kill(signo?: string | number) {
+    this.#child.kill(signo as NodeJS.Signals | number | undefined);
+  }
+
+  ref() {
+    this.#child.ref?.();
+  }
+  unref() {
+    this.#child.unref?.();
+  }
+}
+
+class Command {
   #cmd: string;
   #opts: CommandOptions;
+
   constructor(cmd: string | URL, opts: CommandOptions = {}) {
     this.#cmd = cmd instanceof URL ? cmd.pathname : cmd;
     this.#opts = opts;
   }
 
-  output(): Promise<CommandOutput> {
-    const o = this.#opts;
-    return new Promise((resolve, reject) => {
-      const child = spawn(this.#cmd, o.args ?? [], {
-        cwd: o.cwd instanceof URL ? o.cwd.pathname : o.cwd,
-        env: buildEnv(o),
-        stdio: [mapStdio(o.stdin), mapStdio(o.stdout ?? "piped"), mapStdio(o.stderr ?? "piped")],
-        signal: o.signal,
+  output() {
+    const opts = this.#opts;
+    return new Promise<{
+      code: number;
+      signal: string | null;
+      success: boolean;
+      stdout: Uint8Array;
+      stderr: Uint8Array;
+    }>((resolve, reject) => {
+      const child = spawn(this.#cmd, opts.args ?? [], {
+        cwd: resolveCwd(opts.cwd),
+        env: buildEnv(opts),
+        signal: opts.signal,
+        stdio: [
+          stdioFlag(opts.stdin, "null"),
+          stdioFlag(opts.stdout, "piped"),
+          stdioFlag(opts.stderr, "piped"),
+        ],
       });
-      const out: Uint8Array[] = [];
-      const err: Uint8Array[] = [];
+      const out: Buffer[] = [];
+      const err: Buffer[] = [];
       child.stdout?.on("data", (c: Buffer) => out.push(c));
       child.stderr?.on("data", (c: Buffer) => err.push(c));
-      child.on("error", reject);
-      child.on("close", (code, sig) => {
+      child.on("error", (e) => reject(mapNodeError(e)));
+      child.on("close", (code, signal) => {
         resolve({
-          code: code ?? 0,
-          signal: sig,
-          success: (code ?? 0) === 0,
+          code: code ?? (signal ? 128 : 1),
+          signal: signal ?? null,
+          success: code === 0,
           stdout: out.length ? new Uint8Array(Buffer.concat(out)) : new Uint8Array(),
           stderr: err.length ? new Uint8Array(Buffer.concat(err)) : new Uint8Array(),
         });
@@ -102,283 +329,382 @@ class DenoCommand {
     });
   }
 
-  outputSync(): CommandOutput {
-    const o = this.#opts;
-    const r = spawnSync(this.#cmd, o.args ?? [], {
-      cwd: o.cwd instanceof URL ? o.cwd.pathname : o.cwd,
-      env: buildEnv(o),
-      stdio: [mapStdio(o.stdin), mapStdio(o.stdout ?? "piped"), mapStdio(o.stderr ?? "piped")],
+  outputSync() {
+    const opts = this.#opts;
+    const res = spawnSync(this.#cmd, opts.args ?? [], {
+      cwd: resolveCwd(opts.cwd),
+      env: buildEnv(opts),
+      maxBuffer: 1024 * 1024 * 256,
     });
+    if (res.error) throw mapNodeError(res.error);
     return {
-      code: r.status ?? 0,
-      signal: r.signal,
-      success: (r.status ?? 0) === 0,
-      stdout: r.stdout ? new Uint8Array(r.stdout) : new Uint8Array(),
-      stderr: r.stderr ? new Uint8Array(r.stderr) : new Uint8Array(),
+      success: res.status === 0,
+      code: res.status ?? (res.signal ? 128 : 1),
+      signal: res.signal ?? null,
+      stdout: res.stdout ? new Uint8Array(res.stdout) : new Uint8Array(),
+      stderr: res.stderr ? new Uint8Array(res.stderr) : new Uint8Array(),
     };
   }
 
   spawn() {
-    const o = this.#opts;
-    // Deno's Command.spawn() exposes stdin/stdout/stderr as WHATWG web streams
-    // (stdin is a WritableStream with getWriter(); stdout/stderr are
-    // ReadableStreams). It is NOT detached. We model that here so call sites that
-    // do `child.stdin.getWriter()` (e.g. piping a tar archive to a subprocess)
-    // behave the same under bun as under Deno.
-    const child = spawn(this.#cmd, o.args ?? [], {
-      cwd: o.cwd instanceof URL ? o.cwd.pathname : o.cwd,
-      env: buildEnv(o),
-      stdio: [mapStdio(o.stdin), mapStdio(o.stdout), mapStdio(o.stderr)],
-      signal: o.signal,
-    });
-
-    const stdin: WritableStream<Uint8Array> | null = child.stdin
-      ? new WritableStream<Uint8Array>({
-        write(chunk) {
-          return new Promise<void>((resolve, reject) => {
-            child.stdin!.write(chunk, (err) => (err ? reject(err) : resolve()));
-          });
-        },
-        close() {
-          return new Promise<void>((resolve) => child.stdin!.end(() => resolve()));
-        },
-        abort() {
-          child.stdin!.destroy();
-        },
-      })
-      : null;
-
-    function toReadable(
-      stream: NodeJS.ReadableStream | null,
-    ): ReadableStream<Uint8Array> | null {
-      if (!stream) return null;
-      return new ReadableStream<Uint8Array>({
-        start(controller) {
-          stream.on("data", (c: Buffer) => controller.enqueue(new Uint8Array(c)));
-          stream.on("end", () => controller.close());
-          stream.on("error", (e) => controller.error(e));
-        },
-        cancel() {
-          (stream as { destroy?: () => void }).destroy?.();
-        },
-      });
-    }
-
-    const status = new Promise<{ code: number; success: boolean; signal: string | null }>(
-      (res) => child.on("close", (code, sig) => res({ code: code ?? 0, success: (code ?? 0) === 0, signal: sig })),
-    );
-
-    return {
-      pid: child.pid,
-      stdin,
-      stdout: toReadable(child.stdout),
-      stderr: toReadable(child.stderr),
-      status,
-      output: () =>
-        new Promise<CommandOutput>((resolve) => {
-          const out: Uint8Array[] = [];
-          const err: Uint8Array[] = [];
-          child.stdout?.on("data", (c: Buffer) => out.push(c));
-          child.stderr?.on("data", (c: Buffer) => err.push(c));
-          child.on("close", (code, sig) =>
-            resolve({
-              code: code ?? 0,
-              signal: sig,
-              success: (code ?? 0) === 0,
-              stdout: out.length ? new Uint8Array(Buffer.concat(out)) : new Uint8Array(),
-              stderr: err.length ? new Uint8Array(Buffer.concat(err)) : new Uint8Array(),
-            }));
-        }),
-      kill: (sig?: NodeJS.Signals) => child.kill(sig),
-      unref: () => child.unref?.(),
-      ref: () => child.ref?.(),
-    };
+    return new ChildProcess(this.#cmd, this.#opts);
   }
 }
 
-class NotFound extends Error {
-  override name = "NotFound";
-}
-class AlreadyExists extends Error {
-  override name = "AlreadyExists";
-}
-class PermissionDenied extends Error {
-  override name = "PermissionDenied";
-}
-
-function remap(e: unknown): unknown {
-  const code = (e as { code?: string })?.code;
-  if (code === "ENOENT") return Object.assign(new NotFound((e as Error).message), { cause: e });
-  if (code === "EEXIST") return Object.assign(new AlreadyExists((e as Error).message), { cause: e });
-  if (code === "EACCES" || code === "EPERM") return Object.assign(new PermissionDenied((e as Error).message), { cause: e });
-  return e;
-}
-
-interface DirEntry {
-  name: string;
-  isFile: boolean;
-  isDirectory: boolean;
-  isSymlink: boolean;
-}
-
-const DenoCompat = {
-  args: process.argv.slice(2),
-  pid: process.pid,
-  build: {
-    os: (process.platform === "win32" ? "windows" : process.platform === "darwin" ? "darwin" : process.platform) as string,
-    arch: process.arch,
+// ---------------------------------------------------------------------------
+// env
+// ---------------------------------------------------------------------------
+const env = {
+  get: (k: string) => nodeProcess.env[k],
+  set: (k: string, v: string) => {
+    nodeProcess.env[k] = v;
   },
-  errors: { NotFound, AlreadyExists, PermissionDenied },
-
-  env: {
-    get: (k: string): string | undefined => process.env[k],
-    set: (k: string, v: string): void => {
-      process.env[k] = v;
-    },
-    has: (k: string): boolean => k in process.env,
-    delete: (k: string): void => {
-      delete process.env[k];
-    },
-    toObject: (): Record<string, string> => ({ ...process.env } as Record<string, string>),
+  delete: (k: string) => {
+    delete nodeProcess.env[k];
   },
+  has: (k: string) => k in nodeProcess.env,
+  toObject: () => ({ ...nodeProcess.env }) as Record<string, string>,
+};
 
-  exit: (code = 0): never => process.exit(code) as never,
-  cwd: (): string => process.cwd(),
-  chdir: (dir: string | URL): void => process.chdir(dir instanceof URL ? dir.pathname : dir),
-  execPath: (): string => process.execPath,
+// ---------------------------------------------------------------------------
+// filesystem
+// ---------------------------------------------------------------------------
+interface MkdirOptions {
+  recursive?: boolean;
+  mode?: number;
+}
+interface RemoveOptions {
+  recursive?: boolean;
+}
+interface MakeTempOptions {
+  dir?: string;
+  prefix?: string;
+  suffix?: string;
+}
+interface WriteFileOptions {
+  append?: boolean;
+  create?: boolean;
+  mode?: number;
+}
 
-  addSignalListener: (sig: NodeJS.Signals, handler: () => void): void => {
-    process.on(sig, handler);
-  },
-  removeSignalListener: (sig: NodeJS.Signals, handler: () => void): void => {
-    process.off(sig, handler);
-  },
+function tempName(opts: MakeTempOptions = {}) {
+  const base = opts.dir ?? nodeOs.tmpdir();
+  const rand = crypto.randomUUID();
+  return nodePath.join(base, `${opts.prefix ?? ""}${rand}${opts.suffix ?? ""}`);
+}
 
-  readTextFile: (p: string | URL): Promise<string> =>
-    fsp.readFile(p, "utf8").catch((e) => Promise.reject(remap(e))),
-  readTextFileSync: (p: string | URL): string => {
-    try {
-      return fs.readFileSync(p, "utf8");
-    } catch (e) {
-      throw remap(e);
-    }
-  },
-  readFile: (p: string | URL): Promise<Uint8Array> =>
-    fsp.readFile(p).then((b) => new Uint8Array(b)).catch((e) => Promise.reject(remap(e))),
-
-  writeTextFile: (
-    p: string | URL,
-    data: string,
-    opts?: { append?: boolean; create?: boolean; mode?: number },
-  ): Promise<void> => fsp.writeFile(p, data, { flag: opts?.append ? "a" : "w", mode: opts?.mode }),
+const fsApi = {
+  readTextFile: (p: string | URL) =>
+    wrapAsync(() => nodeFsp.readFile(p, "utf8")),
+  readTextFileSync: (p: string | URL) =>
+    wrapSync(() => nodeFs.readFileSync(p, "utf8")),
+  writeTextFile: (p: string | URL, data: string, opts: WriteFileOptions = {}) =>
+    wrapAsync(() =>
+      nodeFsp.writeFile(p, data, {
+        flag: opts.append ? "a" : "w",
+        mode: opts.mode,
+      })),
   writeTextFileSync: (
     p: string | URL,
     data: string,
-    opts?: { append?: boolean; create?: boolean; mode?: number },
-  ): void => fs.writeFileSync(p, data, { flag: opts?.append ? "a" : "w", mode: opts?.mode }),
-  writeFile: (p: string | URL, data: Uint8Array, opts?: { mode?: number }): Promise<void> =>
-    fsp.writeFile(p, data, { mode: opts?.mode }),
-  writeFileSync: (p: string | URL, data: Uint8Array, opts?: { mode?: number }): void =>
-    fs.writeFileSync(p, data, { mode: opts?.mode }),
-
-  mkdir: (p: string | URL, opts?: { recursive?: boolean; mode?: number }): Promise<void> =>
-    fsp.mkdir(p, { recursive: opts?.recursive, mode: opts?.mode }).then(() => undefined),
-  remove: (p: string | URL, opts?: { recursive?: boolean }): Promise<void> =>
-    fsp.rm(p, { recursive: opts?.recursive ?? false, force: false }).catch((e) => Promise.reject(remap(e))),
-  removeSync: (p: string | URL, opts?: { recursive?: boolean }): void => {
-    try {
-      fs.rmSync(p, { recursive: opts?.recursive ?? false, force: false });
-    } catch (e) {
-      throw remap(e);
-    }
-  },
-
-  makeTempDir: (opts?: { dir?: string; prefix?: string }): Promise<string> =>
-    fsp.mkdtemp(path.join(opts?.dir ?? os.tmpdir(), opts?.prefix ?? "")),
-  makeTempDirSync: (opts?: { dir?: string; prefix?: string }): string =>
-    fs.mkdtempSync(path.join(opts?.dir ?? os.tmpdir(), opts?.prefix ?? "")),
-  makeTempFile: async (opts?: { dir?: string; prefix?: string; suffix?: string }): Promise<string> => {
-    const dir = opts?.dir ?? os.tmpdir();
-    const p = path.join(dir, `${opts?.prefix ?? ""}${crypto.randomUUID()}${opts?.suffix ?? ""}`);
-    await fsp.writeFile(p, "");
-    return p;
-  },
-  makeTempFileSync: (opts?: { dir?: string; prefix?: string; suffix?: string }): string => {
-    const dir = opts?.dir ?? os.tmpdir();
-    const p = path.join(dir, `${opts?.prefix ?? ""}${crypto.randomUUID()}${opts?.suffix ?? ""}`);
-    fs.writeFileSync(p, "");
-    return p;
-  },
-
+    opts: WriteFileOptions = {},
+  ) =>
+    wrapSync(() =>
+      nodeFs.writeFileSync(p, data, {
+        flag: opts.append ? "a" : "w",
+        mode: opts.mode,
+      })),
+  readFile: (p: string | URL) =>
+    wrapAsync(async () => new Uint8Array(await nodeFsp.readFile(p))),
+  readFileSync: (p: string | URL) =>
+    wrapSync(() => new Uint8Array(nodeFs.readFileSync(p))),
+  writeFile: (p: string | URL, data: Uint8Array, opts: WriteFileOptions = {}) =>
+    wrapAsync(() => nodeFsp.writeFile(p, data, { mode: opts.mode })),
+  writeFileSync: (
+    p: string | URL,
+    data: Uint8Array,
+    opts: WriteFileOptions = {},
+  ) => wrapSync(() => nodeFs.writeFileSync(p, data, { mode: opts.mode })),
+  mkdir: (p: string | URL, opts: MkdirOptions = {}) =>
+    wrapAsync(async () => {
+      await nodeFsp.mkdir(p, opts);
+    }),
+  mkdirSync: (p: string | URL, opts: MkdirOptions = {}) =>
+    wrapSync(() => {
+      nodeFs.mkdirSync(p, opts);
+    }),
+  remove: (p: string | URL, opts: RemoveOptions = {}) =>
+    wrapAsync(() => nodeFsp.rm(p, { recursive: opts.recursive, force: false })),
+  removeSync: (p: string | URL, opts: RemoveOptions = {}) =>
+    wrapSync(() => nodeFs.rmSync(p, { recursive: opts.recursive, force: false })),
   stat: (p: string | URL) =>
-    fsp.stat(p).then(toFileInfo).catch((e) => Promise.reject(remap(e))),
-  statSync: (p: string | URL) => {
-    try {
-      return toFileInfo(fs.statSync(p));
-    } catch (e) {
-      throw remap(e);
-    }
-  },
+    wrapAsync(async () => toFileInfo(await nodeFsp.stat(p))),
+  statSync: (p: string | URL) => wrapSync(() => toFileInfo(nodeFs.statSync(p))),
   lstat: (p: string | URL) =>
-    fsp.lstat(p).then(toFileInfo).catch((e) => Promise.reject(remap(e))),
-
-  readDir: async function* (p: string | URL): AsyncIterable<DirEntry> {
-    let ents: fs.Dirent[];
-    try {
-      ents = await fsp.readdir(p, { withFileTypes: true });
-    } catch (e) {
-      throw remap(e);
+    wrapAsync(async () => toFileInfo(await nodeFsp.lstat(p))),
+  lstatSync: (p: string | URL) =>
+    wrapSync(() => toFileInfo(nodeFs.lstatSync(p))),
+  realPath: (p: string | URL) => wrapAsync(() => nodeFsp.realpath(p)),
+  realPathSync: (p: string | URL) => wrapSync(() => nodeFs.realpathSync(p)),
+  rename: (a: string | URL, b: string | URL) =>
+    wrapAsync(() => nodeFsp.rename(a, b)),
+  renameSync: (a: string | URL, b: string | URL) =>
+    wrapSync(() => nodeFs.renameSync(a, b)),
+  copyFile: (a: string | URL, b: string | URL) =>
+    wrapAsync(() => nodeFsp.copyFile(a, b)),
+  copyFileSync: (a: string | URL, b: string | URL) =>
+    wrapSync(() => nodeFs.copyFileSync(a, b)),
+  symlink: (
+    target: string | URL,
+    p: string | URL,
+    opts?: { type?: "file" | "dir" | "junction" },
+  ) =>
+    wrapAsync(() =>
+      nodeFsp.symlink(target, p, opts?.type === "dir" ? "dir" : opts?.type)),
+  chmod: (p: string | URL, mode: number) =>
+    wrapAsync(() => nodeFsp.chmod(p, mode)),
+  makeTempDir: (opts: MakeTempOptions = {}) =>
+    wrapAsync(() =>
+      nodeFsp.mkdtemp(nodePath.join(opts.dir ?? nodeOs.tmpdir(), opts.prefix ?? ""))),
+  makeTempDirSync: (opts: MakeTempOptions = {}) =>
+    wrapSync(() =>
+      nodeFs.mkdtempSync(nodePath.join(opts.dir ?? nodeOs.tmpdir(), opts.prefix ?? ""))),
+  makeTempFile: (opts: MakeTempOptions = {}) =>
+    wrapAsync(async () => {
+      const name = tempName(opts);
+      await nodeFsp.writeFile(name, "");
+      return name;
+    }),
+  makeTempFileSync: (opts: MakeTempOptions = {}) =>
+    wrapSync(() => {
+      const name = tempName(opts);
+      nodeFs.writeFileSync(name, "");
+      return name;
+    }),
+  // deno returns an async iterable of DirEntry
+  readDir: (p: string | URL) => {
+    async function* iter() {
+      const entries = await wrapAsync(() =>
+        nodeFsp.readdir(p, { withFileTypes: true }));
+      for (const e of entries) yield toDirEntry(e);
     }
-    for (const e of ents) {
-      yield { name: e.name, isFile: e.isFile(), isDirectory: e.isDirectory(), isSymlink: e.isSymbolicLink() };
-    }
+    return iter();
   },
-
-  readDirSync: function* (p: string | URL): IterableIterator<DirEntry> {
-    let ents: fs.Dirent[];
-    try {
-      ents = fs.readdirSync(p, { withFileTypes: true });
-    } catch (e) {
-      throw remap(e);
-    }
-    for (const e of ents) {
-      yield { name: e.name, isFile: e.isFile(), isDirectory: e.isDirectory(), isSymlink: e.isSymbolicLink() };
-    }
+  readDirSync: (p: string | URL) => {
+    const entries = wrapSync(() =>
+      nodeFs.readdirSync(p, { withFileTypes: true }));
+    return entries.map(toDirEntry)[Symbol.iterator]();
   },
-
-  lstatSync: (p: string | URL) => {
-    try {
-      return toFileInfo(fs.lstatSync(p));
-    } catch (e) {
-      throw remap(e);
-    }
-  },
-
-  copyFile: (from: string | URL, to: string | URL): Promise<void> => fsp.copyFile(from, to),
-  rename: (from: string | URL, to: string | URL): Promise<void> => fsp.rename(from, to),
-  symlink: (target: string | URL, p: string | URL): Promise<void> => fsp.symlink(target, p),
-  chmod: (p: string | URL, mode: number): Promise<void> => fsp.chmod(p, mode),
-  realPath: (p: string | URL): Promise<string> => fsp.realpath(p),
-
-  Command: DenoCommand,
 };
 
-function toFileInfo(s: fs.Stats) {
+// ---------------------------------------------------------------------------
+// Deno.open / Deno.create / Deno.SeekMode (FsFile)
+//
+// takos-computer's FsManager uses Deno.open(path,{read})/{write}, then
+// file.read(buf) (returns bytes-read or null at EOF), file.seek(offset, whence),
+// file.write(buf), file.truncate(), file.stat(), and file.close().
+// ---------------------------------------------------------------------------
+const SeekMode = { Start: 0, Current: 1, End: 2 } as const;
+
+interface OpenOptions {
+  read?: boolean;
+  write?: boolean;
+  append?: boolean;
+  create?: boolean;
+  createNew?: boolean;
+  truncate?: boolean;
+}
+
+function openFlags(opts: OpenOptions = {}): string {
+  if (opts.write && opts.read) {
+    return opts.createNew ? "wx+" : opts.create === false ? "r+" : "w+";
+  }
+  if (opts.write) return opts.append ? "a" : opts.createNew ? "wx" : "w";
+  if (opts.append) return "a";
+  return "r";
+}
+
+function makeFsFile(fh: import("node:fs/promises").FileHandle) {
+  let pos = 0;
   return {
-    isFile: s.isFile(),
-    isDirectory: s.isDirectory(),
-    isSymlink: s.isSymbolicLink(),
-    size: s.size,
-    mtime: s.mtime,
-    atime: s.atime,
-    birthtime: s.birthtime,
-    mode: s.mode,
+    async read(buf: Uint8Array): Promise<number | null> {
+      const { bytesRead } = await fh.read(buf, 0, buf.byteLength, pos);
+      if (bytesRead === 0) return null;
+      pos += bytesRead;
+      return bytesRead;
+    },
+    async write(buf: Uint8Array): Promise<number> {
+      const { bytesWritten } = await fh.write(buf, 0, buf.byteLength, pos);
+      pos += bytesWritten;
+      return bytesWritten;
+    },
+    seek(offset: number | bigint, whence: number): Promise<number> {
+      const off = Number(offset);
+      if (whence === SeekMode.Start) pos = off;
+      else if (whence === SeekMode.Current) pos += off;
+      else pos = off; // End: best-effort (size not tracked here)
+      return Promise.resolve(pos);
+    },
+    truncate(len?: number): Promise<void> {
+      return fh.truncate(len);
+    },
+    stat: () => fh.stat().then(toFileInfo),
+    close(): void {
+      void fh.close();
+    },
+    get readable(): ReadableStream<Uint8Array> {
+      return fh.readableWebStream() as unknown as ReadableStream<Uint8Array>;
+    },
   };
 }
 
-// Idempotent install: merge onto any pre-existing partial Deno (e.g. real Deno,
-// or the test preload that adds Deno.test on top of this runtime).
-const g = globalThis as unknown as { Deno?: Record<string, unknown> };
-g.Deno = Object.assign({}, DenoCompat, g.Deno ?? {});
+const openApi = {
+  SeekMode,
+  open: (p: string | URL, opts?: OpenOptions) =>
+    wrapAsync(async () => makeFsFile(await nodeFsp.open(p, openFlags(opts)))),
+  create: (p: string | URL) =>
+    wrapAsync(async () => makeFsFile(await nodeFsp.open(p, "w+"))),
+};
+
+// ---------------------------------------------------------------------------
+// build / misc
+// ---------------------------------------------------------------------------
+const buildInfo = {
+  target: `${nodeProcess.arch}-unknown-${nodeProcess.platform}`,
+  arch: nodeProcess.arch === "x64" ? "x86_64" : nodeProcess.arch,
+  os: nodeProcess.platform === "win32"
+    ? "windows"
+    : nodeProcess.platform === "darwin"
+    ? "darwin"
+    : "linux",
+  vendor: "unknown",
+};
+
+const DenoShim = {
+  env,
+  args: nodeProcess.argv.slice(2),
+  pid: nodeProcess.pid,
+  build: buildInfo,
+  cwd: () => nodeProcess.cwd(),
+  chdir: (p: string | URL) => nodeProcess.chdir(p instanceof URL ? p.pathname : p),
+  exit: (code = 0): never => nodeProcess.exit(code),
+  execPath: () => nodeProcess.execPath,
+  addSignalListener: (sig: NodeJS.Signals, handler: () => void) => {
+    nodeProcess.on(sig, handler);
+  },
+  removeSignalListener: (sig: NodeJS.Signals, handler: () => void) => {
+    nodeProcess.off(sig, handler);
+  },
+  Command,
+  ChildProcess,
+  errors: { NotFound, AlreadyExists, PermissionDenied, NotADirectory },
+  ...fsApi,
+  ...openApi,
+};
+
+// Only install if a real Deno runtime is not present; otherwise merge missing
+// members onto the existing (partial) Deno (e.g. the test preload's Deno.test).
+const g = globalThis as { Deno?: Record<string, unknown> };
+if (!g.Deno) {
+  Object.defineProperty(globalThis, "Deno", {
+    value: { ...DenoShim },
+    writable: true,
+    configurable: true,
+    enumerable: false,
+  });
+} else {
+  const existing = g.Deno;
+  for (const [k, v] of Object.entries(DenoShim)) {
+    if (!(k in existing)) existing[k] = v;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deno.serve / Deno.upgradeWebSocket (Bun.serve adapter)
+//
+// Not exercised by bun:test (no *.test.ts imports the server entry) but lets the
+// sandbox container run on `bun`.
+// ---------------------------------------------------------------------------
+type ServeHandler = (req: Request, info?: unknown) => Response | Promise<Response>;
+interface ServeOptions {
+  port?: number;
+  hostname?: string;
+  signal?: AbortSignal;
+  onListen?: (addr: { hostname: string; port: number }) => void;
+}
+
+const BunRef = (globalThis as { Bun?: { serve: (o: unknown) => unknown } }).Bun;
+const Deno = g.Deno as Record<string, unknown>;
+
+Deno.serve = (a: ServeOptions | ServeHandler, b?: ServeHandler) => {
+  const opts: ServeOptions = typeof a === "function" ? {} : a;
+  const handler: ServeHandler = (typeof a === "function" ? a : b)!;
+  if (!BunRef) throw new Error("Deno.serve shim requires the Bun runtime");
+  const server = BunRef.serve({
+    port: opts.port ?? 8000,
+    hostname: opts.hostname ?? "0.0.0.0",
+    signal: opts.signal,
+    websocket: {
+      message(ws: { data?: { onmessage?: (e: unknown) => void } }, msg: unknown) {
+        ws.data?.onmessage?.({ data: msg });
+      },
+      open(ws: { data?: { onopen?: () => void } }) {
+        ws.data?.onopen?.();
+      },
+      close(ws: { data?: { onclose?: () => void } }) {
+        ws.data?.onclose?.();
+      },
+    },
+    fetch: (req: Request, srv: unknown) => {
+      (req as unknown as Record<string, unknown>).__bunServer = srv;
+      return handler(req, {});
+    },
+  }) as { hostname: string; port: number; stop?: (force?: boolean) => void };
+  opts.onListen?.({
+    hostname: server.hostname ?? opts.hostname ?? "0.0.0.0",
+    port: server.port ?? opts.port ?? 8000,
+  });
+  return {
+    finished: Promise.resolve(),
+    shutdown: () => {
+      server.stop?.(true);
+      return Promise.resolve();
+    },
+    ref() {},
+    unref() {},
+    addr: {
+      hostname: server.hostname,
+      port: server.port,
+      transport: "tcp" as const,
+    },
+  };
+};
+
+Deno.upgradeWebSocket = (req: Request) => {
+  const srv = (req as unknown as {
+    __bunServer?: { upgrade?: (req: Request, o?: unknown) => boolean };
+  }).__bunServer;
+  const data: Record<string, unknown> = {};
+  const socket = {
+    readyState: 0,
+    send: (_m: unknown) => {},
+    close: () => {},
+    set onopen(fn: () => void) {
+      data.onopen = fn;
+    },
+    set onmessage(fn: (e: unknown) => void) {
+      data.onmessage = fn;
+    },
+    set onclose(fn: () => void) {
+      data.onclose = fn;
+    },
+    set onerror(_fn: (e: unknown) => void) {},
+  };
+  const ok = srv?.upgrade?.(req, { data });
+  const response = ok
+    ? new Response(null, { status: 101 })
+    : new Response("upgrade failed", { status: 426 });
+  return { socket, response };
+};
 
 export {};
