@@ -1,29 +1,29 @@
 {
-  "name": "takos-computer",
-  "version": "1.0.0",
-  "license": "MIT",
-  "type": "module",
+  "name": "@takos-apps/takos-computer",
+  "version": "0.1.0",
   "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
-    "check": "tsc --noEmit",
+    "dev": "bun run --filter '*' dev",
     "test": "LC_ALL=C bun test packages/common/src && LC_ALL=C bun test packages/cloudflare-compat/src && LC_ALL=C bun test packages/computer-hosts/src && LC_ALL=C bun test packages/sandbox-service/src",
-    "test:all": "LC_ALL=C bun test packages/common/src && LC_ALL=C bun test packages/cloudflare-compat/src && LC_ALL=C bun test packages/computer-hosts/src && LC_ALL=C bun test packages/sandbox-service/src"
+    "test:all": "bun run test",
+    "check": "tsc --noEmit"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.1.1",
-    "@cloudflare/workers-types": "^4.20260118.0",
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "@solidjs/router": "^0.15.0",
-    "esbuild": "0.25.5",
-    "hono": "^4.11.10",
-    "solid-js": "^1.9.0",
-    "vite": "^6.3.0",
-    "vite-plugin-singlefile": "^2.0.0",
-    "vite-plugin-solid": "^2.11.0",
-    "zod": "^3.23.0"
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "@types/bun": "latest",
+    "@libsql/client": "^0.14.0",
+    "@takos-computer/common": "workspace:*",
+    "@takos-computer/cloudflare-compat": "workspace:*",
+    "@takos-computer/computer-hosts": "workspace:*",
+    "@takos-computer/dashboard": "workspace:*",
+    "@takos-computer/sandbox-service": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
     "typescript": "^5.7.0"
   }
 }
