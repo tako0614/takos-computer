@@ -28,6 +28,6 @@ Takos-specific な結合はなく、 MCP 互換 agent host から利用できま
 
 ## 作業ルール
 
-- Deno コマンドは `cd takos-apps/takos-computer && deno task ...` を使う
+- Bun コマンドは `cd takos-apps/takos-computer && bun run ...` (test は `bun test`) を使う
 - コンテナイメージのビルドは `apps/sandbox/` の Dockerfile を使用
 - CF Worker のデプロイは `deploy/` の wrangler config を使用
