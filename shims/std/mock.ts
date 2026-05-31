@@ -55,13 +55,20 @@ export function spy<Args extends unknown[] = unknown[], Return = unknown>(
   if (fnOrObj && method !== undefined) {
     const obj = fnOrObj as Record<PropertyKey, unknown>;
     const original = obj[method] as (...args: Args) => Return;
-    const s = makeSpy<Args, Return>((...args: Args) => original.apply(obj, args), () => {
-      obj[method] = original;
-    }, original);
+    const s = makeSpy<Args, Return>(
+      (...args: Args) => original.apply(obj, args),
+      () => {
+        obj[method] = original;
+      },
+      original,
+    );
     obj[method] = s as unknown;
     return s;
   }
-  const impl = (typeof fnOrObj === "function" ? fnOrObj : (() => undefined)) as (...args: Args) => Return;
+  const impl =
+    (typeof fnOrObj === "function" ? fnOrObj : (() => undefined)) as (
+      ...args: Args
+    ) => Return;
   return makeSpy<Args, Return>(impl, () => {}, impl);
 }
 
@@ -71,7 +78,8 @@ export function stub<Args extends unknown[] = unknown[], Return = unknown>(
   impl?: (...args: Args) => Return,
 ): Spy<Args, Return> {
   const original = obj[method] as ((...args: Args) => Return) | undefined;
-  const fn = impl ?? (((..._a: Args) => undefined) as unknown as (...args: Args) => Return);
+  const fn = impl ??
+    (((..._a: Args) => undefined) as unknown as (...args: Args) => Return);
   const s = makeSpy<Args, Return>(fn, () => {
     obj[method] = original as unknown;
   }, original);
@@ -94,9 +102,14 @@ export function returnsThis<Self>(): (this: Self, ...args: unknown[]) => Self {
   };
 }
 
-export function assertSpyCalls(spyFn: { calls: unknown[] }, expected: number): void {
+export function assertSpyCalls(
+  spyFn: { calls: unknown[] },
+  expected: number,
+): void {
   if (spyFn.calls.length !== expected) {
-    throw new Error(`Expected spy to be called ${expected} time(s) but was called ${spyFn.calls.length} time(s).`);
+    throw new Error(
+      `Expected spy to be called ${expected} time(s) but was called ${spyFn.calls.length} time(s).`,
+    );
   }
 }
 
@@ -110,7 +123,11 @@ export function assertSpyCall(
   if (expected?.args) {
     const a = JSON.stringify(call.args);
     const b = JSON.stringify(expected.args);
-    if (a !== b) throw new Error(`Spy call ${callIndex} args mismatch.\n  actual:   ${a}\n  expected: ${b}`);
+    if (a !== b) {
+      throw new Error(
+        `Spy call ${callIndex} args mismatch.\n  actual:   ${a}\n  expected: ${b}`,
+      );
+    }
   }
 }
 
@@ -123,5 +140,9 @@ export function assertSpyCallArgs<T extends unknown[]>(
   if (!call) throw new Error(`Spy not called ${callIndex + 1} time(s).`);
   const a = JSON.stringify(call.args);
   const b = JSON.stringify(expectedArgs);
-  if (a !== b) throw new Error(`Spy call ${callIndex} args mismatch.\n  actual:   ${a}\n  expected: ${b}`);
+  if (a !== b) {
+    throw new Error(
+      `Spy call ${callIndex} args mismatch.\n  actual:   ${a}\n  expected: ${b}`,
+    );
+  }
 }

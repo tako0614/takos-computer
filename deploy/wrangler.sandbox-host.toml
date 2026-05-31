@@ -12,7 +12,7 @@
 # - PUBLISHED_MCP_AUTH_TOKEN (published /mcp auth only)
 # - MCP_AUTH_TOKEN (worker-to-container /mcp auth only)
 # - APP_SESSION_SECRET (GUI OIDC session/state cookie signing)
-# Optional Takos CLI env injected into the sandbox container:
+# Optional Takos API env injected into the sandbox container:
 # - TAKOS_TOKEN
 # - TAKOS_API_URL
 

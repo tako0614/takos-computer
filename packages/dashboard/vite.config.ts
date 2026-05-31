@@ -1,7 +1,6 @@
-// deno-lint-ignore-file no-import-prefix
-import { defineConfig } from "npm:vite@6.4.2";
-import solidPlugin from "npm:vite-plugin-solid@2.11.12";
-import { viteSingleFile } from "npm:vite-plugin-singlefile@2.3.2";
+import { defineConfig } from "vite";
+import solidPlugin from "vite-plugin-solid";
+import { viteSingleFile } from "vite-plugin-singlefile";
 
 export default defineConfig({
   plugins: [solidPlugin(), viteSingleFile()],

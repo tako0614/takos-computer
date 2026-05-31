@@ -16,7 +16,7 @@ const WORKSPACE_CWD_GUARD_SCRIPT = [
   '  "$workspace_root"|"$workspace_root"/*) ;;',
   '  *) echo "cwd is outside workspace" >&2; exit 1 ;;',
   "esac",
-  'exec "$BASH" -c "$user_command"',
+  'exec bash -c "$user_command"',
 ].join("\n");
 const CONTROL_PLANE_ENV_DENYLIST = new Set([
   "MCP_AUTH_TOKEN",
@@ -132,7 +132,7 @@ export class ShellManager {
     let timedOut = false;
     let aborted = false;
     let process: Deno.ChildProcess | null = null;
-    let forceKillTimer: number | undefined;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
 
     const terminate = (reason: "timeout" | "abort") => {
       if (reason === "timeout") timedOut = true;
@@ -183,14 +183,15 @@ export class ShellManager {
         stderr: "piped",
       });
 
-      process = cmd.spawn();
-      this.trackProcess(process);
+      const child = cmd.spawn() as Deno.ChildProcess;
+      process = child;
+      this.trackProcess(child);
       if (options.signal?.aborted) externalAbort();
 
       const [status, stdout, stderr] = await Promise.all([
-        process.status,
-        collectOutput(process.stdout),
-        collectOutput(process.stderr),
+        child.status,
+        collectOutput(child.stdout),
+        collectOutput(child.stderr),
       ]);
 
       return {
@@ -307,7 +308,9 @@ function buildCommandEnv(
   },
 ): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(Deno.env.toObject())) {
+  for (const [key, value] of Object.entries(
+    Deno.env.toObject() as Record<string, string>,
+  )) {
     if (
       INHERITED_ENV_ALLOWLIST.has(key) &&
       !CONTROL_PLANE_ENV_DENYLIST.has(key)

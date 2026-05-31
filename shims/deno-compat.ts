@@ -28,10 +28,13 @@
 
 import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
+import { Buffer } from "node:buffer";
 
 const require = createRequire(import.meta.url);
 const nodeFs = require("node:fs") as typeof import("node:fs");
-const nodeFsp = require("node:fs/promises") as typeof import("node:fs/promises");
+const nodeFsp = require(
+  "node:fs/promises",
+) as typeof import("node:fs/promises");
 const nodeOs = require("node:os") as typeof import("node:os");
 const nodePath = require("node:path") as typeof import("node:path");
 const nodeProcess = require("node:process") as typeof import("node:process");
@@ -216,8 +219,10 @@ function webWritableToNode(
   return new WritableStream<Uint8Array>({
     write(chunk) {
       return new Promise((resolve, reject) => {
-        stream.write(Buffer.from(chunk), (err) =>
-          err ? reject(err) : resolve());
+        stream.write(
+          Buffer.from(chunk),
+          (err) => err ? reject(err) : resolve(),
+        );
       });
     },
     close() {
@@ -322,8 +327,12 @@ class Command {
           code: code ?? (signal ? 128 : 1),
           signal: signal ?? null,
           success: code === 0,
-          stdout: out.length ? new Uint8Array(Buffer.concat(out)) : new Uint8Array(),
-          stderr: err.length ? new Uint8Array(Buffer.concat(err)) : new Uint8Array(),
+          stdout: out.length
+            ? new Uint8Array(Buffer.concat(out))
+            : new Uint8Array(),
+          stderr: err.length
+            ? new Uint8Array(Buffer.concat(err))
+            : new Uint8Array(),
         });
       });
     });
@@ -393,6 +402,12 @@ function tempName(opts: MakeTempOptions = {}) {
   return nodePath.join(base, `${opts.prefix ?? ""}${rand}${opts.suffix ?? ""}`);
 }
 
+function tempDirPrefix(opts: MakeTempOptions = {}) {
+  const base = opts.dir ?? nodeOs.tmpdir();
+  const prefix = opts.prefix && opts.prefix.length > 0 ? opts.prefix : "tmp-";
+  return nodePath.join(base, prefix);
+}
+
 const fsApi = {
   readTextFile: (p: string | URL) =>
     wrapAsync(() => nodeFsp.readFile(p, "utf8")),
@@ -403,7 +418,8 @@ const fsApi = {
       nodeFsp.writeFile(p, data, {
         flag: opts.append ? "a" : "w",
         mode: opts.mode,
-      })),
+      })
+    ),
   writeTextFileSync: (
     p: string | URL,
     data: string,
@@ -413,7 +429,8 @@ const fsApi = {
       nodeFs.writeFileSync(p, data, {
         flag: opts.append ? "a" : "w",
         mode: opts.mode,
-      })),
+      })
+    ),
   readFile: (p: string | URL) =>
     wrapAsync(async () => new Uint8Array(await nodeFsp.readFile(p))),
   readFileSync: (p: string | URL) =>
@@ -436,7 +453,9 @@ const fsApi = {
   remove: (p: string | URL, opts: RemoveOptions = {}) =>
     wrapAsync(() => nodeFsp.rm(p, { recursive: opts.recursive, force: false })),
   removeSync: (p: string | URL, opts: RemoveOptions = {}) =>
-    wrapSync(() => nodeFs.rmSync(p, { recursive: opts.recursive, force: false })),
+    wrapSync(() =>
+      nodeFs.rmSync(p, { recursive: opts.recursive, force: false })
+    ),
   stat: (p: string | URL) =>
     wrapAsync(async () => toFileInfo(await nodeFsp.stat(p))),
   statSync: (p: string | URL) => wrapSync(() => toFileInfo(nodeFs.statSync(p))),
@@ -460,15 +479,14 @@ const fsApi = {
     opts?: { type?: "file" | "dir" | "junction" },
   ) =>
     wrapAsync(() =>
-      nodeFsp.symlink(target, p, opts?.type === "dir" ? "dir" : opts?.type)),
+      nodeFsp.symlink(target, p, opts?.type === "dir" ? "dir" : opts?.type)
+    ),
   chmod: (p: string | URL, mode: number) =>
     wrapAsync(() => nodeFsp.chmod(p, mode)),
   makeTempDir: (opts: MakeTempOptions = {}) =>
-    wrapAsync(() =>
-      nodeFsp.mkdtemp(nodePath.join(opts.dir ?? nodeOs.tmpdir(), opts.prefix ?? ""))),
+    wrapAsync(() => nodeFsp.mkdtemp(tempDirPrefix(opts))),
   makeTempDirSync: (opts: MakeTempOptions = {}) =>
-    wrapSync(() =>
-      nodeFs.mkdtempSync(nodePath.join(opts.dir ?? nodeOs.tmpdir(), opts.prefix ?? ""))),
+    wrapSync(() => nodeFs.mkdtempSync(tempDirPrefix(opts))),
   makeTempFile: (opts: MakeTempOptions = {}) =>
     wrapAsync(async () => {
       const name = tempName(opts);
@@ -485,14 +503,16 @@ const fsApi = {
   readDir: (p: string | URL) => {
     async function* iter() {
       const entries = await wrapAsync(() =>
-        nodeFsp.readdir(p, { withFileTypes: true }));
+        nodeFsp.readdir(p, { withFileTypes: true })
+      );
       for (const e of entries) yield toDirEntry(e);
     }
     return iter();
   },
   readDirSync: (p: string | URL) => {
     const entries = wrapSync(() =>
-      nodeFs.readdirSync(p, { withFileTypes: true }));
+      nodeFs.readdirSync(p, { withFileTypes: true })
+    );
     return entries.map(toDirEntry)[Symbol.iterator]();
   },
 };
@@ -586,7 +606,8 @@ const DenoShim = {
   pid: nodeProcess.pid,
   build: buildInfo,
   cwd: () => nodeProcess.cwd(),
-  chdir: (p: string | URL) => nodeProcess.chdir(p instanceof URL ? p.pathname : p),
+  chdir: (p: string | URL) =>
+    nodeProcess.chdir(p instanceof URL ? p.pathname : p),
   exit: (code = 0): never => nodeProcess.exit(code),
   execPath: () => nodeProcess.execPath,
   addSignalListener: (sig: NodeJS.Signals, handler: () => void) => {
@@ -625,7 +646,10 @@ if (!g.Deno) {
 // Not exercised by bun:test (no *.test.ts imports the server entry) but lets the
 // sandbox container run on `bun`.
 // ---------------------------------------------------------------------------
-type ServeHandler = (req: Request, info?: unknown) => Response | Promise<Response>;
+type ServeHandler = (
+  req: Request,
+  info?: unknown,
+) => Response | Promise<Response>;
 interface ServeOptions {
   port?: number;
   hostname?: string;
@@ -645,7 +669,10 @@ Deno.serve = (a: ServeOptions | ServeHandler, b?: ServeHandler) => {
     hostname: opts.hostname ?? "0.0.0.0",
     signal: opts.signal,
     websocket: {
-      message(ws: { data?: { onmessage?: (e: unknown) => void } }, msg: unknown) {
+      message(
+        ws: { data?: { onmessage?: (e: unknown) => void } },
+        msg: unknown,
+      ) {
         ws.data?.onmessage?.({ data: msg });
       },
       open(ws: { data?: { onopen?: () => void } }) {
@@ -698,7 +725,9 @@ Deno.upgradeWebSocket = (req: Request) => {
     set onclose(fn: () => void) {
       data.onclose = fn;
     },
-    set onerror(_fn: (e: unknown) => void) {},
+    set onerror(_fn: (e: unknown) => void) {
+      // Bun upgrade errors are surfaced through the server-side upgrade result.
+    },
   };
   const ok = srv?.upgrade?.(req, { data });
   const response = ok

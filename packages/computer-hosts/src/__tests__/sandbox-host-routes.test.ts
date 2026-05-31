@@ -213,10 +213,12 @@ function fetchRequestUrl(request: RequestInfo | URL): string {
   return request instanceof Request ? request.url : String(request);
 }
 
-async function withFetch<T>(
-  fakeFetch: typeof fetch,
-  fn: () => Promise<T>,
-): Promise<T> {
+type TestFetch = (
+  request: RequestInfo | URL,
+  init?: RequestInit,
+) => Response | Promise<Response>;
+
+async function withFetch<T>(fakeFetch: TestFetch, fn: () => Promise<T>): Promise<T> {
   const originalFetch = globalThis.fetch;
   Object.defineProperty(globalThis, "fetch", {
     value: fakeFetch,
