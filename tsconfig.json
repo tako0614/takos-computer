@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "target": "ESNext",
+    "types": ["bun", "node"],
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@std/assert": ["./shims/std/assert.ts"],
+      "@std/fmt/colors": ["./shims/std/colors.ts"],
+      "@std/testing/mock": ["./shims/std/mock.ts"],
+      "@takos-computer/common": ["./packages/common/src/index.ts"],
+      "@takos-computer/common/crypto": ["./packages/common/src/crypto.ts"],
+      "@takos-computer/common/id": ["./packages/common/src/id.ts"],
+      "@takos-computer/common/validation": ["./packages/common/src/validation.ts"],
+      "@takos-computer/common/errors": ["./packages/common/src/errors.ts"],
+      "@takos-computer/common/middleware/hono": ["./packages/common/src/middleware/hono.ts"],
+      "@takos-computer/common/logger": ["./packages/common/src/logger.ts"],
+      "@takos-computer/common/cf-types": ["./packages/common/src/cf-types.ts"],
+      "@takos-computer/cloudflare-compat": ["./packages/cloudflare-compat/src/index.ts"],
+      "@takos-computer/computer-hosts": ["./packages/computer-hosts/src/index.ts"],
+      "@takos-computer/computer-hosts/local-dev-simulator": ["./packages/computer-hosts/src/local-dev-simulator.ts"],
+      "@takos-computer/computer-hosts/sandbox-host": ["./packages/computer-hosts/src/sandbox-host.ts"],
+      "@takos-computer/computer-hosts/sandbox-session-types": ["./packages/computer-hosts/src/sandbox-session-types.ts"],
+      "@takos-computer/computer-hosts/proxy-token": ["./packages/computer-hosts/src/proxy-token.ts"],
+      "@takos-computer/sandbox-service": ["./packages/sandbox-service/src/index.ts"]
+    }
+  },
+  "include": ["apps", "packages", "shims"]
+}

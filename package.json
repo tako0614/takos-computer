@@ -1,0 +1,29 @@
+{
+  "name": "takos-computer",
+  "version": "1.0.0",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "bun test packages/common/src && bun test packages/cloudflare-compat/src && bun test packages/computer-hosts/src && bun test packages/sandbox-service/src",
+    "test:all": "bun test packages/common/src && bun test packages/cloudflare-compat/src && bun test packages/computer-hosts/src && bun test packages/sandbox-service/src"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.1.1",
+    "@cloudflare/workers-types": "^4.20260118.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@solidjs/router": "^0.15.0",
+    "esbuild": "0.25.5",
+    "hono": "^4.11.10",
+    "solid-js": "^1.9.0",
+    "vite": "^6.3.0",
+    "vite-plugin-singlefile": "^2.0.0",
+    "vite-plugin-solid": "^2.11.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  }
+}
