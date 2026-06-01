@@ -58,9 +58,8 @@ async function importContainerRuntime(): Promise<
 > {
   try {
     return await import("@cloudflare/containers");
-  } catch (error) {
-    if (typeof Deno !== "undefined") return null;
-    throw error;
+  } catch {
+    return null;
   }
 }
 

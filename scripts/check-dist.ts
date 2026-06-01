@@ -1,40 +1,43 @@
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { exit } from "node:process";
 import { fileURLToPath } from "node:url";
 
 const rootUrl = new URL("../", import.meta.url);
 const root = fileURLToPath(rootUrl);
 const expectedPath = fileURLToPath(new URL("dist/sandbox-host.js", rootUrl));
 async function main(): Promise<number> {
-  const tempDir = await Deno.makeTempDir({
-    dir: root,
-    prefix: ".dist-check-",
-  });
+  const tempDir = await mkdtemp(join(tmpdir(), "takos-computer-dist-check-"));
   const generatedPath = `${tempDir}/sandbox-host.js`;
 
   try {
-    const build = new Deno.Command(Deno.execPath(), {
-      args: [
-        "--preload",
-        "./shims/deno-compat.ts",
-        "packages/computer-hosts/scripts/build-host.ts",
-        "sandbox",
-        "--outfile",
-        generatedPath,
-      ],
+    const build = Bun.spawn([
+      "bun",
+      "packages/computer-hosts/scripts/build-host.ts",
+      "sandbox",
+      "--outfile",
+      generatedPath,
+    ], {
       cwd: root,
-      stdout: "piped",
-      stderr: "piped",
+      stdout: "pipe",
+      stderr: "pipe",
     });
-    const output = await build.output();
     const decoder = new TextDecoder();
-    const stdout = decoder.decode(output.stdout).trim();
-    const stderr = decoder.decode(output.stderr).trim();
+    const [code, stdoutBytes, stderrBytes] = await Promise.all([
+      build.exited,
+      new Response(build.stdout).arrayBuffer(),
+      new Response(build.stderr).arrayBuffer(),
+    ]);
+    const stdout = decoder.decode(stdoutBytes).trim();
+    const stderr = decoder.decode(stderrBytes).trim();
     if (stdout) console.log(stdout);
     if (stderr) console.error(stderr);
-    if (!output.success) return output.code;
+    if (code !== 0) return code;
 
     const [expected, generated] = await Promise.all([
-      Deno.readTextFile(expectedPath),
-      Deno.readTextFile(generatedPath),
+      readFile(expectedPath, "utf8"),
+      readFile(generatedPath, "utf8"),
     ]);
     if (expected !== generated) {
       console.error(
@@ -45,8 +48,8 @@ async function main(): Promise<number> {
     console.log("dist/sandbox-host.js is up to date.");
     return 0;
   } finally {
-    await Deno.remove(tempDir, { recursive: true }).catch(() => undefined);
+    await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
-Deno.exit(await main());
+exit(await main());

@@ -3735,9 +3735,8 @@ var LocalHostContainerRuntime = class {
 async function importContainerRuntime() {
   try {
     return await Promise.resolve().then(() => (init_dist(), dist_exports));
-  } catch (error) {
-    if (typeof Deno !== "undefined") return null;
-    throw error;
+  } catch {
+    return null;
   }
 }
 var runtimeModule = await importContainerRuntime();

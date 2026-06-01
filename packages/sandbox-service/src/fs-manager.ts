@@ -5,6 +5,16 @@
  */
 
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import type { Stats } from "node:fs";
+import {
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 
 const MAX_READ_BYTES = 256 * 1024; // 256 KB
 
@@ -69,24 +79,25 @@ export class FsManager {
     throwIfAborted(signal);
 
     const path = await this.resolveExistingPath(options.path);
-    const stat = await Deno.stat(path);
-    const totalSize = stat.size;
+    const info = await stat(path);
+    const totalSize = info.size;
     const offset = normalizeOffset(options.offset);
     const limit = normalizeLimit(options.limit);
-    const file = await Deno.open(path, { read: true });
+    const file = await open(path, "r");
 
     try {
       throwIfAborted(signal);
-      if (offset > 0) {
-        await file.seek(offset, Deno.SeekMode.Start);
-      }
-
-      const buffer = new Uint8Array(limit);
+      const buffer = Buffer.alloc(limit);
       let bytesRead = 0;
       while (bytesRead < limit) {
         throwIfAborted(signal);
-        const n = await file.read(buffer.subarray(bytesRead));
-        if (n === null) break;
+        const { bytesRead: n } = await file.read(
+          buffer,
+          bytesRead,
+          limit - bytesRead,
+          offset + bytesRead,
+        );
+        if (n === 0) break;
         bytesRead += n;
       }
 
@@ -100,7 +111,7 @@ export class FsManager {
 
       return { content, size: totalSize, truncated };
     } finally {
-      file.close();
+      await file.close();
     }
   }
 
@@ -131,7 +142,7 @@ export class FsManager {
     }
 
     throwIfAborted(signal);
-    await Deno.writeFile(path, data);
+    await writeFile(path, data);
     return { path, bytes_written: data.length };
   }
 
@@ -153,7 +164,7 @@ export class FsManager {
         signal,
       );
     } else {
-      for await (const entry of Deno.readDir(path)) {
+      for (const entry of await readdir(path, { withFileTypes: true })) {
         throwIfAborted(signal);
         if (entries.length >= maxEntries) break;
         if (options.glob && !matchGlob(entry.name, options.glob)) continue;
@@ -162,11 +173,11 @@ export class FsManager {
         const stat = await safeLstatFile(fullPath);
         entries.push({
           name: entry.name,
-          type: entry.isFile
+          type: entry.isFile()
             ? "file"
-            : entry.isDirectory
+            : entry.isDirectory()
             ? "directory"
-            : entry.isSymlink
+            : entry.isSymbolicLink()
             ? "symlink"
             : "unknown",
           size: stat?.size ?? 0,
@@ -180,14 +191,14 @@ export class FsManager {
   async info(path: string): Promise<FileInfoResult> {
     try {
       const resolvedPath = await this.resolveExistingPath(path);
-      const stat = await Deno.lstat(resolvedPath);
+      const stat = await lstat(resolvedPath);
       return {
         exists: true,
-        type: stat.isFile
+        type: stat.isFile()
           ? "file"
-          : stat.isDirectory
+          : stat.isDirectory()
           ? "directory"
-          : stat.isSymlink
+          : stat.isSymbolicLink()
           ? "symlink"
           : "unknown",
         size: stat.size,
@@ -195,7 +206,7 @@ export class FsManager {
         permissions: stat.mode,
       };
     } catch (err) {
-      if (err instanceof Deno.errors.NotFound) {
+      if (isNotFoundError(err)) {
         return {
           exists: false,
           type: "unknown",
@@ -217,7 +228,7 @@ export class FsManager {
 
   private async getWorkspaceRealRoot(): Promise<string> {
     if (!this.workspaceRealRoot) {
-      this.workspaceRealRoot = resolve(await Deno.realPath(this.workspaceRoot));
+      this.workspaceRealRoot = resolve(await realpath(this.workspaceRoot));
     }
     return this.workspaceRealRoot;
   }
@@ -233,7 +244,7 @@ export class FsManager {
     this.assertInsideWorkspace(lexicalPath);
     const [realRoot, realPath] = await Promise.all([
       this.getWorkspaceRealRoot(),
-      Deno.realPath(lexicalPath),
+      realpath(lexicalPath),
     ]);
     this.assertInsideWorkspace(resolve(realPath), realRoot);
     return resolve(realPath);
@@ -241,18 +252,18 @@ export class FsManager {
 
   private async assertWritableTarget(path: string): Promise<void> {
     const realRoot = await this.getWorkspaceRealRoot();
-    const parentRealPath = resolve(await Deno.realPath(dirname(path)));
+    const parentRealPath = resolve(await realpath(dirname(path)));
     this.assertInsideWorkspace(parentRealPath, realRoot);
 
     try {
-      const info = await Deno.lstat(path);
-      if (info.isSymlink) {
+      const info = await lstat(path);
+      if (info.isSymbolicLink()) {
         throw new Error("refusing to write through symlink");
       }
-      const realPath = resolve(await Deno.realPath(path));
+      const realPath = resolve(await realpath(path));
       this.assertInsideWorkspace(realPath, realRoot);
     } catch (err) {
-      if (err instanceof Deno.errors.NotFound) return;
+      if (isNotFoundError(err)) return;
       throw err;
     }
   }
@@ -265,32 +276,32 @@ export class FsManager {
     let nearestExisting = parent;
     while (true) {
       try {
-        const info = await Deno.lstat(nearestExisting);
-        if (info.isSymlink) {
-          const realPath = resolve(await Deno.realPath(nearestExisting));
+        const info = await lstat(nearestExisting);
+        if (info.isSymbolicLink()) {
+          const realPath = resolve(await realpath(nearestExisting));
           this.assertInsideWorkspace(realPath, realRoot);
-          const realInfo = await Deno.stat(realPath);
-          if (!realInfo.isDirectory) {
+          const realInfo = await stat(realPath);
+          if (!realInfo.isDirectory()) {
             throw new Error("parent path is not a directory");
           }
           break;
         }
-        if (!info.isDirectory) {
+        if (!info.isDirectory()) {
           throw new Error("parent path is not a directory");
         }
-        const realPath = resolve(await Deno.realPath(nearestExisting));
+        const realPath = resolve(await realpath(nearestExisting));
         this.assertInsideWorkspace(realPath, realRoot);
         break;
       } catch (err) {
-        if (!(err instanceof Deno.errors.NotFound)) throw err;
+        if (!isNotFoundError(err)) throw err;
         const next = dirname(nearestExisting);
         if (next === nearestExisting) throw err;
         nearestExisting = next;
       }
     }
 
-    await Deno.mkdir(parent, { recursive: true });
-    const parentRealPath = resolve(await Deno.realPath(parent));
+    await mkdir(parent, { recursive: true });
+    const parentRealPath = resolve(await realpath(parent));
     this.assertInsideWorkspace(parentRealPath, realRoot);
   }
 
@@ -303,19 +314,23 @@ export class FsManager {
   ): Promise<void> {
     throwIfAborted(signal);
     if (entries.length >= maxEntries) return;
-    for await (const entry of Deno.readDir(dir)) {
+    for (const entry of await readdir(dir, { withFileTypes: true })) {
       throwIfAborted(signal);
       if (entries.length >= maxEntries) return;
       const fullPath = join(dir, entry.name);
 
-      if (entry.isDirectory) {
+      if (entry.isDirectory()) {
         await this.walkDir(fullPath, entries, maxEntries, glob, signal);
       } else {
         if (glob && !matchGlob(entry.name, glob)) continue;
         const stat = await safeLstatFile(fullPath);
         entries.push({
           name: fullPath,
-          type: entry.isFile ? "file" : entry.isSymlink ? "symlink" : "unknown",
+          type: entry.isFile()
+            ? "file"
+            : entry.isSymbolicLink()
+            ? "symlink"
+            : "unknown",
           size: stat?.size ?? 0,
           modified: stat?.mtime?.toISOString() ?? null,
         });
@@ -324,12 +339,18 @@ export class FsManager {
   }
 }
 
-async function safeLstatFile(path: string): Promise<Deno.FileInfo | null> {
+async function safeLstatFile(path: string): Promise<Stats | null> {
   try {
-    return await Deno.lstat(path);
+    return await lstat(path);
   } catch {
     return null;
   }
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return typeof error === "object" && error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "ENOENT";
 }
 
 /** Simple glob matching (supports * and ?). */

@@ -1,18 +1,26 @@
 import { expect, test } from "bun:test";
-import { assert, assertEquals, assertRejects } from "@std/assert";
 import { FsManager } from "../fs-manager.ts";
 import { join } from "node:path";
+import {
+  makeTempDir,
+  makeTempFile,
+  mkdir,
+  readTextFile,
+  remove,
+  symlink,
+  writeTextFile,
+} from "./fs-helpers.ts";
 
 let tmpDir: string;
 let fs: FsManager;
 
 async function setup(): Promise<void> {
-  tmpDir = await Deno.makeTempDir();
+  tmpDir = await makeTempDir();
   fs = new FsManager(tmpDir);
 }
 
 async function cleanup(): Promise<void> {
-  await Deno.remove(tmpDir, { recursive: true });
+  await remove(tmpDir, { recursive: true });
 }
 
 // ---------- read ----------
@@ -21,7 +29,7 @@ test("FsManager.read: existing file returns content", async () => {
   await setup();
   try {
     const filePath = join(tmpDir, "test.txt");
-    await Deno.writeTextFile(filePath, "hello world");
+    await writeTextFile(filePath, "hello world");
 
     const result = await fs.read({ path: filePath });
     expect(result.content).toEqual("hello world");
@@ -35,10 +43,9 @@ test("FsManager.read: existing file returns content", async () => {
 test("FsManager.read: non-existent file throws", async () => {
   await setup();
   try {
-    await assertRejects(
-      () => fs.read({ path: join(tmpDir, "nonexistent.txt") }),
-      Deno.errors.NotFound,
-    );
+    await expect(
+      fs.read({ path: join(tmpDir, "nonexistent.txt") }),
+    ).rejects.toThrow();
   } finally {
     await cleanup();
   }
@@ -48,7 +55,7 @@ test("FsManager.read: with offset and limit", async () => {
   await setup();
   try {
     const filePath = join(tmpDir, "offset.txt");
-    await Deno.writeTextFile(filePath, "abcdefghij");
+    await writeTextFile(filePath, "abcdefghij");
 
     const result = await fs.read({ path: filePath, offset: 3, limit: 4 });
     expect(result.content).toEqual("defg");
@@ -63,7 +70,7 @@ test("FsManager.read: base64 encoding", async () => {
   await setup();
   try {
     const filePath = join(tmpDir, "b64.txt");
-    await Deno.writeTextFile(filePath, "hello");
+    await writeTextFile(filePath, "hello");
 
     const result = await fs.read({ path: filePath, encoding: "base64" });
     expect(result.content).toEqual(btoa("hello"));
@@ -77,7 +84,7 @@ test("FsManager.read: caps reads at 256KB without returning whole file", async (
   try {
     const filePath = join(tmpDir, "large.txt");
     const content = "x".repeat(300_000);
-    await Deno.writeTextFile(filePath, content);
+    await writeTextFile(filePath, content);
 
     const result = await fs.read({ path: filePath, limit: 300_000 });
     expect(result.content.length).toEqual(256 * 1024);
@@ -92,11 +99,9 @@ test("FsManager.read: rejects negative offset", async () => {
   await setup();
   try {
     const filePath = join(tmpDir, "test.txt");
-    await Deno.writeTextFile(filePath, "hello");
+    await writeTextFile(filePath, "hello");
 
-    await assertRejects(
-      () => fs.read({ path: filePath, offset: -1 }),
-      Error,
+    await expect(fs.read({ path: filePath, offset: -1 })).rejects.toThrow(
       "offset must be a non-negative integer",
     );
   } finally {
@@ -106,41 +111,35 @@ test("FsManager.read: rejects negative offset", async () => {
 
 test("FsManager.read: rejects paths outside workspace", async () => {
   await setup();
-  const outsideFile = await Deno.makeTempFile();
+  const outsideFile = await makeTempFile();
   try {
-    await Deno.writeTextFile(outsideFile, "outside");
+    await writeTextFile(outsideFile, "outside");
 
-    await assertRejects(
-      () => fs.read({ path: outsideFile }),
-      Error,
+    await expect(fs.read({ path: outsideFile })).rejects.toThrow(
       "path is outside workspace",
     );
-    await assertRejects(
-      () => fs.read({ path: "../outside.txt" }),
-      Error,
+    await expect(fs.read({ path: "../outside.txt" })).rejects.toThrow(
       "path is outside workspace",
     );
   } finally {
-    await Deno.remove(outsideFile);
+    await remove(outsideFile);
     await cleanup();
   }
 });
 
 test("FsManager.read: rejects symlink escape", async () => {
   await setup();
-  const outsideFile = await Deno.makeTempFile();
+  const outsideFile = await makeTempFile();
   try {
-    await Deno.writeTextFile(outsideFile, "outside");
+    await writeTextFile(outsideFile, "outside");
     const linkPath = join(tmpDir, "outside-link.txt");
-    await Deno.symlink(outsideFile, linkPath);
+    await symlink(outsideFile, linkPath);
 
-    await assertRejects(
-      () => fs.read({ path: linkPath }),
-      Error,
+    await expect(fs.read({ path: linkPath })).rejects.toThrow(
       "path is outside workspace",
     );
   } finally {
-    await Deno.remove(outsideFile);
+    await remove(outsideFile);
     await cleanup();
   }
 });
@@ -155,7 +154,7 @@ test("FsManager.write: new file", async () => {
     expect(result.path).toEqual(filePath);
     expect(result.bytes_written > 0).toBeTruthy();
 
-    const written = await Deno.readTextFile(filePath);
+    const written = await readTextFile(filePath);
     expect(written).toEqual("new content");
   } finally {
     await cleanup();
@@ -166,10 +165,10 @@ test("FsManager.write: overwrite existing", async () => {
   await setup();
   try {
     const filePath = join(tmpDir, "overwrite.txt");
-    await Deno.writeTextFile(filePath, "old");
+    await writeTextFile(filePath, "old");
     await fs.write({ path: filePath, content: "new" });
 
-    const written = await Deno.readTextFile(filePath);
+    const written = await readTextFile(filePath);
     expect(written).toEqual("new");
   } finally {
     await cleanup();
@@ -182,7 +181,7 @@ test("FsManager.write: create directories", async () => {
     const filePath = join(tmpDir, "a", "b", "c", "deep.txt");
     await fs.write({ path: filePath, content: "deep", create_dirs: true });
 
-    const written = await Deno.readTextFile(filePath);
+    const written = await readTextFile(filePath);
     expect(written).toEqual("deep");
   } finally {
     await cleanup();
@@ -196,7 +195,7 @@ test("FsManager.write: base64 encoding", async () => {
     const encoded = btoa("binary data");
     await fs.write({ path: filePath, content: encoded, encoding: "base64" });
 
-    const written = await Deno.readTextFile(filePath);
+    const written = await readTextFile(filePath);
     expect(written).toEqual("binary data");
   } finally {
     await cleanup();
@@ -205,41 +204,36 @@ test("FsManager.write: base64 encoding", async () => {
 
 test("FsManager.write: refuses symlink target", async () => {
   await setup();
-  const outsideFile = await Deno.makeTempFile();
+  const outsideFile = await makeTempFile();
   try {
     const linkPath = join(tmpDir, "write-link.txt");
-    await Deno.symlink(outsideFile, linkPath);
+    await symlink(outsideFile, linkPath);
 
-    await assertRejects(
-      () => fs.write({ path: linkPath, content: "nope" }),
-      Error,
+    await expect(fs.write({ path: linkPath, content: "nope" })).rejects.toThrow(
       "refusing to write through symlink",
     );
   } finally {
-    await Deno.remove(outsideFile);
+    await remove(outsideFile);
     await cleanup();
   }
 });
 
 test("FsManager.write: create_dirs refuses symlink parent escape", async () => {
   await setup();
-  const outsideDir = await Deno.makeTempDir();
+  const outsideDir = await makeTempDir();
   try {
     const linkPath = join(tmpDir, "outside-dir");
-    await Deno.symlink(outsideDir, linkPath);
+    await symlink(outsideDir, linkPath);
 
-    await assertRejects(
-      () =>
-        fs.write({
-          path: join(linkPath, "nested", "file.txt"),
-          content: "nope",
-          create_dirs: true,
-        }),
-      Error,
-      "path is outside workspace",
-    );
+    await expect(
+      fs.write({
+        path: join(linkPath, "nested", "file.txt"),
+        content: "nope",
+        create_dirs: true,
+      }),
+    ).rejects.toThrow("path is outside workspace");
   } finally {
-    await Deno.remove(outsideDir, { recursive: true });
+    await remove(outsideDir, { recursive: true });
     await cleanup();
   }
 });
@@ -249,9 +243,9 @@ test("FsManager.write: create_dirs refuses symlink parent escape", async () => {
 test("FsManager.list: directory contents", async () => {
   await setup();
   try {
-    await Deno.writeTextFile(join(tmpDir, "a.txt"), "a");
-    await Deno.writeTextFile(join(tmpDir, "b.txt"), "b");
-    await Deno.mkdir(join(tmpDir, "subdir"));
+    await writeTextFile(join(tmpDir, "a.txt"), "a");
+    await writeTextFile(join(tmpDir, "b.txt"), "b");
+    await mkdir(join(tmpDir, "subdir"));
 
     const entries = await fs.list({ path: tmpDir });
     expect(entries.length).toEqual(3);
@@ -272,9 +266,9 @@ test("FsManager.list: directory contents", async () => {
 test("FsManager.list: with glob filter", async () => {
   await setup();
   try {
-    await Deno.writeTextFile(join(tmpDir, "file.ts"), "ts");
-    await Deno.writeTextFile(join(tmpDir, "file.js"), "js");
-    await Deno.writeTextFile(join(tmpDir, "file.txt"), "txt");
+    await writeTextFile(join(tmpDir, "file.ts"), "ts");
+    await writeTextFile(join(tmpDir, "file.js"), "js");
+    await writeTextFile(join(tmpDir, "file.txt"), "txt");
 
     const entries = await fs.list({ path: tmpDir, glob: "*.ts" });
     expect(entries.length).toEqual(1);
@@ -287,9 +281,9 @@ test("FsManager.list: with glob filter", async () => {
 test("FsManager.list: recursive", async () => {
   await setup();
   try {
-    await Deno.mkdir(join(tmpDir, "sub"));
-    await Deno.writeTextFile(join(tmpDir, "root.txt"), "r");
-    await Deno.writeTextFile(join(tmpDir, "sub", "nested.txt"), "n");
+    await mkdir(join(tmpDir, "sub"));
+    await writeTextFile(join(tmpDir, "root.txt"), "r");
+    await writeTextFile(join(tmpDir, "sub", "nested.txt"), "n");
 
     const entries = await fs.list({ path: tmpDir, recursive: true });
     // Recursive mode returns full paths for files and skips directories in entries
@@ -308,7 +302,7 @@ test("FsManager.info: existing file metadata", async () => {
   await setup();
   try {
     const filePath = join(tmpDir, "info.txt");
-    await Deno.writeTextFile(filePath, "hello");
+    await writeTextFile(filePath, "hello");
 
     const info = await fs.info(filePath);
     expect(info.exists).toEqual(true);
@@ -347,18 +341,14 @@ test("FsManager.info: non-existent path", async () => {
 
 test("FsManager.info: rejects symlink escape", async () => {
   await setup();
-  const outsideFile = await Deno.makeTempFile();
+  const outsideFile = await makeTempFile();
   try {
     const linkPath = join(tmpDir, "info-link.txt");
-    await Deno.symlink(outsideFile, linkPath);
+    await symlink(outsideFile, linkPath);
 
-    await assertRejects(
-      () => fs.info(linkPath),
-      Error,
-      "path is outside workspace",
-    );
+    await expect(fs.info(linkPath)).rejects.toThrow("path is outside workspace");
   } finally {
-    await Deno.remove(outsideFile);
+    await remove(outsideFile);
     await cleanup();
   }
 });

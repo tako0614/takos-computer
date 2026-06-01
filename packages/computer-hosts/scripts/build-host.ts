@@ -1,5 +1,7 @@
 import { build } from "esbuild";
 import type { Plugin } from "esbuild";
+import { readFile } from "node:fs/promises";
+import { argv } from "node:process";
 import { fileURLToPath } from "node:url";
 
 type TargetName = "sandbox";
@@ -11,7 +13,8 @@ const targets: Record<TargetName, { entry: string; outfile: string }> = {
   },
 };
 
-const targetName = Deno.args[0] as TargetName | undefined;
+const args = argv.slice(2);
+const targetName = args[0] as TargetName | undefined;
 if (!targetName || !(targetName in targets)) {
   throw new Error("Usage: bun run build:sandbox-host -- [--outfile <path>]");
 }
@@ -19,10 +22,10 @@ if (!targetName || !(targetName in targets)) {
 const target = targets[targetName];
 const defaultOutfile = fileURLToPath(new URL(target.outfile, import.meta.url));
 let outfile = defaultOutfile;
-for (let index = 1; index < Deno.args.length; index++) {
-  const arg = Deno.args[index];
+for (let index = 1; index < args.length; index++) {
+  const arg = args[index];
   if (arg === "--outfile") {
-    const value = Deno.args[++index];
+    const value = args[++index];
     if (!value) throw new Error("--outfile requires a path");
     outfile = value;
     continue;
@@ -34,7 +37,7 @@ const generatedAssetsUrl = new URL(
   "../src/gui/assets.generated.ts",
   import.meta.url,
 );
-const generatedAssetsSource = await Deno.readTextFile(generatedAssetsUrl);
+const generatedAssetsSource = await readFile(generatedAssetsUrl, "utf8");
 if (
   generatedAssetsSource.includes("Dashboard not built.") ||
   generatedAssetsSource.includes("Keep this placeholder in sync")
@@ -44,9 +47,9 @@ if (
   );
 }
 
-function denoResolvePlugin(): Plugin {
+function bunResolvePlugin(): Plugin {
   return {
-    name: "deno-resolve",
+    name: "bun-resolve",
     setup(builder) {
       builder.onResolve(
         { filter: /^cloudflare:/ },
@@ -78,7 +81,7 @@ await build({
     ".html": "text",
     ".css": "text",
   },
-  plugins: [denoResolvePlugin()],
+  plugins: [bunResolvePlugin()],
   logLevel: "info",
 });
 

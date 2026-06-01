@@ -1,9 +1,12 @@
 /**
  * Shell command execution manager.
  *
- * Runs commands via Deno.Command with configurable timeout and output limits.
+ * Runs commands through Bun subprocesses with configurable timeout and output
+ * limits.
  */
 
+import { env as processEnv } from "node:process";
+import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
 const MAX_OUTPUT_BYTES = 256 * 1024; // 256 KB per stream
@@ -109,7 +112,7 @@ export class ShellManager {
   private readonly workspaceRoot: string;
   private readonly defaultCwd: string;
   private workspaceRealRoot: string | null = null;
-  private managedProcesses = new Map<number, Deno.ChildProcess>();
+  private managedProcesses = new Map<number, ManagedProcess>();
 
   constructor(defaultCwd = "/home/sandbox/workspace") {
     this.workspaceRoot = resolve(defaultCwd);
@@ -131,7 +134,7 @@ export class ShellManager {
 
     let timedOut = false;
     let aborted = false;
-    let process: Deno.ChildProcess | null = null;
+    let process: ManagedProcess | null = null;
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
 
     const terminate = (reason: "timeout" | "abort") => {
@@ -165,31 +168,29 @@ export class ShellManager {
     try {
       const cwd = await this.resolveCwd(options.cwd ?? this.defaultCwd);
       const workspaceRoot = await this.getWorkspaceRealRoot();
-      const cmd = new Deno.Command("bash", {
-        args: [
-          "-c",
-          WORKSPACE_CWD_GUARD_SCRIPT,
-          "takos-shell-manager",
-          workspaceRoot,
-          options.command,
-        ],
+      const child = bunLike().spawn([
+        "bash",
+        "-c",
+        WORKSPACE_CWD_GUARD_SCRIPT,
+        "takos-shell-manager",
+        workspaceRoot,
+        options.command,
+      ], {
         cwd,
-        clearEnv: true,
         env: buildCommandEnv(options.env, {
           allowTakosToken: options.allow_takos_token === true,
           takosToken: options.takos_token,
         }),
-        stdout: "piped",
-        stderr: "piped",
+        stdout: "pipe",
+        stderr: "pipe",
       });
 
-      const child = cmd.spawn() as Deno.ChildProcess;
       process = child;
       this.trackProcess(child);
       if (options.signal?.aborted) externalAbort();
 
-      const [status, stdout, stderr] = await Promise.all([
-        child.status,
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
         collectOutput(child.stdout),
         collectOutput(child.stderr),
       ]);
@@ -197,7 +198,7 @@ export class ShellManager {
       return {
         stdout,
         stderr: appendTerminationMessage(stderr, timeoutMs, timedOut, aborted),
-        exit_code: timedOut ? 124 : status.code,
+        exit_code: timedOut ? 124 : exitCode,
         timed_out: timedOut,
       };
     } catch (err) {
@@ -248,9 +249,9 @@ export class ShellManager {
     }
   }
 
-  private trackProcess(process: Deno.ChildProcess): void {
+  private trackProcess(process: ManagedProcess): void {
     this.managedProcesses.set(process.pid, process);
-    void process.status.finally(() => {
+    void process.exited.finally(() => {
       if (this.managedProcesses.get(process.pid) === process) {
         this.managedProcesses.delete(process.pid);
       }
@@ -269,13 +270,13 @@ export class ShellManager {
 
     const [workspaceRealRoot, cwdRealPath] = await Promise.all([
       this.getWorkspaceRealRoot(),
-      Deno.realPath(lexicalPath),
+      realpath(lexicalPath),
     ]);
     const resolvedCwd = resolve(cwdRealPath);
     this.assertInsideWorkspace(resolvedCwd, workspaceRealRoot);
 
-    const stat = await Deno.stat(resolvedCwd);
-    if (!stat.isDirectory) {
+    const info = await stat(resolvedCwd);
+    if (!info.isDirectory()) {
       throw new Error("cwd must be a directory");
     }
     return resolvedCwd;
@@ -283,7 +284,7 @@ export class ShellManager {
 
   private async getWorkspaceRealRoot(): Promise<string> {
     if (!this.workspaceRealRoot) {
-      this.workspaceRealRoot = resolve(await Deno.realPath(this.workspaceRoot));
+      this.workspaceRealRoot = resolve(await realpath(this.workspaceRoot));
     }
     return this.workspaceRealRoot;
   }
@@ -308,9 +309,8 @@ function buildCommandEnv(
   },
 ): Record<string, string> {
   const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries(
-    Deno.env.toObject() as Record<string, string>,
-  )) {
+  for (const [key, value] of Object.entries(processEnv)) {
+    if (value === undefined) continue;
     if (
       INHERITED_ENV_ALLOWLIST.has(key) &&
       !CONTROL_PLANE_ENV_DENYLIST.has(key)
@@ -319,7 +319,7 @@ function buildCommandEnv(
     }
   }
   if (options.allowTakosToken) {
-    const takosToken = options.takosToken ?? Deno.env.get("TAKOS_TOKEN");
+    const takosToken = options.takosToken ?? processEnv.TAKOS_TOKEN;
     if (takosToken !== undefined) {
       validateDirectEnv("TAKOS_TOKEN", takosToken);
       env.TAKOS_TOKEN = takosToken;
@@ -332,6 +332,32 @@ function buildCommandEnv(
     env[key] = value;
   }
   return env;
+}
+
+type ManagedProcess = {
+  readonly pid: number;
+  readonly stdout: ReadableStream<Uint8Array>;
+  readonly stderr: ReadableStream<Uint8Array>;
+  readonly exited: Promise<number>;
+  kill(signal?: ProcessSignal): void;
+};
+
+type BunLike = {
+  spawn(
+    command: readonly string[],
+    options: {
+      cwd: string;
+      env: Record<string, string>;
+      stdout: "pipe";
+      stderr: "pipe";
+    },
+  ): ManagedProcess;
+};
+
+function bunLike(): BunLike {
+  const bun = (globalThis as { Bun?: BunLike }).Bun;
+  if (!bun) throw new Error("Bun runtime is required for shell execution");
+  return bun;
 }
 
 function assertSafeEnvShape(

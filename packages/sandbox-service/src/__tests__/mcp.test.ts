@@ -49,11 +49,10 @@ test("MCP process_kill rejects unmanaged pids", async () => {
     { shell: new ShellManager("/tmp"), fs: new FsManager() },
     MCP_AUTH_TOKEN,
   );
-  const proc = new Deno.Command("bash", {
-    args: ["-c", "sleep 30"],
-    stdout: "null",
-    stderr: "null",
-  }).spawn();
+  const proc = Bun.spawn(["bash", "-c", "sleep 30"], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
 
   try {
     const res = await handler(createRequest({
@@ -86,6 +85,6 @@ test("MCP process_kill rejects unmanaged pids", async () => {
     } catch {
       // Process may already be gone.
     }
-    await proc.status;
+    await proc.exited;
   }
 });

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import process from "node:process";
 import { createLogger } from "@takos-computer/common/logger";
 import { ShellManager } from "./shell-manager.ts";
 import { FsManager } from "./fs-manager.ts";
@@ -12,6 +13,23 @@ export type SandboxServiceOptions = {
   allowUnauthenticatedMcp?: boolean;
 };
 
+type BunServer = {
+  stop(closeActiveConnections?: boolean): void;
+};
+
+type BunLike = {
+  serve(options: {
+    port: number;
+    fetch: (request: Request) => Response | Promise<Response>;
+  }): BunServer;
+};
+
+function bunLike(): BunLike {
+  const bun = (globalThis as { Bun?: BunLike }).Bun;
+  if (!bun) throw new Error("Bun runtime is required to start sandbox service");
+  return bun;
+}
+
 export function createSandboxServiceApp(options: SandboxServiceOptions = {}): {
   app: Hono;
   shell: ShellManager;
@@ -24,9 +42,9 @@ export function createSandboxServiceApp(options: SandboxServiceOptions = {}): {
   const app = new Hono();
   const mcpAuthToken = options.mcpAuthToken === null
     ? undefined
-    : options.mcpAuthToken ?? Deno.env.get("MCP_AUTH_TOKEN") ?? undefined;
+    : options.mcpAuthToken ?? process.env.MCP_AUTH_TOKEN ?? undefined;
   const allowUnauthenticatedMcp = options.allowUnauthenticatedMcp ??
-    Deno.env.get("MCP_ALLOW_UNAUTHENTICATED") === "true";
+    process.env.MCP_ALLOW_UNAUTHENTICATED === "true";
 
   app.get("/healthz", (c) =>
     c.json({
@@ -59,41 +77,39 @@ export function createSandboxServiceApp(options: SandboxServiceOptions = {}): {
 
 export function startSandboxService(options: SandboxServiceOptions = {}): {
   app: Hono;
-  server: Deno.HttpServer;
+  server: BunServer;
   logger: ReturnType<typeof createLogger>;
 } {
-  const port = options.port ?? parseInt(Deno.env.get("PORT") ?? "8080", 10);
+  const port = options.port ?? parseInt(process.env.PORT ?? "8080", 10);
   const shutdownGraceMs = options.shutdownGraceMs ??
-    parseInt(Deno.env.get("SHUTDOWN_GRACE_MS") ?? "15000", 10);
+    parseInt(process.env.SHUTDOWN_GRACE_MS ?? "15000", 10);
   const { app, logger } = createSandboxServiceApp(options);
 
-  const abortController = new AbortController();
-  const server = Deno.serve(
-    { port, signal: abortController.signal },
-    app.fetch,
-  );
+  const server = bunLike().serve({
+    port,
+    fetch: (request) => app.fetch(request),
+  });
   logger.info(`[sandbox] Listening on port ${port}`);
 
   async function shutdown(signal: string): Promise<void> {
     logger.info(`[sandbox] Received ${signal}, shutting down`);
-    abortController.abort();
-    await server.finished;
+    server.stop(false);
     logger.info("[sandbox] Server closed");
-    Deno.exit(0);
+    process.exit(0);
   }
 
   const forceExit = () => {
     setTimeout(() => {
       logger.warn(`[sandbox] Force exit after ${shutdownGraceMs}ms`);
-      Deno.exit(1);
+      process.exit(1);
     }, shutdownGraceMs);
   };
 
-  Deno.addSignalListener("SIGTERM", () => {
+  process.on("SIGTERM", () => {
     forceExit();
     void shutdown("SIGTERM");
   });
-  Deno.addSignalListener("SIGINT", () => {
+  process.on("SIGINT", () => {
     forceExit();
     void shutdown("SIGINT");
   });

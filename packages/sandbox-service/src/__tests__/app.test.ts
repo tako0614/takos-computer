@@ -30,7 +30,7 @@ test("createSandboxServiceApp: health endpoint returns 200", async () => {
 test("createSandboxServiceApp: MCP endpoint handles tools/call", async () => {
   const { app } = createSandboxServiceApp({
     serviceName: "test-sandbox",
-    workspaceRoot: Deno.cwd(),
+    workspaceRoot: process.cwd(),
     mcpAuthToken: MCP_AUTH_TOKEN,
   });
 
@@ -45,7 +45,7 @@ test("createSandboxServiceApp: MCP endpoint handles tools/call", async () => {
       method: "tools/call",
       params: {
         name: "shell_exec",
-        arguments: { command: "printf sandbox-ok", cwd: Deno.cwd() },
+        arguments: { command: "printf sandbox-ok", cwd: process.cwd() },
       },
       id: 1,
     }),

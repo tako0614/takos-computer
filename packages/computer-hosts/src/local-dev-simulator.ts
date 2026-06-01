@@ -3,6 +3,8 @@ import worker, { type SandboxSessionContainer } from "./sandbox-host.ts";
 import { constantTimeEqual } from "./crypto-utils.ts";
 import type { DurableObjectId, DurableObjectStub } from "./cf-types.ts";
 import { generateProxyToken } from "./proxy-token.ts";
+import { mkdir } from "node:fs/promises";
+import process from "node:process";
 import type {
   CreateSandboxSessionPayload,
   KVNamespace,
@@ -12,16 +14,16 @@ import type {
 } from "./sandbox-session-types.ts";
 
 /**
- * Platform-shim bridges for the local Deno simulator.
+ * Platform-shim bridges for the local Bun simulator.
  *
  * The simulator implements the runtime surface of Cloudflare Workers Durable
- * Object stubs and namespaces using plain Deno classes. The classes implement
+ * Object stubs and namespaces using plain local classes. The classes implement
  * the RPC methods of `SandboxSessionContainer` directly (no DO transport) and
  * therefore do not satisfy the Cloudflare-shaped `fetch(input, init?)` /
  * `DurableObjectStubOf<T>` contracts at the type level even though they are
  * structurally interchangeable at runtime.
  *
- * These two helpers are the single named boundary between the Deno simulator
+ * These two helpers are the single named boundary between the local simulator
  * and the Worker environment types. Production code never reaches them.
  */
 function bridgeLocalSessionStub(
@@ -155,7 +157,7 @@ class LocalSandboxSession {
     const sessionWorkspace = `${this.workspaceRoot}/${
       safePathSegment(this.id.name ?? this.id.toString())
     }`;
-    await Deno.mkdir(sessionWorkspace, { recursive: true });
+    await mkdir(sessionWorkspace, { recursive: true });
 
     this.sandboxApp = createSandboxServiceApp({
       serviceName: "local-sandbox",
@@ -272,10 +274,13 @@ export function createLocalDevSandboxHost(
 
 export function startLocalDevSandboxHost(
   options: LocalDevSimulatorOptions & { port?: number } = {},
-): LocalDevSandboxHost & { server: Deno.HttpServer } {
+): LocalDevSandboxHost & { server: BunServer } {
   const host = createLocalDevSandboxHost(options);
   const port = options.port ?? DEFAULT_LOCAL_PORT;
-  const server = Deno.serve({ port }, host.fetch);
+  const server = bunLike().serve({
+    port,
+    fetch: (request) => host.fetch(request),
+  });
   return { ...host, server };
 }
 
@@ -285,13 +290,13 @@ function safePathSegment(value: string): string {
 }
 
 function readEnvOrDefault(name: string, fallback: string): string {
-  const value = Deno.env.get(name)?.trim();
+  const value = process.env[name]?.trim();
   return value || fallback;
 }
 
 if (import.meta.main) {
   const port = Number.parseInt(
-    Deno.env.get("PORT") ?? `${DEFAULT_LOCAL_PORT}`,
+    process.env.PORT ?? `${DEFAULT_LOCAL_PORT}`,
     10,
   );
   const workspaceRoot = readEnvOrDefault(
@@ -317,9 +322,9 @@ if (import.meta.main) {
     hostAuthToken,
     publishedMcpAuthToken,
     mcpAuthToken,
-    takosApiUrl: Deno.env.get("TAKOS_API_URL") ?? undefined,
-    takosToken: Deno.env.get("TAKOS_TOKEN") ?? undefined,
-    trustRoutedGuiApi: Deno.env.get("TAKOS_TRUST_ROUTED_GUI_API") === "1",
+    takosApiUrl: process.env.TAKOS_API_URL ?? undefined,
+    takosToken: process.env.TAKOS_TOKEN ?? undefined,
+    trustRoutedGuiApi: process.env.TAKOS_TRUST_ROUTED_GUI_API === "1",
   });
 
   console.log(`takos-computer local simulator listening on :${port}`);
@@ -328,4 +333,23 @@ if (import.meta.main) {
   );
   console.log(`published MCP bearer token: ${publishedMcpAuthToken}`);
   console.log(`workspace root: ${workspaceRoot}`);
+}
+
+type BunServer = {
+  stop(closeActiveConnections?: boolean): void;
+};
+
+type BunLike = {
+  serve(options: {
+    port: number;
+    fetch: (request: Request) => Response | Promise<Response>;
+  }): BunServer;
+};
+
+function bunLike(): BunLike {
+  const bun = (globalThis as { Bun?: BunLike }).Bun;
+  if (!bun) {
+    throw new Error("Bun runtime is required to start local dev simulator");
+  }
+  return bun;
 }

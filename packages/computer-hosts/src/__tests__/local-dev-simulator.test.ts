@@ -4,13 +4,14 @@ import {
   createLocalDevSandboxHost,
   LOCAL_DEV_DEFAULTS,
 } from "../local-dev-simulator.ts";
+import { makeTempDir, remove } from "./fs-helpers.ts";
 
 const HOST_AUTH_TOKEN = "test-host-token";
 const PUBLISHED_MCP_AUTH_TOKEN = "test-published-mcp-token";
 const MCP_AUTH_TOKEN = "test-mcp-token";
 
 test("local dev simulator exposes a ready sandbox host env", async () => {
-  const workspaceRoot = await Deno.makeTempDir({
+  const workspaceRoot = await makeTempDir({
     prefix: "takos-computer-local-",
   });
   try {
@@ -30,12 +31,12 @@ test("local dev simulator exposes a ready sandbox host env", async () => {
       missingBindings: [],
     });
   } finally {
-    await Deno.remove(workspaceRoot, { recursive: true });
+    await remove(workspaceRoot, { recursive: true });
   }
 });
 
 test("local dev simulator creates sessions and proxies MCP to sandbox service", async () => {
-  const workspaceRoot = await Deno.makeTempDir({
+  const workspaceRoot = await makeTempDir({
     prefix: "takos-computer-local-",
   });
   try {
@@ -96,12 +97,12 @@ test("local dev simulator creates sessions and proxies MCP to sandbox service", 
       createdAt: indexedState.createdAt,
     });
   } finally {
-    await Deno.remove(workspaceRoot, { recursive: true });
+    await remove(workspaceRoot, { recursive: true });
   }
 });
 
 test("local dev simulator published MCP auto-creates a local session", async () => {
-  const workspaceRoot = await Deno.makeTempDir({
+  const workspaceRoot = await makeTempDir({
     prefix: "takos-computer-local-",
   });
   try {
@@ -173,7 +174,7 @@ test("local dev simulator published MCP auto-creates a local session", async () 
     // list -> get/destroy round-trips against the same scoped DO/KV entry.
     expect(state.sessionId).toEqual(scopedKey.slice("session:".length));
   } finally {
-    await Deno.remove(workspaceRoot, { recursive: true });
+    await remove(workspaceRoot, { recursive: true });
   }
 });
 
