@@ -4,7 +4,7 @@
  * Provides read, write, list, and info operations with output limits.
  */
 
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { Stats } from "node:fs";
 import {
   lstat,
@@ -15,6 +15,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { WorkspaceJail } from "./workspace-jail.ts";
 
 const MAX_READ_BYTES = 256 * 1024; // 256 KB
 
@@ -65,11 +66,10 @@ export interface FileInfoResult {
 }
 
 export class FsManager {
-  private readonly workspaceRoot: string;
-  private workspaceRealRoot: string | null = null;
+  private readonly jail: WorkspaceJail;
 
   constructor(workspaceRoot = "/home/sandbox/workspace") {
-    this.workspaceRoot = resolve(workspaceRoot);
+    this.jail = new WorkspaceJail(workspaceRoot, { noun: "path" });
   }
 
   async read(
@@ -78,7 +78,7 @@ export class FsManager {
   ): Promise<FileReadResult> {
     throwIfAborted(signal);
 
-    const path = await this.resolveExistingPath(options.path);
+    const path = await this.jail.resolveExistingPath(options.path);
     const info = await stat(path);
     const totalSize = info.size;
     const offset = normalizeOffset(options.offset);
@@ -120,14 +120,14 @@ export class FsManager {
     signal?: AbortSignal,
   ): Promise<FileWriteResult> {
     throwIfAborted(signal);
-    const path = this.resolveLexicalPath(options.path);
-    this.assertInsideWorkspace(path);
+    const path = this.jail.resolveLexicalPath(options.path);
+    this.jail.assertInsideWorkspace(path);
 
     if (options.create_dirs) {
       await this.createParentDirs(path);
     }
     throwIfAborted(signal);
-    await this.assertWritableTarget(path);
+    await this.jail.assertWritable(path);
 
     const encoding = options.encoding ?? "utf-8";
     let data: Uint8Array;
@@ -153,7 +153,7 @@ export class FsManager {
     throwIfAborted(signal);
     const entries: FileEntry[] = [];
     const maxEntries = 1000;
-    const path = await this.resolveExistingPath(options.path);
+    const path = await this.jail.resolveExistingPath(options.path);
 
     if (options.recursive) {
       await this.walkDir(
@@ -190,7 +190,7 @@ export class FsManager {
 
   async info(path: string): Promise<FileInfoResult> {
     try {
-      const resolvedPath = await this.resolveExistingPath(path);
+      const resolvedPath = await this.jail.resolveExistingPath(path);
       const stat = await lstat(resolvedPath);
       return {
         exists: true,
@@ -219,67 +219,18 @@ export class FsManager {
     }
   }
 
-  private resolveLexicalPath(path: string): string {
-    if (!path || path.includes("\0")) {
-      throw new Error("path must be a non-empty string");
-    }
-    return isAbsolute(path) ? resolve(path) : resolve(this.workspaceRoot, path);
-  }
-
-  private async getWorkspaceRealRoot(): Promise<string> {
-    if (!this.workspaceRealRoot) {
-      this.workspaceRealRoot = resolve(await realpath(this.workspaceRoot));
-    }
-    return this.workspaceRealRoot;
-  }
-
-  private assertInsideWorkspace(path: string, root = this.workspaceRoot): void {
-    const rel = relative(root, path);
-    if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) return;
-    throw new Error("path is outside workspace");
-  }
-
-  private async resolveExistingPath(path: string): Promise<string> {
-    const lexicalPath = this.resolveLexicalPath(path);
-    this.assertInsideWorkspace(lexicalPath);
-    const [realRoot, realPath] = await Promise.all([
-      this.getWorkspaceRealRoot(),
-      realpath(lexicalPath),
-    ]);
-    this.assertInsideWorkspace(resolve(realPath), realRoot);
-    return resolve(realPath);
-  }
-
-  private async assertWritableTarget(path: string): Promise<void> {
-    const realRoot = await this.getWorkspaceRealRoot();
-    const parentRealPath = resolve(await realpath(dirname(path)));
-    this.assertInsideWorkspace(parentRealPath, realRoot);
-
-    try {
-      const info = await lstat(path);
-      if (info.isSymbolicLink()) {
-        throw new Error("refusing to write through symlink");
-      }
-      const realPath = resolve(await realpath(path));
-      this.assertInsideWorkspace(realPath, realRoot);
-    } catch (err) {
-      if (isNotFoundError(err)) return;
-      throw err;
-    }
-  }
-
   private async createParentDirs(path: string): Promise<void> {
     const parent = dirname(path);
-    this.assertInsideWorkspace(parent);
+    this.jail.assertInsideWorkspace(parent);
 
-    const realRoot = await this.getWorkspaceRealRoot();
+    const realRoot = await this.jail.getWorkspaceRealRoot();
     let nearestExisting = parent;
     while (true) {
       try {
         const info = await lstat(nearestExisting);
         if (info.isSymbolicLink()) {
           const realPath = resolve(await realpath(nearestExisting));
-          this.assertInsideWorkspace(realPath, realRoot);
+          this.jail.assertInsideWorkspace(realPath, realRoot);
           const realInfo = await stat(realPath);
           if (!realInfo.isDirectory()) {
             throw new Error("parent path is not a directory");
@@ -290,7 +241,7 @@ export class FsManager {
           throw new Error("parent path is not a directory");
         }
         const realPath = resolve(await realpath(nearestExisting));
-        this.assertInsideWorkspace(realPath, realRoot);
+        this.jail.assertInsideWorkspace(realPath, realRoot);
         break;
       } catch (err) {
         if (!isNotFoundError(err)) throw err;
@@ -302,7 +253,7 @@ export class FsManager {
 
     await mkdir(parent, { recursive: true });
     const parentRealPath = resolve(await realpath(parent));
-    this.assertInsideWorkspace(parentRealPath, realRoot);
+    this.jail.assertInsideWorkspace(parentRealPath, realRoot);
   }
 
   private async walkDir(

@@ -27,6 +27,7 @@
  */
 
 import type { Context } from "hono";
+import { createMcpEnvelope, isRecord } from "@takos-computer/common/mcp-rpc";
 import type { DurableObjectStub } from "./cf-types.ts";
 import {
   requirePublishedMcpAuth,
@@ -48,13 +49,6 @@ type AppContext = Context<{ Bindings: Env }>;
 const PUBLISHED_MCP_DEFAULT_SESSION_ID = "agent-default";
 const PUBLISHED_MCP_DEFAULT_SPACE_ID = "published-mcp";
 const PUBLISHED_MCP_DEFAULT_USER_ID = "takos-agent";
-
-type JsonRpcRequest = {
-  jsonrpc?: unknown;
-  id?: unknown;
-  method?: unknown;
-  params?: unknown;
-};
 
 type PublishedMcpToolResult = {
   content: Array<{ type: "text"; text: string }>;
@@ -337,22 +331,6 @@ const publishedMcpToolMap = new Map(
   publishedMcpTools.map((tool) => [tool.name, tool]),
 );
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function jsonRpcResponse(id: unknown, result: unknown): Response {
-  return Response.json({ jsonrpc: "2.0", id: id ?? null, result });
-}
-
-function jsonRpcError(id: unknown, code: number, message: string): Response {
-  return Response.json({
-    jsonrpc: "2.0",
-    id: id ?? null,
-    error: { code, message },
-  });
-}
-
 function publishedMcpJson(value: unknown): PublishedMcpToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
@@ -577,93 +555,17 @@ async function callSandboxToolThroughPublishedMcp(
   return publishedMcpJson(result ?? null);
 }
 
-export async function handlePublishedMcp(c: AppContext): Promise<Response> {
-  if (c.req.raw.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: { Allow: "POST, OPTIONS" },
-    });
-  }
-  if (c.req.raw.method !== "POST") {
-    return new Response(
-      JSON.stringify({
-        error:
-          "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this endpoint",
-      }),
-      {
-        status: 405,
-        headers: {
-          "Content-Type": "application/json",
-          Allow: "POST, OPTIONS",
-        },
-      },
-    );
-  }
-
-  const auth = requirePublishedMcpAuth(c);
-  if (auth) return auth;
-
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return jsonRpcError(null, -32700, "Parse error");
-  }
-
-  if (!isRecord(body)) return jsonRpcError(null, -32600, "Invalid Request");
-  const request = body as JsonRpcRequest;
-  const id = request.id;
-  if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
-    return jsonRpcError(id, -32600, "Invalid Request");
-  }
-
-  if (request.method === "initialize") {
-    return jsonRpcResponse(id, {
-      protocolVersion: "2024-11-05",
-      capabilities: { tools: {} },
-      serverInfo: {
-        name: "takos-computer",
-        version: "2.0.0",
-      },
-    });
-  }
-
-  if (request.method === "notifications/initialized") {
-    return new Response(null, { status: 204 });
-  }
-
-  if (request.method === "tools/list") {
-    return jsonRpcResponse(id, {
-      tools: publishedMcpTools.map(({ name, description, inputSchema }) => ({
-        name,
-        description,
-        inputSchema,
-      })),
-    });
-  }
-
-  if (request.method !== "tools/call") {
-    return jsonRpcError(id, -32601, "Method not found");
-  }
-  if (!isRecord(request.params) || typeof request.params.name !== "string") {
-    return jsonRpcError(id, -32602, "Invalid params");
-  }
-
-  const tool = publishedMcpToolMap.get(request.params.name);
-  if (!tool) {
-    return jsonRpcError(id, -32602, `Unknown tool: ${request.params.name}`);
-  }
-
-  try {
-    const args = isRecord(request.params.arguments)
-      ? request.params.arguments
-      : {};
-    return jsonRpcResponse(id, await tool.handle(args, c));
-  } catch (error) {
-    return jsonRpcError(
-      id,
-      -32000,
-      error instanceof Error ? error.message : String(error),
-    );
-  }
+export function handlePublishedMcp(c: AppContext): Promise<Response> {
+  // The published tools need the Hono `AppContext`, so capture it as the
+  // per-call context for this request. The shared envelope owns the
+  // OPTIONS/405 preflight, JSON-RPC parsing/dispatch, and error codes; only
+  // the auth gate, tool set, and identity are host-specific.
+  const handle = createMcpEnvelope<AppContext>({
+    serverInfo: { name: "takos-computer", version: "2.0.0" },
+    tools: publishedMcpTools,
+    toolMap: publishedMcpToolMap,
+    authorize: () => requirePublishedMcpAuth(c),
+    callContext: () => c,
+  });
+  return handle(c.req.raw);
 }

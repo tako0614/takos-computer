@@ -10,6 +10,10 @@
  */
 
 import { type Context, Hono } from "hono";
+import {
+  mcpMethodNotAllowed,
+  mcpOptionsPreflight,
+} from "@takos-computer/common/mcp-rpc";
 import { guiAppAuthRequired, registerGuiAuthRoutes } from "./app-auth.ts";
 import { appHtml, styleCss } from "./gui/assets.ts";
 import { computerIconSvg } from "./gui/icon.ts";
@@ -326,32 +330,13 @@ app.delete("/gui/api/sandbox-session/:id", destroySession);
 
 app.all("/mcp", handlePublishedMcp);
 
-function mcpMethodNotAllowed(): Response {
-  return new Response(
-    JSON.stringify({
-      error:
-        "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this endpoint",
-    }),
-    {
-      status: 405,
-      headers: {
-        "Content-Type": "application/json",
-        Allow: "POST, OPTIONS",
-      },
-    },
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Session MCP — forward to container
 // ---------------------------------------------------------------------------
 
 async function forwardMcp(c: AppContext): Promise<Response> {
   if (c.req.raw.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: { Allow: "POST, OPTIONS" },
-    });
+    return mcpOptionsPreflight();
   }
 
   const sessionId = sessionIdParam(c);

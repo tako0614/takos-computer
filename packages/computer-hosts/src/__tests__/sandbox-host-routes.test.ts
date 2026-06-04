@@ -1277,6 +1277,37 @@ test("sandbox host published MCP auto-creates a session and proxies tool calls",
   }]);
 });
 
+test("sandbox host published MCP returns canonical -32603 when a tool handler throws", async () => {
+  // The published and in-container MCP servers share one envelope; a tool/call
+  // handler failure must surface as JSON-RPC -32603 (Internal error) on both,
+  // not the previously-drifted -32000. Omitting the container MCP auth token
+  // makes computer_shell_exec throw before it can proxy.
+  const { env } = createEnv({ mcpAuthToken: null });
+
+  const response = await fetchWorker(env, "/mcp", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...publishedMcpAuthHeaders(),
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 7,
+      method: "tools/call",
+      params: {
+        name: "computer_shell_exec",
+        arguments: { command: "pwd", session_id: "agent-session-1" },
+      },
+    }),
+  });
+
+  assertEquals(response.status, 200);
+  const body = await response.json() as {
+    error?: { code: number; message: string };
+  };
+  assertEquals(body.error?.code, -32603);
+});
+
 test("sandbox host published MCP scopes the DO name to the token but reports the logical session id", async () => {
   const { env, doNames } = createEnv();
 

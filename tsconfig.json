@@ -14,6 +14,7 @@
     "skipLibCheck": true,
     "paths": {
       "@takos-computer/common/crypto": ["./packages/common/src/crypto.ts"],
+      "@takos-computer/common/mcp-rpc": ["./packages/common/src/mcp-rpc.ts"],
       "@takos-computer/common/logger": ["./packages/common/src/logger.ts"],
       "@takos-computer/common/cf-types": ["./packages/common/src/cf-types.ts"],
       "@takos-computer/computer-hosts": [

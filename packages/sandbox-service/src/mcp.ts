@@ -12,6 +12,10 @@
  */
 
 import { constantTimeEqual } from "@takos-computer/common/crypto";
+import {
+  createMcpEnvelope,
+  isRecord,
+} from "@takos-computer/common/mcp-rpc";
 import type {
   ProcessSignal,
   ShellExecOptions,
@@ -58,10 +62,6 @@ function json(v: unknown): ToolResult {
 
 function errorText(err: unknown): ToolResult {
   return text(`Error: ${err instanceof Error ? err.message : String(err)}`);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function objectArgs(args: unknown): Record<string, unknown> {
@@ -190,21 +190,45 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
   ];
 }
 
-function jsonRpcResponse(id: unknown, result: unknown): Response {
-  return Response.json({ jsonrpc: "2.0", id: id ?? null, result });
-}
+/**
+ * Auth gate for the sandbox MCP endpoint: 503 when no token is configured and
+ * unauthenticated access is not explicitly allowed, 401 on a missing/mismatched
+ * bearer token. Returns `null` to allow the request through.
+ */
+function authorizeSandboxMcp(
+  request: Request,
+  authToken: string | undefined,
+  allowUnauthenticated: boolean,
+): Response | null {
+  if (!authToken && !allowUnauthenticated) {
+    return new Response(
+      JSON.stringify({ error: "MCP auth not configured" }),
+      {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+  }
 
-function jsonRpcError(id: unknown, code: number, message: string): Response {
-  return Response.json({
-    jsonrpc: "2.0",
-    id: id ?? null,
-    error: { code, message },
-  });
+  if (authToken) {
+    const header = request.headers.get("Authorization");
+    const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
+    if (!token || !constantTimeEqual(token, authToken)) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  }
+
+  return null;
 }
 
 /**
  * Create a request handler for the MCP server that works with Hono.
- * Handles the JSON-RPC subset used by MCP Streamable HTTP clients.
+ * Handles the JSON-RPC subset used by MCP Streamable HTTP clients via the
+ * shared `createMcpEnvelope`; only the tool set, identity, and auth gate are
+ * sandbox-specific.
  */
 export function createMcpRequestHandler(
   deps: McpServerDeps,
@@ -214,119 +238,17 @@ export function createMcpRequestHandler(
   const tools = createSandboxToolDefinitions(deps);
   const toolMap = new Map(tools.map((tool) => [tool.name, tool]));
 
-  return async (request: Request): Promise<Response> => {
-    if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: { Allow: "POST, OPTIONS" },
-      });
-    }
-
-    if (request.method !== "POST") {
-      return new Response(
-        JSON.stringify({
-          error:
-            "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this sandbox endpoint",
-        }),
-        {
-          status: 405,
-          headers: {
-            "Content-Type": "application/json",
-            Allow: "POST, OPTIONS",
-          },
-        },
-      );
-    }
-
-    if (!authToken && !options.allowUnauthenticated) {
-      return new Response(
-        JSON.stringify({ error: "MCP auth not configured" }),
-        {
-          status: 503,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
-    }
-
-    if (authToken) {
-      const header = request.headers.get("Authorization");
-      const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
-      if (!token || !constantTimeEqual(token, authToken)) {
-        return new Response(JSON.stringify({ error: "Unauthorized" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      return jsonRpcError(null, -32700, "Parse error");
-    }
-
-    if (!isRecord(body)) {
-      return jsonRpcError(null, -32600, "Invalid Request");
-    }
-
-    const id = body.id;
-    if (body.jsonrpc !== "2.0" || typeof body.method !== "string") {
-      return jsonRpcError(id, -32600, "Invalid Request");
-    }
-
-    if (body.method === "initialize") {
-      return jsonRpcResponse(id, {
-        protocolVersion: "2024-11-05",
-        capabilities: { tools: {} },
-        serverInfo: {
-          name: "takos-computer-sandbox",
-          version: "1.0.0",
-        },
-      });
-    }
-
-    if (body.method === "notifications/initialized") {
-      return new Response(null, { status: 204 });
-    }
-
-    if (body.method === "tools/list") {
-      return jsonRpcResponse(id, {
-        tools: tools.map(({ name, description, inputSchema }) => ({
-          name,
-          description,
-          inputSchema,
-        })),
-      });
-    }
-
-    if (body.method !== "tools/call") {
-      return jsonRpcError(id, -32601, "Method not found");
-    }
-
-    if (!isRecord(body.params) || typeof body.params.name !== "string") {
-      return jsonRpcError(id, -32602, "Invalid params");
-    }
-
-    const tool = toolMap.get(body.params.name);
-    if (!tool) {
-      return jsonRpcError(id, -32602, `Unknown tool: ${body.params.name}`);
-    }
-
-    const args = isRecord(body.params.arguments) ? body.params.arguments : {};
-    try {
-      return jsonRpcResponse(
-        id,
-        await tool.handle(args, {
-          signal: request.signal,
-        }),
-      );
-    } catch (err) {
-      return jsonRpcError(
-        id,
-        -32603,
-        err instanceof Error ? err.message : String(err),
-      );
-    }
-  };
+  return createMcpEnvelope<ToolContext>({
+    serverInfo: { name: "takos-computer-sandbox", version: "1.0.0" },
+    tools,
+    toolMap,
+    endpointLabel: "sandbox endpoint",
+    authorize: (request) =>
+      authorizeSandboxMcp(
+        request,
+        authToken,
+        options.allowUnauthenticated ?? false,
+      ),
+    callContext: (request) => ({ signal: request.signal }),
+  });
 }

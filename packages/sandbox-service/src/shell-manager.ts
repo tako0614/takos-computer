@@ -6,8 +6,8 @@
  */
 
 import { env as processEnv } from "node:process";
-import { realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { stat } from "node:fs/promises";
+import { WorkspaceJail } from "./workspace-jail.ts";
 
 const MAX_OUTPUT_BYTES = 256 * 1024; // 256 KB per stream
 const PROCESS_KILL_GRACE_MS = 1_000;
@@ -109,14 +109,13 @@ export interface ProcessKillResult {
 }
 
 export class ShellManager {
-  private readonly workspaceRoot: string;
+  private readonly jail: WorkspaceJail;
   private readonly defaultCwd: string;
-  private workspaceRealRoot: string | null = null;
   private managedProcesses = new Map<number, ManagedProcess>();
 
   constructor(defaultCwd = "/home/sandbox/workspace") {
-    this.workspaceRoot = resolve(defaultCwd);
-    this.defaultCwd = this.workspaceRoot;
+    this.jail = new WorkspaceJail(defaultCwd, { noun: "cwd" });
+    this.defaultCwd = this.jail.workspaceRoot;
   }
 
   async exec(options: ShellExecOptions): Promise<ShellExecResult> {
@@ -167,7 +166,7 @@ export class ShellManager {
 
     try {
       const cwd = await this.resolveCwd(options.cwd ?? this.defaultCwd);
-      const workspaceRoot = await this.getWorkspaceRealRoot();
+      const workspaceRoot = await this.jail.getWorkspaceRealRoot();
       const child = bunLike().spawn([
         "bash",
         "-c",
@@ -259,45 +258,12 @@ export class ShellManager {
   }
 
   private async resolveCwd(cwd: string): Promise<string> {
-    if (!cwd || cwd.includes("\0")) {
-      throw new Error("cwd must be a non-empty string");
-    }
-
-    const lexicalPath = isAbsolute(cwd)
-      ? resolve(cwd)
-      : resolve(this.workspaceRoot, cwd);
-    this.assertInsideWorkspace(lexicalPath);
-
-    const [workspaceRealRoot, cwdRealPath] = await Promise.all([
-      this.getWorkspaceRealRoot(),
-      realpath(lexicalPath),
-    ]);
-    const resolvedCwd = resolve(cwdRealPath);
-    this.assertInsideWorkspace(resolvedCwd, workspaceRealRoot);
-
+    const resolvedCwd = await this.jail.resolveExistingPath(cwd);
     const info = await stat(resolvedCwd);
     if (!info.isDirectory()) {
       throw new Error("cwd must be a directory");
     }
     return resolvedCwd;
-  }
-
-  private async getWorkspaceRealRoot(): Promise<string> {
-    if (!this.workspaceRealRoot) {
-      this.workspaceRealRoot = resolve(await realpath(this.workspaceRoot));
-    }
-    return this.workspaceRealRoot;
-  }
-
-  private assertInsideWorkspace(path: string, root = this.workspaceRoot): void {
-    const rel = relative(root, path);
-    if (
-      rel === "" ||
-      (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))
-    ) {
-      return;
-    }
-    throw new Error("cwd is outside workspace");
   }
 }
 
