@@ -25,7 +25,9 @@
 
 import type { Context } from "hono";
 import {
+  type GuiSession,
   guiAppAuthRequired,
+  readGuiSession,
   requireGuiAppAuth,
   requireGuiAppOrRedirect,
 } from "./app-auth.ts";
@@ -33,7 +35,10 @@ import { constantTimeEqual } from "./crypto-utils.ts";
 import type { DurableObjectStub } from "./cf-types.ts";
 import { getDOStub } from "./sandbox-session-container.ts";
 import type { SandboxSessionContainer } from "./sandbox-session-container.ts";
-import type { SandboxHostEnv } from "./sandbox-session-types.ts";
+import type {
+  SandboxHostEnv,
+  SandboxSessionState,
+} from "./sandbox-session-types.ts";
 
 type Env = SandboxHostEnv;
 type AppContext = Context<{ Bindings: Env }>;
@@ -171,6 +176,23 @@ async function validateSessionProxyToken(
   return null;
 }
 
+// SECURITY (#10/#25 cross-tenant IDOR): a validly-sealed GUI session cookie
+// only proves *some* user is authenticated — it does not bind that user to a
+// particular sandbox session. The GUI session carries the caller's identity
+// (`sub` = userId) and, when issued via the Takosumi launch/OIDC claims, the
+// owning `spaceId`. A persisted SandboxSessionState carries the session's
+// `userId`/`spaceId`. A GUI caller may touch a session only when both match.
+export function guiSessionOwnsSandbox(
+  guiSession: GuiSession,
+  state: Pick<SandboxSessionState, "userId" | "spaceId">,
+): boolean {
+  if (guiSession.sub !== state.userId) return false;
+  // When the GUI session asserts a space scope, it must match the session's
+  // space. (Older sessions without a space claim are bound by `sub` alone.)
+  if (guiSession.spaceId && guiSession.spaceId !== state.spaceId) return false;
+  return true;
+}
+
 export async function authorizeGuiApp(
   c: AppContext,
 ): Promise<Response | null> {
@@ -243,6 +265,49 @@ export async function requireHostAdmin(
   return authError(c, 401, "Unauthorized");
 }
 
+/**
+ * Result of {@link resolveHostAdminScope}: either an unauthorized `response`,
+ * or a successful scope describing how broadly the caller may list sessions.
+ *
+ * SECURITY (#25 cross-tenant session enumeration): `requireHostAdmin` accepts
+ * an arbitrary GUI session, but a GUI user is NOT a host admin — they must only
+ * see their own sessions. This narrows the listing surface: `kind: "admin"`
+ * (admin bearer token / trusted-routed dashboard proxy) may see all sessions,
+ * while `kind: "gui"` may only see sessions owned by `guiSession`.
+ */
+export type HostAdminScope =
+  | { response: Response }
+  | { response: null; kind: "admin" }
+  | { response: null; kind: "gui"; guiSession: GuiSession };
+
+export async function resolveHostAdminScope(
+  c: AppContext,
+): Promise<HostAdminScope> {
+  if (isTrustedTakosRoutedRequest(c)) return { response: null, kind: "admin" };
+
+  const token = extractBearerToken(c);
+  const expected = c.env.SANDBOX_HOST_AUTH_TOKEN;
+  if (token && expected && constantTimeEqual(token, expected)) {
+    return { response: null, kind: "admin" };
+  }
+
+  if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
+    const auth = await requireGuiAppAuth(c.env, c.req.raw);
+    if (auth) return { response: auth };
+    const guiSession = await readGuiSession(c.env, c.req.raw);
+    if (!guiSession) return { response: authError(c, 401, "Unauthorized") };
+    return { response: null, kind: "gui", guiSession };
+  }
+
+  if (!expected) {
+    return {
+      response: authError(c, 503, "Sandbox host auth token is not configured"),
+    };
+  }
+
+  return { response: authError(c, 401, "Unauthorized") };
+}
+
 export function requirePublishedMcpAuth(c: AppContext): Response | null {
   const expected = resolvePublishedMcpAuthToken(c.env);
   if (!expected) {
@@ -267,7 +332,19 @@ export async function authorizeSessionAccess(
   const token = extractBearerToken(c);
   if (!token) {
     if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
-      return await requireGuiAppAuth(c.env, c.req.raw);
+      // SECURITY (#10 cross-user RCE via session IDOR): a valid GUI session
+      // is necessary but NOT sufficient — it must also own the *target*
+      // sandbox. Verify the sealed session, then bind it to the persisted
+      // owner of `sessionId` before granting read/destroy/MCP access.
+      const auth = await requireGuiAppAuth(c.env, c.req.raw);
+      if (auth) return auth;
+      const guiSession = await readGuiSession(c.env, c.req.raw);
+      if (!guiSession) return authError(c, 401, "Unauthorized");
+      const state = await stub.getSessionState();
+      if (!state || !guiSessionOwnsSandbox(guiSession, state)) {
+        return authError(c, 403, "Forbidden");
+      }
+      return null;
     }
     return authError(c, 401, "Unauthorized");
   }

@@ -13,21 +13,9 @@
     "strict": true,
     "skipLibCheck": true,
     "paths": {
-      "@takos-computer/common": ["./packages/common/src/index.ts"],
       "@takos-computer/common/crypto": ["./packages/common/src/crypto.ts"],
-      "@takos-computer/common/id": ["./packages/common/src/id.ts"],
-      "@takos-computer/common/validation": [
-        "./packages/common/src/validation.ts"
-      ],
-      "@takos-computer/common/errors": ["./packages/common/src/errors.ts"],
-      "@takos-computer/common/middleware/hono": [
-        "./packages/common/src/middleware/hono.ts"
-      ],
       "@takos-computer/common/logger": ["./packages/common/src/logger.ts"],
       "@takos-computer/common/cf-types": ["./packages/common/src/cf-types.ts"],
-      "@takos-computer/cloudflare-compat": [
-        "./packages/cloudflare-compat/src/index.ts"
-      ],
       "@takos-computer/computer-hosts": [
         "./packages/computer-hosts/src/index.ts"
       ],

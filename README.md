@@ -37,8 +37,7 @@ MCP 対応エージェントホストから利用できます。
 
 | Package                               | Path                          | 説明                                                                                  |
 | ------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------- |
-| **@takos-computer/common**            | `packages/common/`            | logger, ID 生成, validation, error クラス, JWT helper, CF shim 等の共通ユーティリティ |
-| **@takos-computer/cloudflare-compat** | `packages/cloudflare-compat/` | Cloudflare Workers 型の再エクスポート                                                 |
+| **@takos-computer/common**            | `packages/common/`            | logger, crypto helper, CF shim 等の共通ユーティリティ                                 |
 | **@takos-computer/dashboard**         | `packages/dashboard/`         | サンドボックスセッション一覧 / オープン用の SolidJS ダッシュボード                    |
 
 ## MCP ツールリファレンス

@@ -16,8 +16,7 @@ Takos-specific な結合はなく、 MCP 互換 agent host から利用できま
 - `packages/sandbox-service/`: サンドボックス MCP サービス
 - `packages/computer-hosts/`: CF Worker コンテナホスト (dashboard proxy,
   sandbox-host)
-- `packages/common/`: 共有ユーティリティ (logger, validation)
-- `packages/cloudflare-compat/`: Cloudflare 互換
+- `packages/common/`: 共有ユーティリティ (logger, crypto, CF shim)
 
 ## 基本方針
 

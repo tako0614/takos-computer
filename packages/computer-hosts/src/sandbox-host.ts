@@ -22,7 +22,9 @@ import {
   authError,
   authorizeGuiApp,
   authorizeSessionAccess,
+  guiSessionOwnsSandbox,
   requireHostAdmin,
+  resolveHostAdminScope,
   resolvePublishedMcpAuthToken,
 } from "./sandbox-host-auth.ts";
 import { handlePublishedMcp } from "./sandbox-host-published-mcp.ts";
@@ -231,8 +233,12 @@ app.get("/gui/", serveGuiApp);
 // ---------------------------------------------------------------------------
 
 async function listSessions(c: AppContext): Promise<Response> {
-  const auth = await requireHostAdmin(c);
-  if (auth) return auth;
+  // SECURITY (#25 cross-tenant session enumeration): the session index spans
+  // every tenant, so a plain GUI session must not enumerate the whole index.
+  // Only a true host admin (admin bearer token / trusted-routed dashboard
+  // proxy) sees all sessions; a GUI caller is filtered to the sessions it owns.
+  const scope = await resolveHostAdminScope(c);
+  if (scope.response) return scope.response;
 
   const kv = c.env.SESSION_INDEX;
   if (!kv) return c.json({ sessions: [] });
@@ -242,7 +248,11 @@ async function listSessions(c: AppContext): Promise<Response> {
     const val = await kv.get(key.name, { type: "json" }) as
       | SandboxSessionState
       | null;
-    if (val) sessions.push(val);
+    if (!val) continue;
+    if (scope.kind === "gui" && !guiSessionOwnsSandbox(scope.guiSession, val)) {
+      continue;
+    }
+    sessions.push(val);
   }
   return c.json({ sessions });
 }

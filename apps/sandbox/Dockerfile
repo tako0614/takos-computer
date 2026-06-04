@@ -7,7 +7,6 @@ COPY shims/ ./shims/
 
 # Copy required packages
 COPY packages/common/ ./packages/common/
-COPY packages/cloudflare-compat/ ./packages/cloudflare-compat/
 COPY packages/computer-hosts/ ./packages/computer-hosts/
 COPY packages/dashboard/ ./packages/dashboard/
 COPY packages/sandbox-service/ ./packages/sandbox-service/
