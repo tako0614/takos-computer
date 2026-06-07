@@ -3024,6 +3024,109 @@ var Hono2 = class extends Hono {
   }
 };
 
+// packages/common/src/mcp-rpc.ts
+var MCP_TOOL_CALL_ERROR_CODE = -32603;
+var MCP_PROTOCOL_VERSION = "2024-11-05";
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function jsonRpcResponse(id, result) {
+  return Response.json({ jsonrpc: "2.0", id: id ?? null, result });
+}
+function jsonRpcError(id, code, message) {
+  return Response.json({
+    jsonrpc: "2.0",
+    id: id ?? null,
+    error: { code, message }
+  });
+}
+function mcpMethodNotAllowed(endpointLabel = "endpoint") {
+  return new Response(
+    JSON.stringify({
+      error: `MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this ${endpointLabel}`
+    }),
+    {
+      status: 405,
+      headers: {
+        "Content-Type": "application/json",
+        Allow: "POST, OPTIONS"
+      }
+    }
+  );
+}
+function mcpOptionsPreflight() {
+  return new Response(null, {
+    status: 204,
+    headers: { Allow: "POST, OPTIONS" }
+  });
+}
+function createMcpEnvelope(config) {
+  const { serverInfo, tools, toolMap, authorize, callContext } = config;
+  const endpointLabel = config.endpointLabel ?? "endpoint";
+  return async (request) => {
+    if (request.method === "OPTIONS") {
+      return mcpOptionsPreflight();
+    }
+    if (request.method !== "POST") {
+      return mcpMethodNotAllowed(endpointLabel);
+    }
+    const denied = await authorize(request);
+    if (denied) return denied;
+    let body;
+    try {
+      body = await request.json();
+    } catch {
+      return jsonRpcError(null, -32700, "Parse error");
+    }
+    if (!isRecord(body)) {
+      return jsonRpcError(null, -32600, "Invalid Request");
+    }
+    const id = body.id;
+    if (body.jsonrpc !== "2.0" || typeof body.method !== "string") {
+      return jsonRpcError(id, -32600, "Invalid Request");
+    }
+    if (body.method === "initialize") {
+      return jsonRpcResponse(id, {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: { tools: {} },
+        serverInfo
+      });
+    }
+    if (body.method === "notifications/initialized") {
+      return new Response(null, { status: 204 });
+    }
+    if (body.method === "tools/list") {
+      return jsonRpcResponse(id, {
+        tools: tools.map(({ name, description, inputSchema }) => ({
+          name,
+          description,
+          inputSchema
+        }))
+      });
+    }
+    if (body.method !== "tools/call") {
+      return jsonRpcError(id, -32601, "Method not found");
+    }
+    if (!isRecord(body.params) || typeof body.params.name !== "string") {
+      return jsonRpcError(id, -32602, "Invalid params");
+    }
+    const tool = toolMap.get(body.params.name);
+    if (!tool) {
+      return jsonRpcError(id, -32602, `Unknown tool: ${body.params.name}`);
+    }
+    const args = isRecord(body.params.arguments) ? body.params.arguments : {};
+    try {
+      return jsonRpcResponse(id, await tool.handle(args, callContext(request)));
+    } catch (err) {
+      return jsonRpcError(
+        id,
+        MCP_TOOL_CALL_ERROR_CODE,
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  };
+}
+
 // packages/common/src/crypto.ts
 function constantTimeEqual(a, b) {
   const maxLen = Math.max(a.length, b.length);
@@ -3034,12 +3137,182 @@ function constantTimeEqual(a, b) {
   return result === 0;
 }
 
+// packages/computer-hosts/src/oidc-verify.ts
+var CLOCK_SKEW_SECONDS = 60;
+function normalizeIssuer(value) {
+  return value.replace(/\/+$/, "");
+}
+function base64UrlBytes(value) {
+  try {
+    const padded = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(
+      Math.ceil(value.length / 4) * 4,
+      "="
+    );
+    const binary = atob(padded);
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+function parseBase64UrlJson(value) {
+  try {
+    const bytes = base64UrlBytes(value);
+    return bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null;
+  } catch {
+    return null;
+  }
+}
+function stringClaim(value) {
+  return typeof value === "string" && value ? value : void 0;
+}
+function numberClaim(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+async function discoverOidc(config) {
+  if (!config.issuer) return {};
+  const response = await fetch(
+    `${config.issuer}/.well-known/openid-configuration`,
+    { headers: { Accept: "application/json" } }
+  ).catch(() => null);
+  if (!response || !response.ok) return {};
+  const body = await response.json().catch(() => null);
+  if (!body || typeof body !== "object") return {};
+  if (typeof body.issuer === "string" && normalizeIssuer(body.issuer) !== config.issuer) {
+    throw new Error("OIDC discovery issuer mismatch");
+  }
+  return body;
+}
+async function oidcEndpoints(config) {
+  const issuer = config.issuer;
+  const discovery = await discoverOidc(config);
+  return {
+    authorizationEndpoint: config.authorizationEndpoint ?? discovery.authorization_endpoint ?? `${issuer}/oauth/authorize`,
+    tokenEndpoint: config.tokenEndpoint ?? discovery.token_endpoint ?? `${issuer}/oauth/token`,
+    userinfoEndpoint: config.userinfoEndpoint ?? discovery.userinfo_endpoint ?? `${issuer}/oauth/userinfo`,
+    jwksUri: config.jwksUri ?? discovery.jwks_uri ?? `${issuer}/oauth/jwks`
+  };
+}
+function jwtSigningInput(parts) {
+  return new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+}
+async function verifyJwtSignature(input) {
+  const signature = new Uint8Array(input.signature);
+  const signingInput = new Uint8Array(input.signingInput);
+  if (input.alg === "ES256") {
+    const key = await crypto.subtle.importKey(
+      "jwk",
+      input.jwk,
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["verify"]
+    );
+    return await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      key,
+      signature,
+      signingInput
+    );
+  }
+  if (input.alg === "RS256") {
+    const key = await crypto.subtle.importKey(
+      "jwk",
+      input.jwk,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+    return await crypto.subtle.verify(
+      { name: "RSASSA-PKCS1-v1_5" },
+      key,
+      signature,
+      signingInput
+    );
+  }
+  return false;
+}
+function selectJwk(jwks, header) {
+  const alg = typeof header.alg === "string" ? header.alg : void 0;
+  const kid = typeof header.kid === "string" ? header.kid : void 0;
+  return (jwks.keys ?? []).find((key) => {
+    if (key.use && key.use !== "sig") return false;
+    if (alg && key.alg && key.alg !== alg) return false;
+    if (kid && key.kid !== kid) {
+      return false;
+    }
+    return true;
+  }) ?? null;
+}
+function validateIdTokenClaims(claims, config, nonce) {
+  const now = Math.floor(Date.now() / 1e3);
+  if (stringClaim(claims.iss) !== config.issuer) {
+    throw new Error("ID token issuer mismatch");
+  }
+  if (!stringClaim(claims.sub)) {
+    throw new Error("ID token missing subject");
+  }
+  const audience = claims.aud;
+  const audienceMatches = typeof audience === "string" ? audience === config.clientId : Array.isArray(audience) && audience.includes(config.clientId);
+  if (!audienceMatches) throw new Error("ID token audience mismatch");
+  if (Array.isArray(audience) && audience.length > 1) {
+    if (stringClaim(claims.azp) !== config.clientId) {
+      throw new Error("ID token authorized party mismatch");
+    }
+  } else if (claims.azp !== void 0 && stringClaim(claims.azp) !== config.clientId) {
+    throw new Error("ID token authorized party mismatch");
+  }
+  const exp = numberClaim(claims.exp);
+  if (!exp || exp <= now - CLOCK_SKEW_SECONDS) {
+    throw new Error("ID token expired");
+  }
+  const nbf = numberClaim(claims.nbf);
+  if (nbf && nbf > now + CLOCK_SKEW_SECONDS) {
+    throw new Error("ID token not yet valid");
+  }
+  const iat = numberClaim(claims.iat);
+  if (iat && iat > now + CLOCK_SKEW_SECONDS) {
+    throw new Error("ID token issued in the future");
+  }
+  if (stringClaim(claims.nonce) !== nonce) {
+    throw new Error("ID token nonce mismatch");
+  }
+}
+async function verifyIdToken(config, idToken, nonce) {
+  const parts = idToken.split(".");
+  if (parts.length !== 3) throw new Error("Invalid ID token format");
+  const header = parseBase64UrlJson(parts[0]);
+  const claims = parseBase64UrlJson(parts[1]);
+  const signature = base64UrlBytes(parts[2]);
+  if (!header || !claims || !signature) throw new Error("Invalid ID token");
+  const alg = typeof header.alg === "string" ? header.alg : "";
+  if (!["ES256", "RS256"].includes(alg)) {
+    throw new Error("Unsupported ID token algorithm");
+  }
+  const endpoints = await oidcEndpoints(config);
+  const jwksResponse = await fetch(endpoints.jwksUri, {
+    headers: { Accept: "application/json" }
+  });
+  if (!jwksResponse.ok) {
+    throw new Error(`OIDC JWKS fetch failed: ${jwksResponse.status}`);
+  }
+  const jwks = await jwksResponse.json();
+  const jwk = selectJwk(jwks, header);
+  if (!jwk) throw new Error("ID token signing key not found");
+  const valid = await verifyJwtSignature({
+    alg,
+    jwk,
+    signingInput: jwtSigningInput(parts),
+    signature
+  });
+  if (!valid) throw new Error("ID token signature invalid");
+  validateIdTokenClaims(claims, config, nonce);
+  return claims;
+}
+
 // packages/computer-hosts/src/app-auth.ts
 var SESSION_COOKIE = "takos_computer_session";
 var STATE_COOKIE = "takos_computer_oauth_state";
 var SESSION_MAX_AGE_SECONDS = 12 * 60 * 60;
 var STATE_MAX_AGE_SECONDS = 10 * 60;
-var CLOCK_SKEW_SECONDS = 60;
 var DEFAULT_AUTH_PATH = "/gui/api/auth";
 var DEFAULT_CALLBACK_PATH = `${DEFAULT_AUTH_PATH}/callback`;
 var DEFAULT_LAUNCH_PATH = `${DEFAULT_AUTH_PATH}/launch`;
@@ -3050,9 +3323,6 @@ function envValue(env, name) {
 function flagEnabled(env, name) {
   const value = envValue(env, name);
   return value ? ["1", "true", "yes"].includes(value.toLowerCase()) : false;
-}
-function normalizeIssuer(value) {
-  return value.replace(/\/+$/, "");
 }
 function appBaseUrl(request, env) {
   const configured = envValue(env, "BASE_URL");
@@ -3131,26 +3401,6 @@ function base64Url(bytes) {
 function base64UrlJson(value) {
   return base64Url(new TextEncoder().encode(JSON.stringify(value)));
 }
-function base64UrlBytes(value) {
-  try {
-    const padded = value.replaceAll("-", "+").replaceAll("_", "/").padEnd(
-      Math.ceil(value.length / 4) * 4,
-      "="
-    );
-    const binary = atob(padded);
-    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
-  } catch {
-    return null;
-  }
-}
-function parseBase64UrlJson(value) {
-  try {
-    const bytes = base64UrlBytes(value);
-    return bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null;
-  } catch {
-    return null;
-  }
-}
 async function sign(value, secret) {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -3220,30 +3470,6 @@ function callbackUrl(request, env) {
   if (config.redirectUri) return config.redirectUri;
   return new URL(DEFAULT_CALLBACK_PATH, appBaseUrl(request, env)).toString();
 }
-async function discoverOidc(config) {
-  if (!config.issuer) return {};
-  const response = await fetch(
-    `${config.issuer}/.well-known/openid-configuration`,
-    { headers: { Accept: "application/json" } }
-  ).catch(() => null);
-  if (!response || !response.ok) return {};
-  const body = await response.json().catch(() => null);
-  if (!body || typeof body !== "object") return {};
-  if (typeof body.issuer === "string" && normalizeIssuer(body.issuer) !== config.issuer) {
-    throw new Error("OIDC discovery issuer mismatch");
-  }
-  return body;
-}
-async function oidcEndpoints(config) {
-  const issuer = config.issuer;
-  const discovery = await discoverOidc(config);
-  return {
-    authorizationEndpoint: config.authorizationEndpoint ?? discovery.authorization_endpoint ?? `${issuer}/oauth/authorize`,
-    tokenEndpoint: config.tokenEndpoint ?? discovery.token_endpoint ?? `${issuer}/oauth/token`,
-    userinfoEndpoint: config.userinfoEndpoint ?? discovery.userinfo_endpoint ?? `${issuer}/oauth/userinfo`,
-    jwksUri: config.jwksUri ?? discovery.jwks_uri ?? `${issuer}/oauth/jwks`
-  };
-}
 async function exchangeCode(env, request, code, codeVerifier) {
   const config = authConfig(env);
   const endpoints = await oidcEndpoints(config);
@@ -3281,128 +3507,6 @@ async function fetchUserInfo(env, accessToken) {
   const sub = body.user?.id ?? body.sub;
   if (!sub) throw new Error("OAuth userinfo response missing subject");
   return { sub, name: body.user?.name ?? body.name };
-}
-function jwtSigningInput(parts) {
-  return new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
-}
-async function verifyJwtSignature(input) {
-  const signature = new Uint8Array(input.signature);
-  const signingInput = new Uint8Array(input.signingInput);
-  if (input.alg === "ES256") {
-    const key = await crypto.subtle.importKey(
-      "jwk",
-      input.jwk,
-      { name: "ECDSA", namedCurve: "P-256" },
-      false,
-      ["verify"]
-    );
-    return await crypto.subtle.verify(
-      { name: "ECDSA", hash: "SHA-256" },
-      key,
-      signature,
-      signingInput
-    );
-  }
-  if (input.alg === "RS256") {
-    const key = await crypto.subtle.importKey(
-      "jwk",
-      input.jwk,
-      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-      false,
-      ["verify"]
-    );
-    return await crypto.subtle.verify(
-      { name: "RSASSA-PKCS1-v1_5" },
-      key,
-      signature,
-      signingInput
-    );
-  }
-  return false;
-}
-function selectJwk(jwks, header) {
-  const alg = typeof header.alg === "string" ? header.alg : void 0;
-  const kid = typeof header.kid === "string" ? header.kid : void 0;
-  return (jwks.keys ?? []).find((key) => {
-    if (key.use && key.use !== "sig") return false;
-    if (alg && key.alg && key.alg !== alg) return false;
-    if (kid && key.kid !== kid) {
-      return false;
-    }
-    return true;
-  }) ?? null;
-}
-function stringClaim(value) {
-  return typeof value === "string" && value ? value : void 0;
-}
-function numberClaim(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
-}
-function validateIdTokenClaims(claims, config, nonce) {
-  const now = Math.floor(Date.now() / 1e3);
-  if (stringClaim(claims.iss) !== config.issuer) {
-    throw new Error("ID token issuer mismatch");
-  }
-  if (!stringClaim(claims.sub)) {
-    throw new Error("ID token missing subject");
-  }
-  const audience = claims.aud;
-  const audienceMatches = typeof audience === "string" ? audience === config.clientId : Array.isArray(audience) && audience.includes(config.clientId);
-  if (!audienceMatches) throw new Error("ID token audience mismatch");
-  if (Array.isArray(audience) && audience.length > 1) {
-    if (stringClaim(claims.azp) !== config.clientId) {
-      throw new Error("ID token authorized party mismatch");
-    }
-  } else if (claims.azp !== void 0 && stringClaim(claims.azp) !== config.clientId) {
-    throw new Error("ID token authorized party mismatch");
-  }
-  const exp = numberClaim(claims.exp);
-  if (!exp || exp <= now - CLOCK_SKEW_SECONDS) {
-    throw new Error("ID token expired");
-  }
-  const nbf = numberClaim(claims.nbf);
-  if (nbf && nbf > now + CLOCK_SKEW_SECONDS) {
-    throw new Error("ID token not yet valid");
-  }
-  const iat = numberClaim(claims.iat);
-  if (iat && iat > now + CLOCK_SKEW_SECONDS) {
-    throw new Error("ID token issued in the future");
-  }
-  if (stringClaim(claims.nonce) !== nonce) {
-    throw new Error("ID token nonce mismatch");
-  }
-}
-async function verifyIdToken(env, idToken, nonce) {
-  const config = authConfig(env);
-  const parts = idToken.split(".");
-  if (parts.length !== 3) throw new Error("Invalid ID token format");
-  const header = parseBase64UrlJson(parts[0]);
-  const claims = parseBase64UrlJson(parts[1]);
-  const signature = base64UrlBytes(parts[2]);
-  if (!header || !claims || !signature) throw new Error("Invalid ID token");
-  const alg = typeof header.alg === "string" ? header.alg : "";
-  if (!["ES256", "RS256"].includes(alg)) {
-    throw new Error("Unsupported ID token algorithm");
-  }
-  const endpoints = await oidcEndpoints(config);
-  const jwksResponse = await fetch(endpoints.jwksUri, {
-    headers: { Accept: "application/json" }
-  });
-  if (!jwksResponse.ok) {
-    throw new Error(`OIDC JWKS fetch failed: ${jwksResponse.status}`);
-  }
-  const jwks = await jwksResponse.json();
-  const jwk = selectJwk(jwks, header);
-  if (!jwk) throw new Error("ID token signing key not found");
-  const valid = await verifyJwtSignature({
-    alg,
-    jwk,
-    signingInput: jwtSigningInput(parts),
-    signature
-  });
-  if (!valid) throw new Error("ID token signature invalid");
-  validateIdTokenClaims(claims, config, nonce);
-  return claims;
 }
 async function createSessionCookie(env, request, session) {
   const secret = envValue(env, "APP_SESSION_SECRET");
@@ -3581,7 +3685,7 @@ function registerGuiAuthRoutes(app2) {
         code,
         state.codeVerifier
       );
-      const claims = await verifyIdToken(c.env, token.id_token, state.nonce);
+      const claims = await verifyIdToken(config, token.id_token, state.nonce);
       const user = await fetchUserInfo(c.env, token.access_token);
       const subject = stringClaim(claims.sub);
       if (!subject || user.sub !== subject) {
@@ -3988,6 +4092,11 @@ async function validateSessionProxyToken(c, sessionId, token) {
   }
   return null;
 }
+function guiSessionOwnsSandbox(guiSession, state) {
+  if (guiSession.sub !== state.userId) return false;
+  if (guiSession.spaceId && guiSession.spaceId !== state.spaceId) return false;
+  return true;
+}
 async function authorizeGuiApp(c) {
   if (isTrustedTakosRoutedRequest(c)) return null;
   const url = new URL(c.req.url);
@@ -4043,6 +4152,27 @@ async function requireHostAdmin(c) {
   }
   return authError(c, 401, "Unauthorized");
 }
+async function resolveHostAdminScope(c) {
+  if (isTrustedTakosRoutedRequest(c)) return { response: null, kind: "admin" };
+  const token = extractBearerToken(c);
+  const expected = c.env.SANDBOX_HOST_AUTH_TOKEN;
+  if (token && expected && constantTimeEqual(token, expected)) {
+    return { response: null, kind: "admin" };
+  }
+  if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
+    const auth = await requireGuiAppAuth(c.env, c.req.raw);
+    if (auth) return { response: auth };
+    const guiSession = await readGuiSession(c.env, c.req.raw);
+    if (!guiSession) return { response: authError(c, 401, "Unauthorized") };
+    return { response: null, kind: "gui", guiSession };
+  }
+  if (!expected) {
+    return {
+      response: authError(c, 503, "Sandbox host auth token is not configured")
+    };
+  }
+  return { response: authError(c, 401, "Unauthorized") };
+}
 function requirePublishedMcpAuth(c) {
   const expected = resolvePublishedMcpAuthToken(c.env);
   if (!expected) {
@@ -4059,7 +4189,15 @@ async function authorizeSessionAccess(c, sessionId, stub) {
   const token = extractBearerToken(c);
   if (!token) {
     if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
-      return await requireGuiAppAuth(c.env, c.req.raw);
+      const auth = await requireGuiAppAuth(c.env, c.req.raw);
+      if (auth) return auth;
+      const guiSession = await readGuiSession(c.env, c.req.raw);
+      if (!guiSession) return authError(c, 401, "Unauthorized");
+      const state = await stub.getSessionState();
+      if (!state || !guiSessionOwnsSandbox(guiSession, state)) {
+        return authError(c, 403, "Forbidden");
+      }
+      return null;
     }
     return authError(c, 401, "Unauthorized");
   }
@@ -4317,19 +4455,6 @@ var publishedMcpTools = [
 var publishedMcpToolMap = new Map(
   publishedMcpTools.map((tool) => [tool.name, tool])
 );
-function isRecord(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function jsonRpcResponse(id, result) {
-  return Response.json({ jsonrpc: "2.0", id: id ?? null, result });
-}
-function jsonRpcError(id, code, message) {
-  return Response.json({
-    jsonrpc: "2.0",
-    id: id ?? null,
-    error: { code, message }
-  });
-}
 function publishedMcpJson(value) {
   return {
     content: [{ type: "text", text: JSON.stringify(value, null, 2) }]
@@ -4473,83 +4598,15 @@ async function callSandboxToolThroughPublishedMcp(c, targetToolName, args) {
   }
   return publishedMcpJson(result ?? null);
 }
-async function handlePublishedMcp(c) {
-  if (c.req.raw.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: { Allow: "POST, OPTIONS" }
-    });
-  }
-  if (c.req.raw.method !== "POST") {
-    return new Response(
-      JSON.stringify({
-        error: "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this endpoint"
-      }),
-      {
-        status: 405,
-        headers: {
-          "Content-Type": "application/json",
-          Allow: "POST, OPTIONS"
-        }
-      }
-    );
-  }
-  const auth = requirePublishedMcpAuth(c);
-  if (auth) return auth;
-  let body;
-  try {
-    body = await c.req.json();
-  } catch {
-    return jsonRpcError(null, -32700, "Parse error");
-  }
-  if (!isRecord(body)) return jsonRpcError(null, -32600, "Invalid Request");
-  const request = body;
-  const id = request.id;
-  if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
-    return jsonRpcError(id, -32600, "Invalid Request");
-  }
-  if (request.method === "initialize") {
-    return jsonRpcResponse(id, {
-      protocolVersion: "2024-11-05",
-      capabilities: { tools: {} },
-      serverInfo: {
-        name: "takos-computer",
-        version: "2.0.0"
-      }
-    });
-  }
-  if (request.method === "notifications/initialized") {
-    return new Response(null, { status: 204 });
-  }
-  if (request.method === "tools/list") {
-    return jsonRpcResponse(id, {
-      tools: publishedMcpTools.map(({ name, description, inputSchema }) => ({
-        name,
-        description,
-        inputSchema
-      }))
-    });
-  }
-  if (request.method !== "tools/call") {
-    return jsonRpcError(id, -32601, "Method not found");
-  }
-  if (!isRecord(request.params) || typeof request.params.name !== "string") {
-    return jsonRpcError(id, -32602, "Invalid params");
-  }
-  const tool = publishedMcpToolMap.get(request.params.name);
-  if (!tool) {
-    return jsonRpcError(id, -32602, `Unknown tool: ${request.params.name}`);
-  }
-  try {
-    const args = isRecord(request.params.arguments) ? request.params.arguments : {};
-    return jsonRpcResponse(id, await tool.handle(args, c));
-  } catch (error) {
-    return jsonRpcError(
-      id,
-      -32e3,
-      error instanceof Error ? error.message : String(error)
-    );
-  }
+function handlePublishedMcp(c) {
+  const handle = createMcpEnvelope({
+    serverInfo: { name: "takos-computer", version: "2.0.0" },
+    tools: publishedMcpTools,
+    toolMap: publishedMcpToolMap,
+    authorize: () => requirePublishedMcpAuth(c),
+    callContext: () => c
+  });
+  return handle(c.req.raw);
 }
 
 // packages/computer-hosts/src/sandbox-host.ts
@@ -4708,15 +4765,19 @@ registerGuiAuthRoutes(app);
 app.get("/gui", serveGuiApp);
 app.get("/gui/", serveGuiApp);
 async function listSessions(c) {
-  const auth = await requireHostAdmin(c);
-  if (auth) return auth;
+  const scope = await resolveHostAdminScope(c);
+  if (scope.response) return scope.response;
   const kv = c.env.SESSION_INDEX;
   if (!kv) return c.json({ sessions: [] });
   const list = await kv.list({ prefix: "session:" });
   const sessions = [];
   for (const key of list.keys) {
     const val = await kv.get(key.name, { type: "json" });
-    if (val) sessions.push(val);
+    if (!val) continue;
+    if (scope.kind === "gui" && !guiSessionOwnsSandbox(scope.guiSession, val)) {
+      continue;
+    }
+    sessions.push(val);
   }
   return c.json({ sessions });
 }
@@ -4776,26 +4837,9 @@ app.get("/gui/api/sandbox-session/:id", getSession);
 app.delete("/session/:id", destroySession);
 app.delete("/gui/api/sandbox-session/:id", destroySession);
 app.all("/mcp", handlePublishedMcp);
-function mcpMethodNotAllowed() {
-  return new Response(
-    JSON.stringify({
-      error: "MCP Streamable HTTP requests must use POST; server-to-client GET streams are not supported by this endpoint"
-    }),
-    {
-      status: 405,
-      headers: {
-        "Content-Type": "application/json",
-        Allow: "POST, OPTIONS"
-      }
-    }
-  );
-}
 async function forwardMcp(c) {
   if (c.req.raw.method === "OPTIONS") {
-    return new Response(null, {
-      status: 204,
-      headers: { Allow: "POST, OPTIONS" }
-    });
+    return mcpOptionsPreflight();
   }
   const sessionId = sessionIdParam(c);
   if (sessionId instanceof Response) return sessionId;

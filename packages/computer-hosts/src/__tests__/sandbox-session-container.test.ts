@@ -1,4 +1,4 @@
-import { test } from "bun:test";
+import { expect, test } from "bun:test";
 import type { HostContainerContext } from "../container-runtime.ts";
 import { SandboxSessionContainer } from "../sandbox-host.ts";
 import type {
@@ -6,20 +6,6 @@ import type {
   SandboxHostEnv,
   SandboxSessionTokenInfo,
 } from "../sandbox-session-types.ts";
-
-function assert(condition: unknown, message: string): asserts condition {
-  if (!condition) {
-    throw new Error(message);
-  }
-}
-
-function assertEquals(actual: unknown, expected: unknown): void {
-  if (JSON.stringify(actual) !== JSON.stringify(expected)) {
-    throw new Error(
-      `Expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-    );
-  }
-}
 
 type HostContainerStorage = HostContainerContext["storage"];
 
@@ -100,14 +86,14 @@ test("sandbox session container passes MCP auth token into the container env", a
 
   await container.createSession(createPayload());
 
-  assertEquals(container.pingEndpoint, "internal/healthz");
-  assertEquals(container.envVars, {
+  expect(container.pingEndpoint).toEqual("internal/healthz");
+  expect(container.envVars).toEqual({
     MCP_AUTH_TOKEN,
     TAKOS_TOKEN,
     TAKOS_API_URL,
     TAKOS_SPACE_ID: "space-1",
   });
-  assertEquals(container.startPorts, [[8080]]);
+  expect(container.startPorts).toEqual([[8080]]);
 });
 
 test("sandbox session container does not use host auth token as MCP fallback", async () => {
@@ -119,7 +105,7 @@ test("sandbox session container does not use host auth token as MCP fallback", a
 
   await container.createSession(createPayload());
 
-  assertEquals(container.envVars, {
+  expect(container.envVars).toEqual({
     TAKOS_TOKEN,
     TAKOS_API_URL,
     TAKOS_SPACE_ID: "space-1",
@@ -133,13 +119,12 @@ test("sandbox session container hydrates persisted session state and clears it o
   const payload = createPayload();
   const result = await first.createSession(payload);
   const createdState = await first.getSessionState();
-  assert(createdState, "expected session state after create");
+  expect(createdState).toBeTruthy();
 
   const second = new TestSandboxSessionContainer(ctx, createEnv());
 
-  assertEquals(await second.getSessionState(), createdState);
-  assertEquals(
-    await second.verifyProxyToken(result.proxyToken),
+  expect(await second.getSessionState()).toEqual(createdState);
+  expect(await second.verifyProxyToken(result.proxyToken)).toEqual(
     {
       sessionId: payload.sessionId,
       spaceId: payload.spaceId,
@@ -150,7 +135,7 @@ test("sandbox session container hydrates persisted session state and clears it o
   await second.destroySession();
 
   const third = new TestSandboxSessionContainer(ctx, createEnv());
-  assertEquals(await third.getSessionState(), null);
-  assertEquals(await third.verifyProxyToken(result.proxyToken), null);
-  assertEquals(second.destroyCalls, 1);
+  expect(await third.getSessionState()).toEqual(null);
+  expect(await third.verifyProxyToken(result.proxyToken)).toEqual(null);
+  expect(second.destroyCalls).toEqual(1);
 });

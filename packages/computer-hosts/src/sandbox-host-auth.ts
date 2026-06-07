@@ -27,6 +27,7 @@ import type { Context } from "hono";
 import {
   type GuiSession,
   guiAppAuthRequired,
+  parseCookie,
   readGuiSession,
   requireGuiAppAuth,
   requireGuiAppOrRedirect,
