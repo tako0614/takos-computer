@@ -17,7 +17,7 @@
  *      `requireGuiAppAuth` / `requireGuiAppOrRedirect` from `app-auth.ts`.
  *
  * This module owns the token / cookie plumbing and the
- * `requireHostAdmin` / `authorizeSessionAccess` / `authorizeGuiApp` /
+ * `resolveHostAdminScope` / `authorizeSessionAccess` / `authorizeGuiApp` /
  * `requirePublishedMcpAuth` gates that the routes in `sandbox-host.ts`
  * compose. Cookie names, lifetimes, and query-param names are part of the
  * public surface and must stay in sync with the GUI assets.
@@ -242,39 +242,16 @@ export async function authorizeGuiApp(
   return authError(c, 401, "Unauthorized");
 }
 
-export async function requireHostAdmin(
-  c: AppContext,
-): Promise<Response | null> {
-  if (isTrustedTakosRoutedRequest(c)) return null;
-
-  const token = extractBearerToken(c);
-  const expected = c.env.SANDBOX_HOST_AUTH_TOKEN;
-  if (token && expected && constantTimeEqual(token, expected)) {
-    return null;
-  }
-
-  if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
-    const auth = await requireGuiAppAuth(c.env, c.req.raw);
-    if (!auth) return null;
-    return auth;
-  }
-
-  if (!expected) {
-    return authError(c, 503, "Sandbox host auth token is not configured");
-  }
-
-  return authError(c, 401, "Unauthorized");
-}
-
 /**
  * Result of {@link resolveHostAdminScope}: either an unauthorized `response`,
- * or a successful scope describing how broadly the caller may list sessions.
+ * or a successful scope describing how broadly the caller may act.
  *
- * SECURITY (#25 cross-tenant session enumeration): `requireHostAdmin` accepts
- * an arbitrary GUI session, but a GUI user is NOT a host admin — they must only
- * see their own sessions. This narrows the listing surface: `kind: "admin"`
- * (admin bearer token / trusted-routed dashboard proxy) may see all sessions,
- * while `kind: "gui"` may only see sessions owned by `guiSession`.
+ * SECURITY (#10/#25 cross-tenant session IDOR): a validly-sealed GUI session
+ * only proves *some* user is authenticated — it is NOT host admin authority. So
+ * the create / list gates must distinguish scopes rather than treat any valid
+ * caller as an admin: `kind: "admin"` (admin bearer token / trusted-routed
+ * dashboard proxy) may see all sessions and mint sessions for any owner, while
+ * `kind: "gui"` may only see / create sessions bound to `guiSession`.
  */
 export type HostAdminScope =
   | { response: Response }

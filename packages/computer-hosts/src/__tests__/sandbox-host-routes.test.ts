@@ -262,6 +262,35 @@ function sessionCookieFromSetCookie(setCookie: string | null): string {
   return match[0];
 }
 
+/**
+ * Mint a sealed GUI session cookie for an arbitrary principal by driving the
+ * launch-token flow with a stubbed `launch-token/consume` upstream.
+ */
+function mintGuiSessionCookie(
+  env: SandboxHostEnv,
+  claims: { sub: string; spaceId?: string },
+): Promise<string> {
+  return withFetch((request) => {
+    const url = new URL(fetchRequestUrl(request));
+    if (url.pathname.endsWith("/launch-token/consume")) {
+      return Promise.resolve(Response.json({
+        consumed: true,
+        sub: claims.sub,
+        space_id: claims.spaceId,
+      }));
+    }
+    return Promise.resolve(Response.json({ error: "unexpected" }, {
+      status: 404,
+    }));
+  }, async () => {
+    const response = await fetchWorker(
+      env,
+      "/gui/api/auth/launch?return_to=%2Fgui&launch_token=tok",
+    );
+    return sessionCookieFromSetCookie(response.headers.get("set-cookie"));
+  });
+}
+
 test("sandbox host serves published GUI app routes", async () => {
   const { env } = createEnv();
 
@@ -758,6 +787,65 @@ test("sandbox host accepts GUI admin auth cookie for dashboard APIs", async () =
   expect(listResponse.status).toEqual(200);
   const listBody = await listResponse.json() as { sessions: unknown[] };
   expect(listBody.sessions.length).toEqual(1);
+});
+
+test("sandbox host forces GUI session owner on create and rejects foreign session ids", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+
+  // A host admin pre-creates a session owned by a different principal.
+  const preCreate = await fetchWorker(env, "/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...hostAuthHeaders() },
+    body: JSON.stringify({
+      sessionId: "victim-session",
+      spaceId: "space-victim",
+      userId: "victim-user",
+    }),
+  });
+  expect(preCreate.status).toEqual(201);
+
+  const cookie = await mintGuiSessionCookie(env, {
+    sub: "user-a",
+    spaceId: "space-a",
+  });
+
+  // A GUI caller cannot mint a session owned by another user/space: the
+  // client-supplied userId/spaceId are ignored and forced to the principal.
+  const createResponse = await fetchWorker(env, "/gui/api/sandbox-create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({
+      sessionId: "user-a-session",
+      spaceId: "space-b",
+      userId: "user-b",
+    }),
+  });
+  expect(createResponse.status).toEqual(201);
+
+  const getResponse = await fetchWorker(
+    env,
+    "/gui/api/sandbox-session/user-a-session",
+    { headers: { Cookie: cookie } },
+  );
+  expect(getResponse.status).toEqual(200);
+  const state = await getResponse.json() as {
+    userId: string;
+    spaceId: string;
+  };
+  expect(state.userId).toEqual("user-a");
+  expect(state.spaceId).toEqual("space-a");
+
+  // A GUI caller cannot target a sessionId already owned by another principal.
+  const clobber = await fetchWorker(env, "/gui/api/sandbox-create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({
+      sessionId: "victim-session",
+      spaceId: "space-a",
+      userId: "user-a",
+    }),
+  });
+  expect(clobber.status).toEqual(409);
 });
 
 test("sandbox host rejects unauthenticated session create", async () => {
