@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { constantTimeEqual } from "../crypto-utils.ts";
+import { constantTimeEqual } from "@takos-computer/common/crypto";
 
 test("constantTimeEqual: equal strings return true", () => {
   expect(constantTimeEqual("hello", "hello")).toEqual(true);

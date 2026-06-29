@@ -8,7 +8,7 @@
 
 import { HostContainerRuntime } from "./container-runtime.ts";
 import { generateProxyToken } from "./proxy-token.ts";
-import { constantTimeEqual } from "./crypto-utils.ts";
+import { constantTimeEqual } from "@takos-computer/common/crypto";
 import type { DurableObjectStub } from "./cf-types.ts";
 import type {
   CreateSandboxSessionPayload,

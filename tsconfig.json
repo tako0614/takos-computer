@@ -17,9 +17,6 @@
       "@takos-computer/common/mcp-rpc": ["./packages/common/src/mcp-rpc.ts"],
       "@takos-computer/common/logger": ["./packages/common/src/logger.ts"],
       "@takos-computer/common/cf-types": ["./packages/common/src/cf-types.ts"],
-      "@takos-computer/computer-hosts": [
-        "./packages/computer-hosts/src/index.ts"
-      ],
       "@takos-computer/computer-hosts/local-dev-simulator": [
         "./packages/computer-hosts/src/local-dev-simulator.ts"
       ],

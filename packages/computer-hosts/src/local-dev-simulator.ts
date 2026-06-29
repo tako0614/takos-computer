@@ -1,6 +1,6 @@
 import { createSandboxServiceApp } from "@takos-computer/sandbox-service";
 import worker, { type SandboxSessionContainer } from "./sandbox-host.ts";
-import { constantTimeEqual } from "./crypto-utils.ts";
+import { constantTimeEqual } from "@takos-computer/common/crypto";
 import type { DurableObjectId, DurableObjectStub } from "./cf-types.ts";
 import { generateProxyToken } from "./proxy-token.ts";
 import { mkdir } from "node:fs/promises";
