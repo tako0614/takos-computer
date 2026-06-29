@@ -155,6 +155,34 @@ test("ShellManager: abort signal terminates running command", async () => {
   }
 });
 
+test("ShellManager: exec kills backgrounded children on timeout", async () => {
+  const tmpDir = await makeTempDir();
+  const marker = `${tmpDir}/bg-marker`;
+  try {
+    const shell = new ShellManager(tmpDir);
+    // Background a child that keeps rewriting a marker, then let the foreground
+    // command sleep past the timeout. Without a process-group kill the
+    // backgrounded child survives the parent's SIGTERM and keeps writing.
+    const result = await shell.exec({
+      command:
+        `( while true; do date +%s%N > "${marker}"; sleep 0.1; done ) & sleep 10`,
+      timeout_ms: 500,
+    });
+    expect(result.timed_out).toEqual(true);
+
+    if (Bun.which("setsid") !== null) {
+      // Let any survivor write, truncate, then confirm nothing rewrites it.
+      await Bun.sleep(300);
+      await Bun.write(marker, "");
+      await Bun.sleep(600);
+      const after = await Bun.file(marker).text().catch(() => "");
+      expect(after).toEqual("");
+    }
+  } finally {
+    await remove(tmpDir, { recursive: true });
+  }
+});
+
 test("ShellManager: killProcess rejects unsafe pid and signal inputs", () => {
   const shell = new ShellManager("/tmp");
 

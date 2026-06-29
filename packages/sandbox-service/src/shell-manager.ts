@@ -5,7 +5,7 @@
  * limits.
  */
 
-import { env as processEnv } from "node:process";
+import { env as processEnv, kill as sendSignal } from "node:process";
 import { stat } from "node:fs/promises";
 import { WorkspaceJail } from "./workspace-jail.ts";
 
@@ -111,7 +111,7 @@ export interface ProcessKillResult {
 export class ShellManager {
   private readonly jail: WorkspaceJail;
   private readonly defaultCwd: string;
-  private managedProcesses = new Map<number, ManagedProcess>();
+  private managedProcesses = new Map<number, TrackedProcess>();
 
   constructor(defaultCwd = "/home/sandbox/workspace") {
     this.jail = new WorkspaceJail(defaultCwd, { noun: "cwd" });
@@ -134,6 +134,7 @@ export class ShellManager {
     let timedOut = false;
     let aborted = false;
     let process: ManagedProcess | null = null;
+    let groupKill = false;
     let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
 
     const terminate = (reason: "timeout" | "abort") => {
@@ -141,18 +142,13 @@ export class ShellManager {
       if (reason === "abort") aborted = true;
       if (!process) return;
 
-      try {
-        process.kill("SIGTERM");
-      } catch {
-        // Process may already be gone.
-      }
+      // SECURITY (S2): signal the whole process group (negative pid) when the
+      // command was spawned via setsid, so backgrounded grandchildren do not
+      // outlive the timeout/abort. Falls back to the direct pid otherwise.
+      killManagedProcess(process, "SIGTERM", groupKill);
 
       forceKillTimer = setTimeout(() => {
-        try {
-          process?.kill("SIGKILL");
-        } catch {
-          // Process may already be gone.
-        }
+        if (process) killManagedProcess(process, "SIGKILL", groupKill);
       }, PROCESS_KILL_GRACE_MS);
     };
 
@@ -167,14 +163,20 @@ export class ShellManager {
     try {
       const cwd = await this.resolveCwd(options.cwd ?? this.defaultCwd);
       const workspaceRoot = await this.jail.getWorkspaceRealRoot();
-      const child = bunLike().spawn([
+      const commandArgv = [
         "bash",
         "-c",
         WORKSPACE_CWD_GUARD_SCRIPT,
         "takos-shell-manager",
         workspaceRoot,
         options.command,
-      ], {
+      ];
+      // `setsid -w` makes the command its own session/process-group leader (so
+      // child.pid == the new pgid) and waits for it, propagating the exit
+      // status. This lets terminate() kill the whole group on timeout/abort.
+      groupKill = setsidAvailable();
+      const argv = groupKill ? ["setsid", "-w", ...commandArgv] : commandArgv;
+      const child = bunLike().spawn(argv, {
         cwd,
         env: buildCommandEnv(options.env, {
           allowTakosToken: options.allow_takos_token === true,
@@ -185,7 +187,7 @@ export class ShellManager {
       });
 
       process = child;
-      this.trackProcess(child);
+      this.trackProcess(child, groupKill);
       if (options.signal?.aborted) externalAbort();
 
       const [exitCode, stdout, stderr] = await Promise.all([
@@ -225,8 +227,8 @@ export class ShellManager {
       throw new Error(`Unsupported signal: ${signal}`);
     }
 
-    const process = this.managedProcesses.get(pid);
-    if (!process) {
+    const tracked = this.managedProcesses.get(pid);
+    if (!tracked) {
       return {
         killed: false,
         pid,
@@ -236,7 +238,12 @@ export class ShellManager {
     }
 
     try {
-      process.kill(signal);
+      if (tracked.groupKill) {
+        // Negative pid signals the whole process group (see exec/setsid).
+        sendSignal(-pid, signal);
+      } else {
+        tracked.process.kill(signal);
+      }
       return { killed: true, pid, signal };
     } catch (err) {
       return {
@@ -248,10 +255,10 @@ export class ShellManager {
     }
   }
 
-  private trackProcess(process: ManagedProcess): void {
-    this.managedProcesses.set(process.pid, process);
+  private trackProcess(process: ManagedProcess, groupKill: boolean): void {
+    this.managedProcesses.set(process.pid, { process, groupKill });
     void process.exited.finally(() => {
-      if (this.managedProcesses.get(process.pid) === process) {
+      if (this.managedProcesses.get(process.pid)?.process === process) {
         this.managedProcesses.delete(process.pid);
       }
     });
@@ -308,6 +315,12 @@ type ManagedProcess = {
   kill(signal?: ProcessSignal): void;
 };
 
+type TrackedProcess = {
+  readonly process: ManagedProcess;
+  /** When true the process leads its own group; kill the negative pid. */
+  readonly groupKill: boolean;
+};
+
 type BunLike = {
   spawn(
     command: readonly string[],
@@ -318,12 +331,45 @@ type BunLike = {
       stderr: "pipe";
     },
   ): ManagedProcess;
+  which(command: string): string | null;
 };
 
 function bunLike(): BunLike {
   const bun = (globalThis as { Bun?: BunLike }).Bun;
   if (!bun) throw new Error("Bun runtime is required for shell execution");
   return bun;
+}
+
+let cachedSetsidAvailable: boolean | undefined;
+
+/**
+ * Whether `setsid` is on PATH. When present, commands run as their own
+ * session/process-group leader so the whole group can be killed on
+ * timeout/abort; otherwise exec falls back to single-process termination.
+ */
+function setsidAvailable(): boolean {
+  if (cachedSetsidAvailable === undefined) {
+    cachedSetsidAvailable = bunLike().which("setsid") !== null;
+  }
+  return cachedSetsidAvailable;
+}
+
+/** Best-effort kill of a managed process, swallowing already-gone errors. */
+function killManagedProcess(
+  process: ManagedProcess,
+  signal: ProcessSignal,
+  groupKill: boolean,
+): void {
+  try {
+    if (groupKill) {
+      // Negative pid signals the whole process group created via setsid.
+      sendSignal(-process.pid, signal);
+    } else {
+      process.kill(signal);
+    }
+  } catch {
+    // Process / group may already be gone.
+  }
 }
 
 function assertSafeEnvShape(
