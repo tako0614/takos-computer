@@ -49,7 +49,7 @@
 // public surface (function names, return-type semantics, env var prefixes),
 // not just internal helpers.
 import type { Hono } from "hono";
-import { constantTimeEqual } from "./crypto-utils.ts";
+import { constantTimeEqual } from "@takos-computer/common/crypto";
 import {
   normalizeIssuer,
   type OidcConfig,

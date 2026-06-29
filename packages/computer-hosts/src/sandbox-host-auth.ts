@@ -32,7 +32,7 @@ import {
   requireGuiAppAuth,
   requireGuiAppOrRedirect,
 } from "./app-auth.ts";
-import { constantTimeEqual } from "./crypto-utils.ts";
+import { constantTimeEqual } from "@takos-computer/common/crypto";
 import type { DurableObjectStub } from "./cf-types.ts";
 import { getDOStub } from "./sandbox-session-container.ts";
 import type { SandboxSessionContainer } from "./sandbox-session-container.ts";
