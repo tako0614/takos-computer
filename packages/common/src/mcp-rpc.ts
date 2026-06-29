@@ -108,6 +108,51 @@ export type McpEnvelopeConfig<TContext> = {
 };
 
 /**
+ * Cap on the JSON-RPC request body for ALL MCP entry points sharing this
+ * envelope (published /mcp + the in-container sandbox endpoint), so neither
+ * buffers an oversized body. Matches MAX_MCP_FORWARD_BODY_BYTES on the host
+ * forward path. 1 MiB is far above any real MCP call.
+ */
+const MAX_MCP_BODY_BYTES = 1024 * 1024;
+
+/**
+ * Read the request body as text, bounded to `max` bytes. Returns `null` when the
+ * body exceeds the cap (Content-Length fast-path + streaming check so a missing
+ * Content-Length / chunked body cannot be buffered unbounded).
+ */
+async function readBodyTextBounded(
+  request: Request,
+  max: number,
+): Promise<string | null> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength && Number(contentLength) > max) return null;
+  if (!request.body) {
+    const text = await request.text();
+    return new TextEncoder().encode(text).length > max ? null : text;
+  }
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > max) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buf.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(buf);
+}
+
+/**
  * Build a `(Request) => Promise<Response>` handler implementing the shared MCP
  * Streamable-HTTP JSON-RPC envelope. The caller supplies tools, identity, an
  * auth gate, and a per-call context factory.
@@ -129,9 +174,13 @@ export function createMcpEnvelope<TContext>(
     const denied = await authorize(request);
     if (denied) return denied;
 
+    const bodyText = await readBodyTextBounded(request, MAX_MCP_BODY_BYTES);
+    if (bodyText === null) {
+      return jsonRpcError(null, -32600, "Request body too large");
+    }
     let body: unknown;
     try {
-      body = await request.json();
+      body = JSON.parse(bodyText);
     } catch {
       return jsonRpcError(null, -32700, "Parse error");
     }

@@ -273,12 +273,19 @@ async function createSession(c: AppContext): Promise<Response> {
   let { sessionId, spaceId, userId } = payload;
 
   if (scope.kind === "gui") {
-    // Force the owner to the authenticated principal; ignore client claims.
+    // Force BOTH owner fields to the sealed session; never trust client claims.
+    // spaceId is set authoritatively even when the session carries no space
+    // claim (-> ""), so a space-less GUI session can't let a client-supplied
+    // spaceId survive into SandboxSessionState / TAKOS_SPACE_ID and spoof the
+    // space context the sandbox advertises to the Takos runtime.
     userId = scope.guiSession.sub;
-    if (scope.guiSession.spaceId) spaceId = scope.guiSession.spaceId;
+    spaceId = scope.guiSession.spaceId ?? "";
   }
 
-  if (!sessionId || !spaceId || !userId) {
+  // A non-empty spaceId is only demanded of admin / trusted-routed callers (who
+  // supply it explicitly); a GUI caller's space is derived above and may be
+  // legitimately empty for a space-less session.
+  if (!sessionId || !userId || (scope.kind !== "gui" && !spaceId)) {
     return c.json({
       error: "Missing required fields: sessionId, spaceId, userId",
     }, 400);

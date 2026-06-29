@@ -848,6 +848,37 @@ test("sandbox host forces GUI session owner on create and rejects foreign sessio
   expect(clobber.status).toEqual(409);
 });
 
+test("sandbox host does not let a space-less GUI session forge spaceId", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+
+  // A GUI session with NO space claim (the IdP / launch flow omitted space_id).
+  const cookie = await mintGuiSessionCookie(env, { sub: "user-a" });
+
+  // The client tries to supply a space; it must NOT survive into the session
+  // (otherwise it would spoof TAKOS_SPACE_ID for the sandbox container).
+  const createResponse = await fetchWorker(env, "/gui/api/sandbox-create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({
+      sessionId: "user-a-session",
+      spaceId: "space-victim",
+      userId: "user-a",
+    }),
+  });
+  expect(createResponse.status).toEqual(201);
+
+  const getResponse = await fetchWorker(
+    env,
+    "/gui/api/sandbox-session/user-a-session",
+    { headers: { Cookie: cookie } },
+  );
+  expect(getResponse.status).toEqual(200);
+  const state = await getResponse.json() as { userId: string; spaceId: string };
+  expect(state.userId).toEqual("user-a");
+  // Authoritative empty space — the client-supplied "space-victim" was dropped.
+  expect(state.spaceId).toEqual("");
+});
+
 test("sandbox host rejects unauthenticated session create", async () => {
   const { env } = createEnv();
 
