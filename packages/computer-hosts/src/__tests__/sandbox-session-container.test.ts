@@ -87,12 +87,14 @@ test("sandbox session container passes MCP auth token into the container env", a
   await container.createSession(createPayload());
 
   expect(container.pingEndpoint).toEqual("internal/healthz");
+  // SECURITY (S1): TAKOS_TOKEN must NOT be persisted in the container env even
+  // when configured on the host — it is delivered per-exec instead.
   expect(container.envVars).toEqual({
     MCP_AUTH_TOKEN,
-    TAKOS_TOKEN,
     TAKOS_API_URL,
     TAKOS_SPACE_ID: "space-1",
   });
+  expect(container.envVars.TAKOS_TOKEN).toBeUndefined();
   expect(container.startPorts).toEqual([[8080]]);
 });
 
@@ -106,7 +108,6 @@ test("sandbox session container does not use host auth token as MCP fallback", a
   await container.createSession(createPayload());
 
   expect(container.envVars).toEqual({
-    TAKOS_TOKEN,
     TAKOS_API_URL,
     TAKOS_SPACE_ID: "space-1",
   });
