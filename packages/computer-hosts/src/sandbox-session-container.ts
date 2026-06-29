@@ -47,6 +47,9 @@ export class SandboxSessionContainer
 
   private applyContainerEnv(): void {
     const nextEnvVars = { ...this.envVars };
+    // MCP_AUTH_TOKEN must stay in the container PID-1 environ: the in-container
+    // sandbox-service reads it from `process.env` to authenticate the host's
+    // forwarded MCP requests. There is no per-exec delivery path for it.
     const mcpAuthToken = resolveContainerMcpAuthToken(this.env);
     if (mcpAuthToken) {
       nextEnvVars.MCP_AUTH_TOKEN = mcpAuthToken;
@@ -54,11 +57,12 @@ export class SandboxSessionContainer
       delete nextEnvVars.MCP_AUTH_TOKEN;
     }
 
-    if (this.env.TAKOS_TOKEN) {
-      nextEnvVars.TAKOS_TOKEN = this.env.TAKOS_TOKEN;
-    } else {
-      delete nextEnvVars.TAKOS_TOKEN;
-    }
+    // SECURITY (S1 secret exfil): TAKOS_TOKEN is a host-wide secret and must
+    // NOT live in the persistent container env — untrusted `shell_exec` could
+    // read it from /proc/1/environ, bypassing shell-manager's env denylist and
+    // the per-exec `allow_takos_token` gate. It is delivered only per-exec via
+    // the shell tool's `takos_token` argument when `allow_takos_token` is set.
+    delete nextEnvVars.TAKOS_TOKEN;
 
     if (this.env.TAKOS_API_URL) {
       nextEnvVars.TAKOS_API_URL = this.env.TAKOS_API_URL;
