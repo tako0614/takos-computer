@@ -176,24 +176,17 @@ app.get("/healthz", (c) => {
   });
 });
 
-app.get("/health", (c) => {
-  const missing = collectMissingRuntimeBindings(c.env);
-
-  return c.json({
-    status: missing.length === 0 ? "ok" : "misconfigured",
-    service: "takos-sandbox-host",
-    missingBindings: missing,
-  }, missing.length === 0 ? 200 : 503);
-});
-
-app.get("/readyz", (c) => {
+function readinessResponse(c: AppContext): Response {
   const missing = collectMissingRuntimeBindings(c.env);
   return c.json({
     status: missing.length === 0 ? "ok" : "misconfigured",
     service: "takos-sandbox-host",
     missingBindings: missing,
   }, missing.length === 0 ? 200 : 503);
-});
+}
+
+app.get("/health", readinessResponse);
+app.get("/readyz", readinessResponse);
 
 async function serveGuiApp(c: AppContext): Promise<Response> {
   const auth = await authorizeGuiApp(c);
