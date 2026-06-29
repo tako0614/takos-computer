@@ -27,7 +27,6 @@ import {
   authorizeGuiApp,
   authorizeSessionAccess,
   guiSessionOwnsSandbox,
-  requireHostAdmin,
   resolveHostAdminScope,
   resolvePublishedMcpAuthToken,
 } from "./sandbox-host-auth.ts";
@@ -269,22 +268,48 @@ app.get("/gui/api/sandbox-sessions", listSessions);
 // ---------------------------------------------------------------------------
 
 async function createSession(c: AppContext): Promise<Response> {
-  const auth = await requireHostAdmin(c);
-  if (auth) return auth;
+  // SECURITY (#10/#25 cross-tenant session IDOR): the create gate must resolve
+  // *who* the caller is, not just that they are authenticated. A host admin /
+  // trusted-routed dashboard proxy may mint a session for any owner, but a
+  // plain GUI caller must only ever create sessions owned by themselves — the
+  // client-supplied `userId`/`spaceId` are untrusted for the GUI scope.
+  const scope = await resolveHostAdminScope(c);
+  if (scope.response) return scope.response;
 
   const payload = await c.req.json<CreateSandboxSessionPayload>();
-  if (!payload.sessionId || !payload.spaceId || !payload.userId) {
+  let { sessionId, spaceId, userId } = payload;
+
+  if (scope.kind === "gui") {
+    // Force the owner to the authenticated principal; ignore client claims.
+    userId = scope.guiSession.sub;
+    if (scope.guiSession.spaceId) spaceId = scope.guiSession.spaceId;
+  }
+
+  if (!sessionId || !spaceId || !userId) {
     return c.json({
       error: "Missing required fields: sessionId, spaceId, userId",
     }, 400);
   }
+
   try {
-    const stub = getDOStub(c.env, payload.sessionId);
-    const result = await stub.createSession(payload);
+    // A GUI caller must not address (and thereby clobber) a `sessionId` that is
+    // already owned by a different principal.
+    if (scope.kind === "gui") {
+      const existing = await getDOStub(c.env, sessionId).getSessionState();
+      if (existing && !guiSessionOwnsSandbox(scope.guiSession, existing)) {
+        return c.json(
+          { error: "Session id is owned by another principal" },
+          409,
+        );
+      }
+    }
+
+    const stub = getDOStub(c.env, sessionId);
+    const result = await stub.createSession({ sessionId, spaceId, userId });
     const state = await stub.getSessionState();
     const kv = c.env.SESSION_INDEX;
     if (kv && state) {
-      await kv.put(`session:${payload.sessionId}`, JSON.stringify(state));
+      await kv.put(`session:${sessionId}`, JSON.stringify(state));
     }
     return c.json(result, 201);
   } catch (err) {
