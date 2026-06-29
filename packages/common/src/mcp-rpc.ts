@@ -72,6 +72,16 @@ export type McpToolResult = {
   content: Array<{ type: "text"; text: string }>;
 };
 
+/** Wrap a plain string in the MCP tool-result text envelope. */
+export function mcpText(text: string): McpToolResult {
+  return { content: [{ type: "text", text }] };
+}
+
+/** Wrap a value as a pretty-printed JSON MCP text result. */
+export function mcpJson(value: unknown): McpToolResult {
+  return mcpText(JSON.stringify(value, null, 2));
+}
+
 /** Minimal tool definition the envelope needs for list + dispatch. */
 export type McpToolDefinition<TContext> = {
   name: string;

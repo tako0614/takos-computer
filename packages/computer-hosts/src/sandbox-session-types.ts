@@ -2,8 +2,15 @@
  * Type definitions for the SandboxSession container host.
  */
 
-import type { DurableObjectNamespace } from "./cf-types.ts";
+import type { DurableObjectNamespace, KVNamespace } from "./cf-types.ts";
 import type { SandboxSessionContainer } from "./sandbox-host.ts";
+
+// Wire shapes are owned by `common` so the host worker and dashboard share one
+// definition.
+export type {
+  CreateSandboxSessionPayload,
+  SandboxSessionState,
+} from "@takos-computer/common/sandbox-session";
 
 export interface SandboxHostEnv {
   SANDBOX_CONTAINER: DurableObjectNamespace<SandboxSessionContainer>;
@@ -30,40 +37,8 @@ export interface SandboxHostEnv {
   SESSION_INDEX?: KVNamespace;
 }
 
-export interface KVNamespace {
-  get(key: string, options?: { type?: "text" }): Promise<string | null>;
-  get(key: string, options: { type: "json" }): Promise<unknown>;
-  put(
-    key: string,
-    value: string,
-    options?: { expirationTtl?: number },
-  ): Promise<void>;
-  delete(key: string): Promise<void>;
-  list(
-    options?: { prefix?: string; limit?: number; cursor?: string },
-  ): Promise<{
-    keys: Array<{ name: string }>;
-    list_complete: boolean;
-    cursor?: string;
-  }>;
-}
-
 export interface SandboxSessionTokenInfo {
   sessionId: string;
   spaceId: string;
   userId: string;
-}
-
-export interface CreateSandboxSessionPayload {
-  sessionId: string;
-  spaceId: string;
-  userId: string;
-}
-
-export interface SandboxSessionState {
-  sessionId: string;
-  spaceId: string;
-  userId: string;
-  status: "starting" | "active" | "stopped";
-  createdAt: string;
 }

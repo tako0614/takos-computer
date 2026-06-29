@@ -10,3 +10,18 @@ export function constantTimeEqual(a: string, b: string): boolean {
   }
   return result === 0;
 }
+
+/** Encode bytes as unpadded base64url (`+/` → `-_`, no `=` padding). */
+export function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll(
+    "=",
+    "",
+  );
+}
+
+/** Generate a cryptographically random unpadded base64url token. */
+export function randomBase64UrlToken(byteLength = 32): string {
+  return base64Url(crypto.getRandomValues(new Uint8Array(byteLength)));
+}

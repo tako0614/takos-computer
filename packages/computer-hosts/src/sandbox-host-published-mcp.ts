@@ -27,7 +27,12 @@
  */
 
 import type { Context } from "hono";
-import { createMcpEnvelope, isRecord } from "@takos-computer/common/mcp-rpc";
+import {
+  createMcpEnvelope,
+  isRecord,
+  type McpToolResult,
+  mcpJson,
+} from "@takos-computer/common/mcp-rpc";
 import type { DurableObjectStub } from "./cf-types.ts";
 import {
   requirePublishedMcpAuth,
@@ -50,10 +55,6 @@ const PUBLISHED_MCP_DEFAULT_SESSION_ID = "agent-default";
 const PUBLISHED_MCP_DEFAULT_SPACE_ID = "published-mcp";
 const PUBLISHED_MCP_DEFAULT_USER_ID = "takos-agent";
 
-type PublishedMcpToolResult = {
-  content: Array<{ type: "text"; text: string }>;
-};
-
 type PublishedMcpToolDefinition = {
   name: string;
   description: string;
@@ -61,7 +62,7 @@ type PublishedMcpToolDefinition = {
   handle: (
     args: Record<string, unknown>,
     c: AppContext,
-  ) => Promise<PublishedMcpToolResult>;
+  ) => Promise<McpToolResult>;
 };
 
 const publishedSessionInputProperties: Record<string, unknown> = {
@@ -93,7 +94,7 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
     },
     handle: async (args, c) => {
       const { state, sessionId } = await ensurePublishedMcpSession(c, args);
-      return publishedMcpJson(toPublishedSessionState(state, sessionId));
+      return mcpJson(toPublishedSessionState(state, sessionId));
     },
   },
   {
@@ -109,7 +110,7 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
         args,
       );
       const state = await getDOStub(c.env, scopedId).getSessionState();
-      return publishedMcpJson(
+      return mcpJson(
         state
           ? toPublishedSessionState(state, sessionId)
           : { session_id: sessionId, status: "missing" },
@@ -132,7 +133,7 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       await getDOStub(c.env, scopedId).destroySession();
       const kv = c.env.SESSION_INDEX;
       if (kv) await kv.delete(`session:${scopedId}`);
-      return publishedMcpJson({ ok: true, session_id: sessionId });
+      return mcpJson({ ok: true, session_id: sessionId });
     },
   },
   {
@@ -331,12 +332,6 @@ const publishedMcpToolMap = new Map(
   publishedMcpTools.map((tool) => [tool.name, tool]),
 );
 
-function publishedMcpJson(value: unknown): PublishedMcpToolResult {
-  return {
-    content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
-  };
-}
-
 function nonEmptyStringArg(
   args: Record<string, unknown>,
   names: string[],
@@ -499,7 +494,7 @@ async function callSandboxToolThroughPublishedMcp(
   c: AppContext,
   targetToolName: string,
   args: Record<string, unknown>,
-): Promise<PublishedMcpToolResult> {
+): Promise<McpToolResult> {
   const { stub } = await ensurePublishedMcpSession(c, args);
   const mcpAuthToken = resolveContainerMcpAuthToken(c.env);
   if (!mcpAuthToken) {
@@ -550,9 +545,9 @@ async function callSandboxToolThroughPublishedMcp(
       isRecord(item) && item.type === "text" && typeof item.text === "string"
     )
   ) {
-    return result as PublishedMcpToolResult;
+    return result as McpToolResult;
   }
-  return publishedMcpJson(result ?? null);
+  return mcpJson(result ?? null);
 }
 
 export function handlePublishedMcp(c: AppContext): Promise<Response> {

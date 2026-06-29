@@ -69,24 +69,6 @@ export function isGuiPath(pathname: string): boolean {
   return pathname === "/gui" || pathname.startsWith("/gui/");
 }
 
-export function getCookie(
-  cookieHeader: string | undefined,
-  name: string,
-): string | null {
-  if (!cookieHeader) return null;
-  for (const part of cookieHeader.split(";")) {
-    const [rawName, ...rawValue] = part.trim().split("=");
-    if (rawName !== name || rawValue.length === 0) continue;
-    const value = rawValue.join("=");
-    try {
-      return decodeURIComponent(value);
-    } catch {
-      return value;
-    }
-  }
-  return null;
-}
-
 export function extractBearerToken(c: AppContext): string | null {
   const authHeader = c.req.header("Authorization");
   if (authHeader?.startsWith("Bearer ")) {
@@ -98,8 +80,8 @@ export function extractBearerToken(c: AppContext): string | null {
   if (headerToken) return headerToken;
 
   if (isGuiPath(new URL(c.req.url).pathname)) {
-    return getCookie(c.req.header("Cookie"), GUI_ADMIN_COOKIE) ??
-      getCookie(c.req.header("Cookie"), GUI_PROXY_COOKIE);
+    return parseCookie(c.req.header("Cookie"), GUI_ADMIN_COOKIE) ??
+      parseCookie(c.req.header("Cookie"), GUI_PROXY_COOKIE);
   }
 
   return null;
@@ -209,13 +191,13 @@ export async function authorizeGuiApp(
   }
 
   const sessionId = guiSessionIdFromPath(url.pathname);
-  const adminCookie = getCookie(c.req.header("Cookie"), GUI_ADMIN_COOKIE);
+  const adminCookie = parseCookie(c.req.header("Cookie"), GUI_ADMIN_COOKIE);
   if (adminCookie) {
     const auth = validateHostAdminToken(c, adminCookie);
     if (!auth) return null;
   }
 
-  const proxyCookie = getCookie(c.req.header("Cookie"), GUI_PROXY_COOKIE);
+  const proxyCookie = parseCookie(c.req.header("Cookie"), GUI_PROXY_COOKIE);
   if (proxyCookie && sessionId) {
     const auth = await validateSessionProxyToken(c, sessionId, proxyCookie);
     if (!auth) return null;
