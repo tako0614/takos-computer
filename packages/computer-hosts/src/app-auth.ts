@@ -49,7 +49,11 @@
 // public surface (function names, return-type semantics, env var prefixes),
 // not just internal helpers.
 import type { Hono } from "hono";
-import { constantTimeEqual } from "@takos-computer/common/crypto";
+import {
+  base64Url,
+  constantTimeEqual,
+  randomBase64UrlToken,
+} from "@takos-computer/common/crypto";
 import {
   normalizeIssuer,
   type OidcConfig,
@@ -173,15 +177,6 @@ function launchMisconfigured(env: AppRuntimeEnv): Response | null {
   }, { status: 503 });
 }
 
-function base64Url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll(
-    "=",
-    "",
-  );
-}
-
 function base64UrlJson(value: unknown): string {
   return base64Url(new TextEncoder().encode(JSON.stringify(value)));
 }
@@ -212,10 +207,6 @@ async function unseal<T>(token: string, secret: string): Promise<T | null> {
   if (!payload || !signature) return null;
   if (!constantTimeEqual(await sign(payload, secret), signature)) return null;
   return parseBase64UrlJson<T>(payload);
-}
-
-function randomToken(): string {
-  return base64Url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 async function sha256Base64Url(value: string): Promise<string> {
@@ -478,10 +469,10 @@ export function registerGuiAuthRoutes(
     const config = authConfig(c.env);
     try {
       const endpoints = await oidcEndpoints(config);
-      const codeVerifier = randomToken();
+      const codeVerifier = randomBase64UrlToken();
       const state: OAuthState = {
-        state: randomToken(),
-        nonce: randomToken(),
+        state: randomBase64UrlToken(),
+        nonce: randomBase64UrlToken(),
         codeVerifier,
         returnTo: safeReturnTo(c.req.query("return_to") ?? null),
         exp: Math.floor(Date.now() / 1000) + STATE_MAX_AGE_SECONDS,

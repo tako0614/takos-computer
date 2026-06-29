@@ -17,7 +17,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { sep } from "node:path";
 import { lstat, realpath } from "node:fs/promises";
 
-function isNotFoundError(error: unknown): boolean {
+export function isNotFoundError(error: unknown): boolean {
   return typeof error === "object" && error !== null &&
     "code" in error &&
     (error as { code?: unknown }).code === "ENOENT";

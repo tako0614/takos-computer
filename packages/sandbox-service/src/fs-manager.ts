@@ -15,7 +15,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { WorkspaceJail } from "./workspace-jail.ts";
+import { isNotFoundError, WorkspaceJail } from "./workspace-jail.ts";
 
 const MAX_READ_BYTES = 256 * 1024; // 256 KB
 
@@ -296,12 +296,6 @@ async function safeLstatFile(path: string): Promise<Stats | null> {
   } catch {
     return null;
   }
-}
-
-function isNotFoundError(error: unknown): boolean {
-  return typeof error === "object" && error !== null &&
-    "code" in error &&
-    (error as { code?: unknown }).code === "ENOENT";
 }
 
 /** Simple glob matching (supports * and ?). */

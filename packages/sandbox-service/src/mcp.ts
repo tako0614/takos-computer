@@ -15,6 +15,9 @@ import { constantTimeEqual } from "@takos-computer/common/crypto";
 import {
   createMcpEnvelope,
   isRecord,
+  type McpToolResult,
+  mcpJson,
+  mcpText,
 } from "@takos-computer/common/mcp-rpc";
 import type {
   ProcessSignal,
@@ -33,10 +36,6 @@ export interface McpServerDeps {
   fs: FsManager;
 }
 
-type ToolResult = {
-  content: Array<{ type: "text"; text: string }>;
-};
-
 type ToolContext = {
   signal: AbortSignal;
 };
@@ -45,23 +44,13 @@ type ToolDefinition = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  handle: (args: unknown, context: ToolContext) => Promise<ToolResult>;
+  handle: (args: unknown, context: ToolContext) => Promise<McpToolResult>;
 };
 
 export type McpRequestHandler = (request: Request) => Promise<Response>;
 
-function text(s: string): ToolResult {
-  return {
-    content: [{ type: "text", text: s }],
-  };
-}
-
-function json(v: unknown): ToolResult {
-  return text(JSON.stringify(v, null, 2));
-}
-
-function errorText(err: unknown): ToolResult {
-  return text(`Error: ${err instanceof Error ? err.message : String(err)}`);
+function errorText(err: unknown): McpToolResult {
+  return mcpText(`Error: ${err instanceof Error ? err.message : String(err)}`);
 }
 
 function objectArgs(args: unknown): Record<string, unknown> {
@@ -81,7 +70,7 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
         shell.exec({
           ...objectArgs(args),
           signal: context.signal,
-        } as ShellExecOptions).then(json),
+        } as ShellExecOptions).then(mcpJson),
     },
     {
       name: "file_read",
@@ -90,7 +79,9 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
       inputSchema: { type: "object" },
       handle: async (args, context) => {
         try {
-          return json(await fs.read(args as FileReadOptions, context.signal));
+          return mcpJson(
+            await fs.read(args as FileReadOptions, context.signal),
+          );
         } catch (err) {
           return errorText(err);
         }
@@ -103,7 +94,7 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
       inputSchema: { type: "object" },
       handle: async (args) => {
         try {
-          return json(await fs.write(args as FileWriteOptions));
+          return mcpJson(await fs.write(args as FileWriteOptions));
         } catch (err) {
           return errorText(err);
         }
@@ -116,7 +107,7 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
       inputSchema: { type: "object" },
       handle: async (args) => {
         try {
-          return json({ entries: await fs.list(args as FileListOptions) });
+          return mcpJson({ entries: await fs.list(args as FileListOptions) });
         } catch (err) {
           return errorText(err);
         }
@@ -135,7 +126,7 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
           if (typeof args.path !== "string") {
             throw new Error("path must be a string");
           }
-          return json(await fs.info(args.path));
+          return mcpJson(await fs.info(args.path));
         } catch (err) {
           return errorText(err);
         }
@@ -150,7 +141,9 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
           command: "ps aux --no-headers",
           timeout_ms: 5000,
         });
-        if (result.exit_code !== 0) return text(`Error: ${result.stderr}`);
+        if (result.exit_code !== 0) {
+          return mcpText(`Error: ${result.stderr}`);
+        }
 
         const processes = result.stdout.trim().split("\n").filter(Boolean).map(
           (line) => {
@@ -164,7 +157,7 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
             };
           },
         );
-        return json({ processes });
+        return mcpJson({ processes });
       },
     },
     {
@@ -182,7 +175,7 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
         const signal = typeof args.signal === "string"
           ? args.signal
           : "SIGTERM";
-        return Promise.resolve(json(
+        return Promise.resolve(mcpJson(
           shell.killProcess(args.pid, signal as ProcessSignal),
         ));
       },
