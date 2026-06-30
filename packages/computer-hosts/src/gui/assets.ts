@@ -8,17 +8,4 @@
 
 import { appHtml } from "./assets.generated.ts";
 
-const styleCss = `
-body {
-  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
-  margin: 0;
-  background: #0f172a;
-  color: #e2e8f0;
-}
-
-code {
-  color: #bfdbfe;
-}
-`;
-
-export { appHtml, styleCss };
+export { appHtml };

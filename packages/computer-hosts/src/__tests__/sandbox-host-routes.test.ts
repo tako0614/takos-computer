@@ -326,11 +326,6 @@ test("sandbox host serves published GUI app routes", async () => {
   expect(fallbackResponse.headers.get("content-type")).toEqual("text/html; charset=utf-8",
   );
 
-  const styleResponse = await fetchWorker(env, "/gui/style.css");
-  expect(styleResponse.status).toEqual(200);
-  expect(styleResponse.headers.get("content-type")).toEqual("text/css; charset=utf-8",
-  );
-
   const iconResponse = await fetchWorker(env, "/icons/computer.svg");
   expect(iconResponse.status).toEqual(200);
   expect(iconResponse.headers.get("content-type")).toEqual("image/svg+xml");

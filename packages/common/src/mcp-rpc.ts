@@ -108,12 +108,12 @@ export type McpEnvelopeConfig<TContext> = {
 };
 
 /**
- * Cap on the JSON-RPC request body for ALL MCP entry points sharing this
- * envelope (published /mcp + the in-container sandbox endpoint), so neither
- * buffers an oversized body. Matches MAX_MCP_FORWARD_BODY_BYTES on the host
- * forward path. 1 MiB is far above any real MCP call.
+ * Single source of truth for the JSON-RPC request-body cap across ALL MCP entry
+ * points: the published `/mcp` envelope, the in-container sandbox endpoint, AND
+ * the host's `/session/:id/mcp` forward (which imports this constant instead of
+ * declaring its own). 1 MiB is far above any real MCP call.
  */
-const MAX_MCP_BODY_BYTES = 1024 * 1024;
+export const MAX_MCP_BODY_BYTES = 1024 * 1024;
 
 /**
  * Read the request body as text, bounded to `max` bytes. Returns `null` when the

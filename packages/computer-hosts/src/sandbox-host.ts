@@ -11,11 +11,12 @@
 
 import { type Context, Hono } from "hono";
 import {
+  MAX_MCP_BODY_BYTES,
   mcpMethodNotAllowed,
   mcpOptionsPreflight,
 } from "@takos-computer/common/mcp-rpc";
 import { guiAppAuthRequired, registerGuiAuthRoutes } from "./app-auth.ts";
-import { appHtml, styleCss } from "./gui/assets.ts";
+import { appHtml } from "./gui/assets.ts";
 import { computerIconSvg } from "./gui/icon.ts";
 import {
   getDOStub,
@@ -44,7 +45,6 @@ import {
   PUBLISHED_MCP_SCOPE_PREFIX,
   type CreateSandboxSessionPayload,
   type SandboxHostEnv,
-  type SandboxSessionState,
 } from "./sandbox-session-types.ts";
 
 export { SandboxSessionContainer };
@@ -55,7 +55,6 @@ export { SandboxSessionContainer };
 
 type Env = SandboxHostEnv;
 type AppContext = Context<{ Bindings: Env }>;
-const MAX_MCP_FORWARD_BODY_BYTES = 1024 * 1024;
 
 // Default cap on the number of live sandbox sessions a single GUI principal may
 // own. Each session is its own Durable Object + CF container that lingers for
@@ -222,15 +221,6 @@ async function serveGuiApp(c: AppContext): Promise<Response> {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
-    },
-  });
-}
-
-function serveGuiStyle(): Response {
-  return new Response(styleCss, {
-    headers: {
-      "Content-Type": "text/css; charset=utf-8",
-      "Cache-Control": "public, max-age=300",
     },
   });
 }
@@ -457,7 +447,7 @@ async function forwardMcp(c: AppContext): Promise<Response> {
     if (c.req.raw.method === "POST") {
       const body = await readRequestTextWithLimit(
         c.req.raw,
-        MAX_MCP_FORWARD_BODY_BYTES,
+        MAX_MCP_BODY_BYTES,
       );
       if (!body.ok) return body.response;
       init.body = body.body;
@@ -475,7 +465,6 @@ async function forwardMcp(c: AppContext): Promise<Response> {
 
 app.all("/session/:id/mcp", forwardMcp);
 app.all("/gui/api/sandbox-session/:id/mcp", forwardMcp);
-app.get("/gui/style.css", serveGuiStyle);
 app.get("/gui/*", serveGuiApp);
 
 export default {

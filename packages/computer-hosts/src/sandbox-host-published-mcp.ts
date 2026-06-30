@@ -363,11 +363,17 @@ function nonEmptyStringArg(
  * if no token is configured — `requirePublishedMcpAuth` already rejects those
  * requests before tool handlers run, so this is a defensive guard.
  */
+// The token -> namespace digest is stable; memoize it so a multi-step agent's
+// tool calls don't re-hash the auth token on every request.
+const tokenNamespaceCache = new Map<string, string>();
+
 async function publishedMcpTokenNamespace(c: AppContext): Promise<string> {
   const token = resolvePublishedMcpAuthToken(c.env);
   if (!token) {
     throw new Error("Published MCP auth token is not configured");
   }
+  const cached = tokenNamespaceCache.get(token);
+  if (cached) return cached;
   const digest = await crypto.subtle.digest(
     "SHA-256",
     new TextEncoder().encode(token),
@@ -375,7 +381,9 @@ async function publishedMcpTokenNamespace(c: AppContext): Promise<string> {
   const hex = Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-  return `${PUBLISHED_MCP_SCOPE_PREFIX}${hex.slice(0, 16)}`;
+  const namespace = `${PUBLISHED_MCP_SCOPE_PREFIX}${hex.slice(0, 16)}`;
+  tokenNamespaceCache.set(token, namespace);
+  return namespace;
 }
 
 type ResolvedPublishedMcpSession = {
