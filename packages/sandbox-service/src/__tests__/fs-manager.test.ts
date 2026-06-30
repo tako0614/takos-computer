@@ -278,6 +278,64 @@ test("FsManager.list: with glob filter", async () => {
   }
 });
 
+test("FsManager.list: ? and multi-* globs match correctly", async () => {
+  await setup();
+  try {
+    await writeTextFile(join(tmpDir, "ab.log"), "1");
+    await writeTextFile(join(tmpDir, "axb.log"), "2");
+    await writeTextFile(join(tmpDir, "report-2026.csv"), "3");
+
+    const single = await fs.list({ path: tmpDir, glob: "a?.log" });
+    expect(single.map((e) => e.name).sort()).toEqual(["ab.log"]);
+
+    const multi = await fs.list({ path: tmpDir, glob: "*-*.csv" });
+    expect(multi.map((e) => e.name).sort()).toEqual(["report-2026.csv"]);
+
+    const allLogs = await fs.list({ path: tmpDir, glob: "*.log" });
+    expect(allLogs.map((e) => e.name).sort()).toEqual(["ab.log", "axb.log"]);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("FsManager.list: pathological glob returns quickly (no ReDoS)", async () => {
+  await setup();
+  try {
+    // A non-matching long filename: the old `*` -> `.*` regex wedged the
+    // event loop for >100s on this input. The linear matcher must be fast.
+    await writeTextFile(join(tmpDir, "a".repeat(40)), "x");
+
+    const start = performance.now();
+    const entries = await fs.list({
+      path: tmpDir,
+      glob: "*".repeat(30) + "x",
+    });
+    const elapsed = performance.now() - start;
+
+    expect(entries.length).toEqual(0); // none end with "x"
+    expect(elapsed).toBeLessThan(1000);
+  } finally {
+    await cleanup();
+  }
+});
+
+test("FsManager.list: over-long glob is rejected, not run", async () => {
+  await setup();
+  try {
+    await writeTextFile(join(tmpDir, "file.ts"), "ts");
+    let threw = false;
+    try {
+      await fs.list({ path: tmpDir, glob: "*".repeat(2000) });
+    } catch (err) {
+      threw = true;
+      expect(String(err)).toContain("glob pattern too long");
+    }
+    expect(threw).toBeTruthy();
+  } finally {
+    await cleanup();
+  }
+});
+
 test("FsManager.list: recursive", async () => {
   await setup();
   try {

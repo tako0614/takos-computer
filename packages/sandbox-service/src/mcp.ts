@@ -105,9 +105,11 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
       description:
         "List directory contents. Returns name, type, size, and modification time.",
       inputSchema: { type: "object" },
-      handle: async (args) => {
+      handle: async (args, context) => {
         try {
-          return mcpJson({ entries: await fs.list(args as FileListOptions) });
+          return mcpJson({
+            entries: await fs.list(args as FileListOptions, context.signal),
+          });
         } catch (err) {
           return errorText(err);
         }
