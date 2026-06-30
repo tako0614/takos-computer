@@ -42,3 +42,16 @@ export interface SandboxSessionTokenInfo {
   spaceId: string;
   userId: string;
 }
+
+/**
+ * Reserved owner/id namespace for published-MCP (`/mcp`) sessions. Their DO
+ * name + index id is `pmcp-<tokenHash>:<logicalId>`. GUI auth treats this as a
+ * reserved namespace that a GUI principal can never own or address, so a
+ * published-token holder cannot plant a co-inhabited sandbox into a GUI user's
+ * session list by setting `user_id`/`space_id` to a victim's tuple.
+ */
+export const PUBLISHED_MCP_SCOPE_PREFIX = "pmcp-";
+
+export function isPublishedScopedId(id: string): boolean {
+  return id.startsWith(PUBLISHED_MCP_SCOPE_PREFIX);
+}

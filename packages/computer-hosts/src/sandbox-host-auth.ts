@@ -36,9 +36,10 @@ import { constantTimeEqual } from "@takos-computer/common/crypto";
 import type { DurableObjectStub } from "./cf-types.ts";
 import { getDOStub } from "./sandbox-session-container.ts";
 import type { SandboxSessionContainer } from "./sandbox-session-container.ts";
-import type {
-  SandboxHostEnv,
-  SandboxSessionState,
+import {
+  isPublishedScopedId,
+  type SandboxHostEnv,
+  type SandboxSessionState,
 } from "./sandbox-session-types.ts";
 
 type Env = SandboxHostEnv;
@@ -167,11 +168,20 @@ async function validateSessionProxyToken(
 // `userId`/`spaceId`. A GUI caller may touch a session only when both match.
 export function guiSessionOwnsSandbox(
   guiSession: GuiSession,
-  state: Pick<SandboxSessionState, "userId" | "spaceId">,
+  state: Pick<SandboxSessionState, "userId" | "spaceId" | "sessionId">,
 ): boolean {
+  // SECURITY (published-MCP confused deputy): a published-token holder can set
+  // an arbitrary `user_id`/`space_id` on a sandbox it provisions. Those land in
+  // the Capsule-wide session index, so a GUI principal must never be able to
+  // own/address a published-scoped session even when its stored `userId`
+  // matches the caller's `sub`. The published namespace is reserved.
+  if (isPublishedScopedId(state.sessionId)) return false;
   if (guiSession.sub !== state.userId) return false;
   // When the GUI session asserts a space scope, it must match the session's
-  // space. (Older sessions without a space claim are bound by `sub` alone.)
+  // space. A space-less GUI session (no `takosumi.space_id` claim — including a
+  // plain `openid profile email` OIDC login) is intentionally bound by `sub`
+  // alone, so it can reach that user's own sandboxes across the user's spaces.
+  // This is same-user only (never a cross-user/cross-tenant escalation).
   if (guiSession.spaceId && guiSession.spaceId !== state.spaceId) return false;
   return true;
 }
@@ -300,6 +310,10 @@ export async function authorizeSessionAccess(
       if (auth) return auth;
       const guiSession = await readGuiSession(c.env, c.req.raw);
       if (!guiSession) return authError(c, 401, "Unauthorized");
+      // A GUI principal must never address a published-MCP-scoped session id,
+      // even by guessing it: those sessions are owned by the agent runtime, not
+      // a GUI user (reserved namespace, see `guiSessionOwnsSandbox`).
+      if (isPublishedScopedId(sessionId)) return authError(c, 403, "Forbidden");
       const state = await stub.getSessionState();
       if (!state || !guiSessionOwnsSandbox(guiSession, state)) {
         return authError(c, 403, "Forbidden");

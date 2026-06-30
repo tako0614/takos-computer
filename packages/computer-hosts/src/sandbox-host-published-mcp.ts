@@ -43,9 +43,10 @@ import {
   resolveContainerMcpAuthToken,
 } from "./sandbox-session-container.ts";
 import type { SandboxSessionContainer } from "./sandbox-session-container.ts";
-import type {
-  SandboxHostEnv,
-  SandboxSessionState,
+import {
+  PUBLISHED_MCP_SCOPE_PREFIX,
+  type SandboxHostEnv,
+  type SandboxSessionState,
 } from "./sandbox-session-types.ts";
 
 type Env = SandboxHostEnv;
@@ -365,7 +366,7 @@ async function publishedMcpTokenNamespace(c: AppContext): Promise<string> {
   const hex = Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
-  return `pmcp-${hex.slice(0, 16)}`;
+  return `${PUBLISHED_MCP_SCOPE_PREFIX}${hex.slice(0, 16)}`;
 }
 
 type ResolvedPublishedMcpSession = {

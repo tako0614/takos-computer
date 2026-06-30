@@ -123,9 +123,47 @@ export class SandboxSessionContainer
     ]);
   }
 
+  private firstProxyToken(): string | null {
+    if (!this.cachedTokens) return null;
+    for (const token of this.cachedTokens.keys()) return token;
+    return null;
+  }
+
   async createSession(
     payload: CreateSandboxSessionPayload,
-  ): Promise<{ ok: true; proxyToken: string }> {
+    options: { force?: boolean } = {},
+  ): Promise<{ ok: true; proxyToken: string; reused?: boolean }> {
+    await this.ensureSessionStateLoaded();
+    await this.ensureProxyTokensLoaded();
+
+    // DO-level ownership / idempotency invariant. The worker layer already
+    // binds owner=self for GUI callers, but this is the second line of defense
+    // and the single create-or-reuse contract shared by the GUI route and the
+    // published-MCP path (which previously diverged: hard-recreate vs reuse).
+    const existing = this.sessionState;
+    if (existing && existing.status !== "stopped" && !options.force) {
+      const ownerChanged = existing.userId !== payload.userId ||
+        existing.spaceId !== payload.spaceId;
+      if (ownerChanged) {
+        // Never silently re-home a live session (its workspace + running
+        // processes) onto a different principal.
+        throw new Error("Session id already exists for a different owner");
+      }
+      // Same owner, still live: reuse the running container + existing token
+      // instead of tearing it down and rotating the proxy token.
+      const reusedToken = this.firstProxyToken();
+      if (reusedToken) {
+        await this.ensureContainerStarted();
+        return { ok: true, proxyToken: reusedToken, reused: true };
+      }
+    }
+
+    // A forced re-create (or an owner change via `force`) must not inherit the
+    // previous owner's live container; tear it down first.
+    if (existing && options.force) {
+      await Promise.allSettled([this.clearPersistedSession(), this.destroy()]);
+    }
+
     const proxyToken = generateProxyToken();
     const tokenInfo: SandboxSessionTokenInfo = {
       sessionId: payload.sessionId,
@@ -189,6 +227,36 @@ export class SandboxSessionContainer
     await this.destroy();
   }
 
+  /**
+   * Start the container if it is not already running/healthy.
+   *
+   * The `@cloudflare/containers` framework stops a container after `sleepAfter`
+   * (10m) idle via `onActivityExpired()`, but leaves DO `sessionState` intact,
+   * so the session keeps reporting "active". `renewActivityTimeout()` only
+   * moves the sleep deadline — it does NOT restart a stopped container. Without
+   * this, a forward to a slept/crashed container hits a not-listening error and
+   * the session is permanently broken (500) until an explicit destroy+recreate.
+   */
+  private async ensureContainerStarted(): Promise<void> {
+    let healthy = false;
+    try {
+      healthy = this.container.running &&
+        (await this.getState()).status === "healthy";
+    } catch {
+      healthy = false;
+    }
+    if (healthy) return;
+    await this.startAndWaitForPorts([8080]);
+    // The container was (re)started: reconcile a stale status so
+    // getSessionState / computer_session_status stop reporting a dead session.
+    if (this.sessionState && this.sessionState.status !== "active") {
+      await this.persistSessionState({
+        ...this.sessionState,
+        status: "active",
+      });
+    }
+  }
+
   /** Forward an HTTP request to the container. */
   async forwardToContainer(
     path: string,
@@ -196,6 +264,7 @@ export class SandboxSessionContainer
   ): Promise<Response> {
     await this.ensureSessionStateLoaded();
     this.applyContainerEnv();
+    await this.ensureContainerStarted();
     this.renewActivityTimeout();
     const tcpPort = this.container.getTcpPort(8080);
     const request = new Request(`http://internal${path}`, init);
