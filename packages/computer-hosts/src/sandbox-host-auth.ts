@@ -8,8 +8,8 @@
  *      parameter on GUI paths (the query token is exchanged for an admin
  *      cookie via a 302 redirect).
  *   2. Per-session client — presents the proxy token returned by
- *      `POST /create` either as a Bearer token, an `X-Proxy-Token` header,
- *      or the `takos_computer_proxy_token` GUI cookie.
+ *      `POST /create` as a Bearer token or an `X-Proxy-Token` header (it is a
+ *      programmatic credential, never a browser cookie).
  *   3. Takosumi-routed GUI request — trusted iff
  *      `TAKOS_TRUST_ROUTED_GUI_API=1` and the `X-Takos-Internal-Marker: 1`
  *      header is set by the dashboard proxy. When configured, GUI requests
@@ -46,7 +46,6 @@ type Env = SandboxHostEnv;
 type AppContext = Context<{ Bindings: Env }>;
 
 export const GUI_ADMIN_COOKIE = "takos_computer_admin_token";
-export const GUI_PROXY_COOKIE = "takos_computer_proxy_token";
 export const GUI_AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60;
 
 export function resolvePublishedMcpAuthToken(env: Env): string | undefined {
@@ -81,8 +80,7 @@ export function extractBearerToken(c: AppContext): string | null {
   if (headerToken) return headerToken;
 
   if (isGuiPath(new URL(c.req.url).pathname)) {
-    return parseCookie(c.req.header("Cookie"), GUI_ADMIN_COOKIE) ??
-      parseCookie(c.req.header("Cookie"), GUI_PROXY_COOKIE);
+    return parseCookie(c.req.header("Cookie"), GUI_ADMIN_COOKIE);
   }
 
   return null;
@@ -207,12 +205,6 @@ export async function authorizeGuiApp(
     if (!auth) return null;
   }
 
-  const proxyCookie = parseCookie(c.req.header("Cookie"), GUI_PROXY_COOKIE);
-  if (proxyCookie && sessionId) {
-    const auth = await validateSessionProxyToken(c, sessionId, proxyCookie);
-    if (!auth) return null;
-  }
-
   const headerToken = extractBearerToken(c);
   if (headerToken) {
     const adminAuth = validateHostAdminToken(c, headerToken);
@@ -299,37 +291,38 @@ export async function authorizeSessionAccess(
 ): Promise<Response | null> {
   if (isTrustedTakosRoutedRequest(c)) return null;
 
+  // Resolve the caller in a fixed order — admin token, then per-session proxy
+  // token, then OIDC GUI session — and NEVER let a present-but-invalid
+  // admin/proxy credential (e.g. a stale `takos_computer_admin_token` cookie
+  // after server-side rotation) short-circuit a valid sealed GUI session. The
+  // pre-fix code keyed the OIDC fall-through on `if (!token)`, so a stale admin
+  // cookie made the same authenticated user get 401 on get/destroy/MCP while
+  // still getting 200 on list/create.
   const token = extractBearerToken(c);
-  if (!token) {
-    if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
-      // SECURITY (#10 cross-user RCE via session IDOR): a valid GUI session
-      // is necessary but NOT sufficient — it must also own the *target*
-      // sandbox. Verify the sealed session, then bind it to the persisted
-      // owner of `sessionId` before granting read/destroy/MCP access.
-      const auth = await requireGuiAppAuth(c.env, c.req.raw);
-      if (auth) return auth;
-      const guiSession = await readGuiSession(c.env, c.req.raw);
-      if (!guiSession) return authError(c, 401, "Unauthorized");
-      // A GUI principal must never address a published-MCP-scoped session id,
-      // even by guessing it: those sessions are owned by the agent runtime, not
-      // a GUI user (reserved namespace, see `guiSessionOwnsSandbox`).
-      if (isPublishedScopedId(sessionId)) return authError(c, 403, "Forbidden");
-      const state = await stub.getSessionState();
-      if (!state || !guiSessionOwnsSandbox(guiSession, state)) {
-        return authError(c, 403, "Forbidden");
-      }
-      return null;
-    }
-    return authError(c, 401, "Unauthorized");
-  }
-
   const adminToken = c.env.SANDBOX_HOST_AUTH_TOKEN;
-  if (adminToken && constantTimeEqual(token, adminToken)) return null;
-
-  const tokenInfo = await stub.verifyProxyToken(token);
-  if (!tokenInfo || tokenInfo.sessionId !== sessionId) {
-    return authError(c, 401, "Unauthorized");
+  if (token && adminToken && constantTimeEqual(token, adminToken)) return null;
+  if (token) {
+    const tokenInfo = await stub.verifyProxyToken(token);
+    if (tokenInfo && tokenInfo.sessionId === sessionId) return null;
   }
 
-  return null;
+  if (isGuiPath(new URL(c.req.url).pathname) && guiAppAuthRequired(c.env)) {
+    // SECURITY (#10 cross-user RCE via session IDOR): a valid GUI session is
+    // necessary but NOT sufficient — it must also own the *target* sandbox.
+    const auth = await requireGuiAppAuth(c.env, c.req.raw);
+    if (auth) return auth;
+    const guiSession = await readGuiSession(c.env, c.req.raw);
+    if (!guiSession) return authError(c, 401, "Unauthorized");
+    // A GUI principal must never address a published-MCP-scoped session id,
+    // even by guessing it: those sessions are owned by the agent runtime, not
+    // a GUI user (reserved namespace, see `guiSessionOwnsSandbox`).
+    if (isPublishedScopedId(sessionId)) return authError(c, 403, "Forbidden");
+    const state = await stub.getSessionState();
+    if (!state || !guiSessionOwnsSandbox(guiSession, state)) {
+      return authError(c, 403, "Forbidden");
+    }
+    return null;
+  }
+
+  return authError(c, 401, "Unauthorized");
 }

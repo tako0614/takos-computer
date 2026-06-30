@@ -879,6 +879,56 @@ test("sandbox host does not let a space-less GUI session forge spaceId", async (
   expect(state.spaceId).toEqual("");
 });
 
+test("sandbox host authorizes consistently when a stale admin cookie rides along a valid OIDC session", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+  const sessionCookie = await mintGuiSessionCookie(env, {
+    sub: "user-a",
+    spaceId: "space-a",
+  });
+  // The user created a session through their valid OIDC GUI session.
+  const createResponse = await fetchWorker(env, "/gui/api/sandbox-create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: sessionCookie },
+    body: JSON.stringify({
+      sessionId: "user-a-session",
+      spaceId: "space-a",
+      userId: "user-a",
+    }),
+  });
+  expect(createResponse.status).toEqual(201);
+
+  // Now a STALE admin-token cookie rides along the same valid session cookie
+  // (e.g. opened the dashboard once via ?authToken, then the admin token
+  // rotated server-side). It must not suppress the valid OIDC session: every
+  // verb stays consistent for the same authenticated user.
+  const cookie = `takos_computer_admin_token=${
+    encodeURIComponent("stale-rotated-admin-token")
+  }; ${sessionCookie}`;
+
+  const listResponse = await fetchWorker(env, "/gui/api/sandbox-sessions", {
+    headers: { Cookie: cookie },
+  });
+  expect(listResponse.status).toEqual(200);
+
+  const getResponse = await fetchWorker(
+    env,
+    "/gui/api/sandbox-session/user-a-session",
+    { headers: { Cookie: cookie } },
+  );
+  expect(getResponse.status).toEqual(200);
+
+  const mcpResponse = await fetchWorker(
+    env,
+    "/gui/api/sandbox-session/user-a-session/mcp",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "process_list" }),
+    },
+  );
+  expect(mcpResponse.status).toEqual(200);
+});
+
 test("sandbox host enforces a per-user live-session quota", async () => {
   const { env } = createEnv({ appAuthRequired: true });
   env.MAX_SANDBOX_SESSIONS_PER_USER = "2";
@@ -1102,34 +1152,6 @@ test("sandbox host supports published GUI MCP compatibility route", async () => 
     path: "/mcp",
     body: { jsonrpc: "2.0", method: "process_list" },
   });
-  expect(mcpCalls).toEqual([{
-    path: "/mcp",
-    authorization: `Bearer ${MCP_AUTH_TOKEN}`,
-    body: { jsonrpc: "2.0", method: "process_list" },
-  }]);
-});
-
-test("sandbox host accepts GUI session proxy cookie for MCP route", async () => {
-  const { env, mcpCalls } = createEnv();
-
-  const cookie = `takos_computer_proxy_token=${
-    encodeURIComponent(SESSION_PROXY_TOKEN)
-  }`;
-
-  const response = await fetchWorker(
-    env,
-    "/gui/api/sandbox-session/session-1/mcp",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookie,
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", method: "process_list" }),
-    },
-  );
-
-  expect(response.status).toEqual(200);
   expect(mcpCalls).toEqual([{
     path: "/mcp",
     authorization: `Bearer ${MCP_AUTH_TOKEN}`,
