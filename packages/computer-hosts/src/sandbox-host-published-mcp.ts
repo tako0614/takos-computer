@@ -42,6 +42,7 @@ import {
   getDOStub,
   resolveContainerMcpAuthToken,
 } from "./sandbox-session-container.ts";
+import { indexSession, unindexSession } from "./session-index.ts";
 import type { SandboxSessionContainer } from "./sandbox-session-container.ts";
 import {
   PUBLISHED_MCP_SCOPE_PREFIX,
@@ -127,13 +128,21 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       properties: publishedSessionInputProperties,
     },
     handle: async (args, c) => {
-      const { sessionId, scopedId } = await resolvePublishedMcpSessionArgs(
-        c,
-        args,
-      );
-      await getDOStub(c.env, scopedId).destroySession();
+      const { sessionId, scopedId, userId } =
+        await resolvePublishedMcpSessionArgs(c, args);
+      const stub = getDOStub(c.env, scopedId);
+      // Load the stored owner before destroy so the owner-scoped index key
+      // matches what `indexSession` wrote (the DO state holds the logical id, so
+      // unindex always uses the scoped id as the key suffix).
+      const state = await stub.getSessionState();
+      await stub.destroySession();
       const kv = c.env.SESSION_INDEX;
-      if (kv) await kv.delete(`session:${scopedId}`);
+      if (kv) {
+        await unindexSession(kv, {
+          userId: state?.userId ?? userId,
+          sessionId: scopedId,
+        });
+      }
       return mcpJson({ ok: true, session_id: sessionId });
     },
   },
@@ -458,7 +467,7 @@ async function indexPublishedMcpSession(
   // the published surface owns. The logical id is still what the published
   // caller sees in tool results (see `toPublishedSessionState`).
   const indexedState: SandboxSessionState = { ...state, sessionId: scopedId };
-  await kv.put(`session:${scopedId}`, JSON.stringify(indexedState));
+  await indexSession(kv, indexedState);
 }
 
 async function ensurePublishedMcpSession(

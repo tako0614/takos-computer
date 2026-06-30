@@ -34,6 +34,8 @@ export interface SandboxHostEnv {
   TAKOS_API_URL?: string;
   TAKOS_TOKEN?: string;
   TAKOS_TRUST_ROUTED_GUI_API?: string;
+  /** Per-GUI-principal cap on live sessions (default 10). */
+  MAX_SANDBOX_SESSIONS_PER_USER?: string;
   SESSION_INDEX?: KVNamespace;
 }
 

@@ -31,10 +31,20 @@ import {
   resolvePublishedMcpAuthToken,
 } from "./sandbox-host-auth.ts";
 import { handlePublishedMcp } from "./sandbox-host-published-mcp.ts";
-import type {
-  CreateSandboxSessionPayload,
-  SandboxHostEnv,
-  SandboxSessionState,
+import {
+  countOwnerSessions,
+  indexSession,
+  listSessionStates,
+  ownerIndexPrefix,
+  SESSION_INDEX_GLOBAL_PREFIX,
+  unindexSession,
+} from "./session-index.ts";
+import {
+  isPublishedScopedId,
+  PUBLISHED_MCP_SCOPE_PREFIX,
+  type CreateSandboxSessionPayload,
+  type SandboxHostEnv,
+  type SandboxSessionState,
 } from "./sandbox-session-types.ts";
 
 export { SandboxSessionContainer };
@@ -46,6 +56,22 @@ export { SandboxSessionContainer };
 type Env = SandboxHostEnv;
 type AppContext = Context<{ Bindings: Env }>;
 const MAX_MCP_FORWARD_BODY_BYTES = 1024 * 1024;
+
+// Default cap on the number of live sandbox sessions a single GUI principal may
+// own. Each session is its own Durable Object + CF container that lingers for
+// `sleepAfter` (10m), and the container class is globally capped
+// (maxInstances). Without a per-user bound, one authenticated user could
+// exhaust the shared pool and deny the app to every other tenant.
+const DEFAULT_MAX_SESSIONS_PER_USER = 10;
+
+function maxSessionsPerUser(env: Env): number {
+  const raw = env.MAX_SANDBOX_SESSIONS_PER_USER;
+  if (!raw) return DEFAULT_MAX_SESSIONS_PER_USER;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_MAX_SESSIONS_PER_USER;
+}
 
 // ---------------------------------------------------------------------------
 // Worker
@@ -238,18 +264,16 @@ async function listSessions(c: AppContext): Promise<Response> {
 
   const kv = c.env.SESSION_INDEX;
   if (!kv) return c.json({ sessions: [] });
-  const list = await kv.list({ prefix: "session:" });
-  const sessions: SandboxSessionState[] = [];
-  for (const key of list.keys) {
-    const val = await kv.get(key.name, { type: "json" }) as
-      | SandboxSessionState
-      | null;
-    if (!val) continue;
-    if (scope.kind === "gui" && !guiSessionOwnsSandbox(scope.guiSession, val)) {
-      continue;
-    }
-    sessions.push(val);
-  }
+  // A GUI caller lists only its own owner-scoped prefix (so it never reads
+  // other tenants' state); an admin lists the whole index. Both follow the KV
+  // cursor so entries past the first page are not silently dropped.
+  const prefix = scope.kind === "gui"
+    ? ownerIndexPrefix(scope.guiSession.sub)
+    : SESSION_INDEX_GLOBAL_PREFIX;
+  const all = await listSessionStates(kv, prefix);
+  const sessions = scope.kind === "gui"
+    ? all.filter((val) => guiSessionOwnsSandbox(scope.guiSession, val))
+    : all;
   return c.json({ sessions });
 }
 
@@ -291,7 +315,18 @@ async function createSession(c: AppContext): Promise<Response> {
     }, 400);
   }
 
+  // The `pmcp-` id namespace is reserved for published-MCP sessions, which a
+  // GUI principal can never own (see guiSessionOwnsSandbox). Reject it here so a
+  // caller cannot create a session it would then be unable to access.
+  if (isPublishedScopedId(sessionId)) {
+    return c.json(
+      { error: `sessionId must not start with "${PUBLISHED_MCP_SCOPE_PREFIX}"` },
+      400,
+    );
+  }
+
   try {
+    const kv = c.env.SESSION_INDEX;
     // A GUI caller must not address (and thereby clobber) a `sessionId` that is
     // already owned by a different principal.
     if (scope.kind === "gui") {
@@ -302,14 +337,32 @@ async function createSession(c: AppContext): Promise<Response> {
           409,
         );
       }
+      // Quota: only new sessions count against the per-user cap (re-creating /
+      // reusing one the caller already owns is fine).
+      if (!existing && kv) {
+        const owned = await countOwnerSessions(kv, userId);
+        if (owned >= maxSessionsPerUser(c.env)) {
+          return c.json(
+            { error: "Active sandbox session limit reached" },
+            429,
+          );
+        }
+      }
     }
 
     const stub = getDOStub(c.env, sessionId);
     const result = await stub.createSession({ sessionId, spaceId, userId });
     const state = await stub.getSessionState();
-    const kv = c.env.SESSION_INDEX;
     if (kv && state) {
-      await kv.put(`session:${sessionId}`, JSON.stringify(state));
+      try {
+        await indexSession(kv, state);
+      } catch (indexErr) {
+        // The container + DO are already live; without an index entry the
+        // session would be invisible/unmanageable (orphaned slot). Compensate
+        // by tearing it down so the caller gets a clean failure to retry.
+        await stub.destroySession().catch(() => {});
+        throw indexErr;
+      }
     }
     return c.json(result, 201);
   } catch (err) {
@@ -337,9 +390,17 @@ async function destroySession(c: AppContext): Promise<Response> {
     const auth = await authorizeSessionAccess(c, sessionId, stub);
     if (auth) return auth;
 
+    // Load the owner-bearing state before tearing the session down so the
+    // owner-scoped index key can be computed (the index keys by owner+id).
+    const state = await stub.getSessionState();
     await stub.destroySession();
     const kv = c.env.SESSION_INDEX;
-    if (kv) await kv.delete(`session:${sessionId}`);
+    if (kv) {
+      await unindexSession(kv, {
+        userId: state?.userId ?? "",
+        sessionId,
+      });
+    }
     return c.json({ ok: true });
   } catch (err) {
     return errorResponse(c, err);

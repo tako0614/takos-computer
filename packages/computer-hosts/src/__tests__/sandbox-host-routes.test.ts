@@ -879,6 +879,72 @@ test("sandbox host does not let a space-less GUI session forge spaceId", async (
   expect(state.spaceId).toEqual("");
 });
 
+test("sandbox host enforces a per-user live-session quota", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+  env.MAX_SANDBOX_SESSIONS_PER_USER = "2";
+  const cookie = await mintGuiSessionCookie(env, {
+    sub: "user-a",
+    spaceId: "space-a",
+  });
+  const create = (sessionId: string) =>
+    fetchWorker(env, "/gui/api/sandbox-create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ sessionId, spaceId: "space-a", userId: "user-a" }),
+    });
+
+  expect((await create("s1")).status).toEqual(201);
+  expect((await create("s2")).status).toEqual(201);
+  // The 3rd distinct session exceeds the cap.
+  expect((await create("s3")).status).toEqual(429);
+  // Re-creating an already-owned session is not blocked by the quota.
+  expect((await create("s1")).status).toEqual(201);
+});
+
+test("sandbox host rejects a reserved published-scope sessionId on create", async () => {
+  const { env } = createEnv();
+  const response = await fetchWorker(env, "/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...hostAuthHeaders() },
+    body: JSON.stringify({
+      sessionId: "pmcp-deadbeef:x",
+      spaceId: "space-1",
+      userId: "user-1",
+    }),
+  });
+  expect(response.status).toEqual(400);
+});
+
+test("sandbox host compensates (destroys) a session whose index write fails", async () => {
+  const { env } = createEnv();
+  // KV that fails the post-create index write.
+  const failingKv = {
+    get: () => Promise.resolve(null),
+    put: () => Promise.reject(new Error("kv put boom")),
+    delete: () => Promise.resolve(),
+    list: () =>
+      Promise.resolve({ keys: [], list_complete: true as const }),
+  };
+  env.SESSION_INDEX = failingKv as unknown as SandboxHostEnv["SESSION_INDEX"];
+
+  const createResponse = await fetchWorker(env, "/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...hostAuthHeaders() },
+    body: JSON.stringify({
+      sessionId: "session-1",
+      spaceId: "space-1",
+      userId: "user-1",
+    }),
+  });
+  expect(createResponse.status).toEqual(500);
+
+  // The session was torn down (compensated), not left as an orphaned container.
+  const getResponse = await fetchWorker(env, "/session/session-1", {
+    headers: hostAuthHeaders(),
+  });
+  expect(getResponse.status).toEqual(404);
+});
+
 test("sandbox host rejects unauthenticated session create", async () => {
   const { env } = createEnv();
 
