@@ -298,13 +298,51 @@ async function safeLstatFile(path: string): Promise<Stats | null> {
   }
 }
 
-/** Simple glob matching (supports * and ?). */
+const MAX_GLOB_LENGTH = 1024;
+
+/**
+ * Linear (non-backtracking) glob matcher supporting `*` and `?`.
+ *
+ * Uses the classic two-pointer wildcard algorithm with a single star
+ * backtrack pointer, so matching runs in O(name x pattern) time and CANNOT
+ * exhibit the catastrophic exponential backtracking of a regex compiled from
+ * caller-controlled input (the previous `*` -> `.*` regex wedged the
+ * single-threaded sandbox-service event loop on inputs like `***...*x`). The
+ * pattern length is capped so a single match stays bounded even against an
+ * adversarial glob.
+ */
 function matchGlob(name: string, pattern: string): boolean {
-  const regex = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*/g, ".*")
-    .replace(/\?/g, ".");
-  return new RegExp(`^${regex}$`).test(name);
+  if (pattern.length > MAX_GLOB_LENGTH) {
+    throw new Error(`glob pattern too long (max ${MAX_GLOB_LENGTH} characters)`);
+  }
+  const n = name.length;
+  const p = pattern.length;
+  let i = 0; // index into name
+  let j = 0; // index into pattern
+  let starIdx = -1; // last `*` position in pattern, -1 if none seen
+  let matchIdx = 0; // name position the last `*` is currently matched up to
+
+  while (i < n) {
+    const pc = j < p ? pattern[j] : undefined;
+    if (pc !== undefined && (pc === "?" || pc === name[i])) {
+      i++;
+      j++;
+    } else if (pc === "*") {
+      starIdx = j;
+      matchIdx = i;
+      j++;
+    } else if (starIdx !== -1) {
+      // Backtrack: let the most recent `*` absorb one more name character.
+      j = starIdx + 1;
+      matchIdx++;
+      i = matchIdx;
+    } else {
+      return false;
+    }
+  }
+
+  while (j < p && pattern[j] === "*") j++;
+  return j === p;
 }
 
 function normalizeOffset(offset: number | undefined): number {
