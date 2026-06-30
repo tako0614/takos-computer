@@ -32,12 +32,22 @@ export class LocalHostContainerRuntime<Env = unknown> {
    * configuration is wrong.
    */
   get container(): {
+    running: boolean;
     getTcpPort(port: number): HostContainerTcpPortFetcher;
   } {
     throw new Error(
       "container.getTcpPort is unavailable in LocalHostContainerRuntime; " +
         "run inside Cloudflare Workers with @cloudflare/containers installed",
     );
+  }
+
+  /**
+   * Mirrors `@cloudflare/containers` `Container.getState()`. The real runtime
+   * reports the container's lifecycle status; the local fallback reports
+   * "stopped" because it cannot host a sidecar.
+   */
+  async getState(): Promise<{ status: string }> {
+    return { status: "stopped" };
   }
 
   async startAndWaitForPorts(_ports?: number | number[]): Promise<void> {}
