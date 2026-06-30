@@ -80,9 +80,12 @@ test("local dev simulator creates sessions and proxies MCP to sandbox service", 
     );
     expect(readResult.content).toEqual("hello local");
 
-    const indexedState = await host.sessionIndex.get("session:session-1", {
-      type: "json",
-    }) as {
+    // The index keys by owner so a GUI caller lists only its own sessions:
+    // `session:<encodeURIComponent(userId)>:<sessionId>`.
+    const indexedState = await host.sessionIndex.get(
+      "session:user-1:session-1",
+      { type: "json" },
+    ) as {
       sessionId: string;
       spaceId: string;
       userId: string;
@@ -142,15 +145,15 @@ test("local dev simulator published MCP auto-creates a local session", async () 
     };
     expect(result.bytes_written).toEqual("published local".length);
 
-    // The published session is indexed under a token-scoped key
-    // (`session:pmcp-<hash>:published-session`), never the raw logical id, so
-    // sessions with the same logical id under different tokens cannot collide.
+    // The published session is indexed under an owner + token-scoped key
+    // (`session:<owner>:pmcp-<hash>:published-session`), never the raw logical
+    // id, so sessions with the same logical id under different tokens cannot
+    // collide.
     const indexed = await host.sessionIndex.list({ prefix: "session:" });
     const scopedKey = indexed.keys
       .map((k) => k.name)
       .find((name) =>
-        name.startsWith("session:pmcp-") &&
-        name.endsWith(":published-session")
+        name.includes(":pmcp-") && name.endsWith(":published-session")
       );
     if (!scopedKey) {
       throw new Error(
@@ -161,7 +164,12 @@ test("local dev simulator published MCP auto-creates a local session", async () 
     }
     // The raw logical id must NOT be a standalone index key — the admin GUI
     // would otherwise try (and fail) to address the DO by it.
-    if (indexed.keys.some((k) => k.name === "session:published-session")) {
+    if (
+      indexed.keys.some((k) =>
+        k.name === "session:published-session" ||
+        k.name === "session:user-1:published-session"
+      )
+    ) {
       throw new Error(
         "Published session must not be indexed under the raw logical id",
       );
@@ -170,9 +178,10 @@ test("local dev simulator published MCP auto-creates a local session", async () 
       type: "json",
     }) as { status: string; sessionId: string };
     expect(state.status).toEqual("active");
-    // The stored addressing id matches the index key suffix so the admin GUI
-    // list -> get/destroy round-trips against the same scoped DO/KV entry.
-    expect(state.sessionId).toEqual(scopedKey.slice("session:".length));
+    // The stored addressing id (the scoped DO name) is the index key suffix so
+    // the admin GUI list -> get/destroy round-trips hit the same DO/KV entry.
+    expect(state.sessionId.startsWith("pmcp-")).toBeTruthy();
+    expect(scopedKey.endsWith(`:${state.sessionId}`)).toBeTruthy();
   } finally {
     await remove(workspaceRoot, { recursive: true });
   }
