@@ -108,10 +108,28 @@ export function numberClaim(value: unknown): number | undefined {
     : undefined;
 }
 
+// The discovery document and JWKS rarely change; cache them in Worker/module
+// scope with a short TTL so a single login callback (which resolves endpoints
+// three times — exchangeCode / verifyIdToken / fetchUserInfo) issues one
+// `.well-known` fetch instead of three, and so an unauthenticated login GET
+// cannot spam the issuer with one outbound discovery fetch per request.
+const DISCOVERY_TTL_MS = 5 * 60 * 1000;
+const JWKS_TTL_MS = 5 * 60 * 1000;
+const discoveryCache = new Map<
+  string,
+  { doc: OidcDiscoveryDocument; expiresAt: number }
+>();
+const jwksCache = new Map<
+  string,
+  { jwks: { keys?: JsonWebKey[] }; expiresAt: number }
+>();
+
 async function discoverOidc(
   config: OidcConfig,
 ): Promise<OidcDiscoveryDocument> {
   if (!config.issuer) return {};
+  const cached = discoveryCache.get(config.issuer);
+  if (cached && cached.expiresAt > Date.now()) return cached.doc;
   const response = await fetch(
     `${config.issuer}/.well-known/openid-configuration`,
     { headers: { Accept: "application/json" } },
@@ -127,11 +145,45 @@ async function discoverOidc(
   ) {
     throw new Error("OIDC discovery issuer mismatch");
   }
+  discoveryCache.set(config.issuer, {
+    doc: body,
+    expiresAt: Date.now() + DISCOVERY_TTL_MS,
+  });
   return body;
+}
+
+/** Fetch the JWKS for `uri`, served from cache unless `forceRefresh`. */
+async function fetchJwks(
+  uri: string,
+  forceRefresh = false,
+): Promise<{ keys?: JsonWebKey[] }> {
+  const cached = jwksCache.get(uri);
+  if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
+    return cached.jwks;
+  }
+  const response = await fetch(uri, { headers: { Accept: "application/json" } });
+  if (!response.ok) {
+    throw new Error(`OIDC JWKS fetch failed: ${response.status}`);
+  }
+  const jwks = await response.json() as { keys?: JsonWebKey[] };
+  jwksCache.set(uri, { jwks, expiresAt: Date.now() + JWKS_TTL_MS });
+  return jwks;
 }
 
 export async function oidcEndpoints(config: OidcConfig): Promise<OidcEndpoints> {
   const issuer = config.issuer!;
+  // Skip discovery entirely when every endpoint is configured via env.
+  if (
+    config.authorizationEndpoint && config.tokenEndpoint &&
+    config.userinfoEndpoint && config.jwksUri
+  ) {
+    return {
+      authorizationEndpoint: config.authorizationEndpoint,
+      tokenEndpoint: config.tokenEndpoint,
+      userinfoEndpoint: config.userinfoEndpoint,
+      jwksUri: config.jwksUri,
+    };
+  }
   const discovery = await discoverOidc(config);
   return {
     authorizationEndpoint: config.authorizationEndpoint ??
@@ -268,14 +320,12 @@ export async function verifyIdToken(
     throw new Error("Unsupported ID token algorithm");
   }
   const endpoints = await oidcEndpoints(config);
-  const jwksResponse = await fetch(endpoints.jwksUri, {
-    headers: { Accept: "application/json" },
-  });
-  if (!jwksResponse.ok) {
-    throw new Error(`OIDC JWKS fetch failed: ${jwksResponse.status}`);
+  let jwk = selectJwk(await fetchJwks(endpoints.jwksUri), header);
+  if (!jwk) {
+    // kid-miss: the issuer may have rotated keys since the cached fetch — force
+    // one refresh before giving up.
+    jwk = selectJwk(await fetchJwks(endpoints.jwksUri, true), header);
   }
-  const jwks = await jwksResponse.json() as { keys?: JsonWebKey[] };
-  const jwk = selectJwk(jwks, header);
   if (!jwk) throw new Error("ID token signing key not found");
   const valid = await verifyJwtSignature({
     alg,
