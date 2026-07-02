@@ -1,4 +1,4 @@
-output "takos_app_manifest" {
+output "app_deployment" {
   value = {
     name    = "takos-computer"
     version = "0.1.0"
@@ -10,9 +10,9 @@ output "takos_app_manifest" {
         readiness = "/readyz"
         containers = {
           sandbox = {
-            image = "apps/sandbox/Dockerfile"
+            image      = "apps/sandbox/Dockerfile"
             dockerfile = "apps/sandbox/Dockerfile"
-            port  = 8080
+            port       = 8080
             cloudflare = {
               container = {
                 className         = "SandboxSessionContainer"
@@ -92,7 +92,7 @@ output "takos_app_manifest" {
       {
         name      = "launcher"
         publisher = "web"
-        type      = "UiSurface"
+        type      = "interface.ui.surface"
         outputs = {
           url = {
             kind     = "url"
@@ -113,7 +113,7 @@ output "takos_app_manifest" {
       {
         name      = "takos-computer-mcp"
         publisher = "web"
-        type      = "McpServer"
+        type      = "protocol.mcp.server"
         outputs = {
           url = {
             kind     = "url"
@@ -137,4 +137,50 @@ output "takos_app_manifest" {
 
     env = {}
   }
+}
+
+output "service_exports" {
+  value = [
+    {
+      name         = "launcher"
+      capabilities = ["interface.ui.surface"]
+      endpoints = [
+        {
+          name       = "default"
+          protocol   = "https"
+          pathPrefix = "/gui"
+        }
+      ]
+      metadata = {
+        title       = "Computer"
+        description = "Browser automation and sandbox computer with a Streamable HTTP MCP server."
+        icon        = "/icons/computer.svg"
+        category    = "app"
+      }
+      visibility = "space"
+    },
+    {
+      name         = "takos-computer-mcp"
+      capabilities = ["protocol.mcp.server"]
+      endpoints = [
+        {
+          name       = "streamable-http"
+          protocol   = "https"
+          pathPrefix = "/mcp"
+        }
+      ]
+      auth = [
+        {
+          scheme = "bearer"
+          scopes = ["mcp.invoke"]
+        }
+      ]
+      metadata = {
+        title       = "Computer MCP"
+        description = "Sandbox shell, file, and process tools exposed over Streamable HTTP."
+        protocol    = "streamable-http"
+      }
+      visibility = "space"
+    },
+  ]
 }
