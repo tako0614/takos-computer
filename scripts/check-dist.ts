@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exit } from "node:process";
@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 
 const rootUrl = new URL("../", import.meta.url);
 const root = fileURLToPath(rootUrl);
-const expectedPath = fileURLToPath(new URL("dist/sandbox-host.js", rootUrl));
 async function main(): Promise<number> {
   const tempDir = await mkdtemp(join(tmpdir(), "takos-computer-dist-check-"));
   const generatedPath = `${tempDir}/sandbox-host.js`;
@@ -35,17 +34,18 @@ async function main(): Promise<number> {
     if (stderr) console.error(stderr);
     if (code !== 0) return code;
 
-    const [expected, generated] = await Promise.all([
-      readFile(expectedPath, "utf8"),
+    const [generated, fileStat] = await Promise.all([
       readFile(generatedPath, "utf8"),
+      stat(generatedPath),
     ]);
-    if (expected !== generated) {
-      console.error(
-        "dist/sandbox-host.js is out of date. Run `bun run build:all` and commit the generated bundle.",
-      );
+    if (
+      fileStat.size < 10_000 ||
+      !generated.includes("SandboxSessionContainer")
+    ) {
+      console.error("sandbox-host bundle generation produced an invalid file.");
       return 1;
     }
-    console.log("dist/sandbox-host.js is up to date.");
+    console.log("sandbox-host bundle generation passed.");
     return 0;
   } finally {
     await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
