@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Takos Computer">
+  <rect width="64" height="64" rx="14" fill="#111827"/>
+  <rect x="13" y="15" width="38" height="27" rx="4" fill="#f8fafc"/>
+  <rect x="17" y="19" width="30" height="17" rx="2" fill="#2563eb"/>
+  <path d="M24 49h16" stroke="#f8fafc" stroke-width="4" stroke-linecap="round"/>
+  <path d="M32 42v7" stroke="#f8fafc" stroke-width="4" stroke-linecap="round"/>
+  <path d="M24 28h10m-10 5h16" stroke="#bfdbfe" stroke-width="3" stroke-linecap="round"/>
+</svg>

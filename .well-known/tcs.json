@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "tcs.repo/v1",
+  "id": "takos-computer",
+  "modulePath": ".",
+  "kind": "worker",
+  "surface": "service",
+  "provider": "cloudflare",
+  "category": "developer",
+  "suggestedName": "takos-computer",
+  "name": {
+    "ja": "Takos Computer",
+    "en": "Takos Computer"
+  },
+  "description": {
+    "ja": "ブラウザ操作とサンドボックスを MCP で使えるコンピューターサービスとして公開します。",
+    "en": "Deploys a browser automation and sandbox computer service with MCP."
+  },
+  "badge": {
+    "ja": "追加候補",
+    "en": "Installable"
+  },
+  "iconUrl": "packages/dashboard/public/icons/computer.svg"
+}
