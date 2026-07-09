@@ -30,3 +30,5 @@ Takos-specific な結合はなく、 MCP 互換 agent host から利用できま
 - Bun コマンドは `cd takos-apps/takos-computer && bun run ...` (test は `bun test`) を使う
 - コンテナイメージのビルドは `apps/sandbox/` の Dockerfile を使用
 - CF Worker のデプロイは `deploy/` の wrangler config を使用
+- `dist/` は local/CI 生成物。Worker bundle は Git release / CI artifact と
+  sha256 で OpenTofu に渡し、生成済み bundle を repository に commit しない
