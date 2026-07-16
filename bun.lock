@@ -8,10 +8,13 @@
         "@cloudflare/containers": "^0.1.1",
         "@cloudflare/workers-types": "^4.20241127.0",
         "@libsql/client": "^0.14.0",
+        "@solidjs/router": "^0.16.1",
         "hono": "^4.12.9",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
+        "@types/node": "^22.0.0",
+        "esbuild": "^0.25.0",
         "solid-js": "^1.9.0",
         "typescript": "^5.7.0",
         "vite": "^6.4.2",
@@ -200,6 +203,8 @@
     "@rollup/rollup-win32-x64-gnu": ["@rollup/rollup-win32-x64-gnu@4.60.4", "", { "os": "win32", "cpu": "x64" }, "sha512-DRS4G7mi9lJxqEDezIkKCaUIKCrLUUDCUaCsTPCi/rtqaC6D/jjwslMQyiDU50Ka0JKpeXeRBFBAXwArY52vBw=="],
 
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.60.4", "", { "os": "win32", "cpu": "x64" }, "sha512-QVTUovf40zgTqlFVrKA1uXMVvU2QWEFWfAH8Wdc48IxLvrJMQVMBRjuQyUpzZCDkakImib9eVazbWlC6ksWtJw=="],
+
+    "@solidjs/router": ["@solidjs/router@0.16.2", "", { "peerDependencies": { "solid-js": "^1.8.6" } }, "sha512-pncbV4SGUwGGlELlDWc3B4KDVB0Kt+7+7ct+GTN7D8CgetGSJMzl8RzyAFz+/TtSuFFzp9IzrjrACHUpGzxsKQ=="],
 
     "@takos-computer/sandbox": ["@takos-computer/sandbox@workspace:apps/sandbox"],
 
