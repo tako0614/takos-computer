@@ -2,7 +2,7 @@ FROM oven/bun:1 AS builder
 WORKDIR /workspace
 
 # Copy workspace config and lockfile.
-COPY package.json bun.lock tsconfig.json bunfig.toml ./
+COPY package.json bun.lock tsconfig.json ./
 COPY shims/ ./shims/
 
 # Copy required packages

@@ -2,6 +2,9 @@ node_modules/
 dist/*
 packages/dashboard/dist/
 .wrangler/
+.terraform/
+*.tfstate
+*.tfstate.*
 .env
 .env.*
 !.env.example

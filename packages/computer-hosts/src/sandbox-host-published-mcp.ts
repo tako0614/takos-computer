@@ -11,19 +11,17 @@
  *     `tools/list`, `tools/call`, `notifications/initialized`)
  *
  * Auth: callers present `PUBLISHED_MCP_AUTH_TOKEN` as a Bearer token; the
- * gate lives in `sandbox-host-auth.ts`.
+ * gate lives in `sandbox-host-auth.ts`. Managed installs instead present an
+ * exact `mcp.invoke` Takosumi Interface OAuth bearer for this Capsule's
+ * `MCP_URL`; direct/self-host installs may retain the static bearer.
  *
- * Session scoping: the published surface has no per-user principal — every
- * caller authenticates with the same shared `PUBLISHED_MCP_AUTH_TOKEN`. To
- * stop one token holder from addressing or destroying sessions created by a
- * holder of a *different* token, every caller-supplied `session_id` is
- * resolved into the namespace derived from the presented token
- * (`<tokenNamespace>:<logicalSessionId>`) before it is used to address a
- * Durable Object or KV index entry. A caller therefore can only ever reach
- * sessions under their own token's namespace; a raw `session_id` minted under
- * another token is unreachable because its namespace prefix cannot be forged
- * without that token. The caller-facing `session_id` reported back in tool
- * results stays the logical id the caller passed.
+ * Session scoping: Interface OAuth calls derive identity from the stable
+ * issuer/Workspace/Capsule/InterfaceBinding/subject evidence, while direct
+ * calls derive it from the configured shared bearer. The worker hashes that
+ * identity before constructing the internal Durable Object name, so rotated
+ * short-lived OAuth tokens retain the same scope and caller-supplied
+ * `session_id` cannot collide with regular GUI or host-admin sessions. The
+ * caller-facing `session_id` remains the logical id the caller supplied.
  */
 
 import type { Context } from "hono";
@@ -36,7 +34,7 @@ import {
 import type { DurableObjectStub } from "./cf-types.ts";
 import {
   requirePublishedMcpAuth,
-  resolvePublishedMcpAuthToken,
+  publishedMcpPrincipal,
 } from "./sandbox-host-auth.ts";
 import {
   getDOStub,
@@ -179,11 +177,7 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       required: ["command"],
     },
     handle: (args, c) =>
-      callSandboxToolThroughPublishedMcp(
-        c,
-        "shell_exec",
-        args,
-      ),
+      callSandboxToolThroughPublishedMcp(c, "shell_exec", args),
   },
   {
     name: "computer_file_read",
@@ -208,11 +202,7 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       required: ["path"],
     },
     handle: (args, c) =>
-      callSandboxToolThroughPublishedMcp(
-        c,
-        "file_read",
-        args,
-      ),
+      callSandboxToolThroughPublishedMcp(c, "file_read", args),
   },
   {
     name: "computer_file_write",
@@ -240,11 +230,7 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       required: ["path", "content"],
     },
     handle: (args, c) =>
-      callSandboxToolThroughPublishedMcp(
-        c,
-        "file_write",
-        args,
-      ),
+      callSandboxToolThroughPublishedMcp(c, "file_write", args),
   },
   {
     name: "computer_file_list",
@@ -270,11 +256,7 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       required: ["path"],
     },
     handle: (args, c) =>
-      callSandboxToolThroughPublishedMcp(
-        c,
-        "file_list",
-        args,
-      ),
+      callSandboxToolThroughPublishedMcp(c, "file_list", args),
   },
   {
     name: "computer_file_info",
@@ -293,11 +275,7 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       required: ["path"],
     },
     handle: (args, c) =>
-      callSandboxToolThroughPublishedMcp(
-        c,
-        "file_info",
-        args,
-      ),
+      callSandboxToolThroughPublishedMcp(c, "file_info", args),
   },
   {
     name: "computer_process_list",
@@ -307,11 +285,7 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       properties: publishedSessionInputProperties,
     },
     handle: (args, c) =>
-      callSandboxToolThroughPublishedMcp(
-        c,
-        "process_list",
-        args,
-      ),
+      callSandboxToolThroughPublishedMcp(c, "process_list", args),
   },
   {
     name: "computer_process_kill",
@@ -330,11 +304,7 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       required: ["pid"],
     },
     handle: (args, c) =>
-      callSandboxToolThroughPublishedMcp(
-        c,
-        "process_kill",
-        args,
-      ),
+      callSandboxToolThroughPublishedMcp(c, "process_kill", args),
   },
 ];
 
@@ -363,26 +333,20 @@ function nonEmptyStringArg(
  * if no token is configured — `requirePublishedMcpAuth` already rejects those
  * requests before tool handlers run, so this is a defensive guard.
  */
-// The token -> namespace digest is stable; memoize it so a multi-step agent's
-// tool calls don't re-hash the auth token on every request.
-const tokenNamespaceCache = new Map<string, string>();
-
 async function publishedMcpTokenNamespace(c: AppContext): Promise<string> {
-  const token = resolvePublishedMcpAuthToken(c.env);
-  if (!token) {
-    throw new Error("Published MCP auth token is not configured");
+  const principal = publishedMcpPrincipal(c);
+  if (!principal) {
+    throw new Error("Published MCP principal is not authorized");
   }
-  const cached = tokenNamespaceCache.get(token);
-  if (cached) return cached;
+  const seed = principal.namespaceSeed;
   const digest = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(token),
+    new TextEncoder().encode(seed),
   );
   const hex = Array.from(new Uint8Array(digest))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
   const namespace = `${PUBLISHED_MCP_SCOPE_PREFIX}${hex.slice(0, 16)}`;
-  tokenNamespaceCache.set(token, namespace);
   return namespace;
 }
 
@@ -405,19 +369,27 @@ async function resolvePublishedMcpSessionArgs(
     PUBLISHED_MCP_DEFAULT_SESSION_ID,
   );
   const namespace = await publishedMcpTokenNamespace(c);
+  const principal = publishedMcpPrincipal(c);
+  if (!principal) throw new Error("Published MCP principal is not authorized");
   return {
     sessionId,
     scopedId: `${namespace}:${sessionId}`,
-    spaceId: nonEmptyStringArg(
-      args,
-      ["space_id", "spaceId"],
-      PUBLISHED_MCP_DEFAULT_SPACE_ID,
-    ),
-    userId: nonEmptyStringArg(
-      args,
-      ["user_id", "userId"],
-      PUBLISHED_MCP_DEFAULT_USER_ID,
-    ),
+    spaceId:
+      principal.kind === "interface_oauth"
+        ? principal.workspaceId
+        : nonEmptyStringArg(
+            args,
+            ["space_id", "spaceId"],
+            PUBLISHED_MCP_DEFAULT_SPACE_ID,
+          ),
+    userId:
+      principal.kind === "interface_oauth"
+        ? principal.subject
+        : nonEmptyStringArg(
+            args,
+            ["user_id", "userId"],
+            PUBLISHED_MCP_DEFAULT_USER_ID,
+          ),
   };
 }
 
@@ -425,16 +397,14 @@ function stripPublishedMcpSessionArgs(
   args: Record<string, unknown>,
 ): Record<string, unknown> {
   const stripped = { ...args };
-  for (
-    const key of [
-      "session_id",
-      "sessionId",
-      "space_id",
-      "spaceId",
-      "user_id",
-      "userId",
-    ]
-  ) {
+  for (const key of [
+    "session_id",
+    "sessionId",
+    "space_id",
+    "spaceId",
+    "user_id",
+    "userId",
+  ]) {
     delete stripped[key];
   }
   return stripped;
@@ -497,7 +467,7 @@ async function ensurePublishedMcpSession(
   // Store the logical sessionId in the session state/proxy token so the
   // caller-facing id is preserved; the DO is addressed by the scoped id.
   await stub.createSession({ sessionId, spaceId, userId });
-  const state = await stub.getSessionState() ?? {
+  const state = (await stub.getSessionState()) ?? {
     sessionId,
     spaceId,
     userId,
@@ -523,7 +493,7 @@ async function callSandboxToolThroughPublishedMcp(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${mcpAuthToken}`,
+      Authorization: `Bearer ${mcpAuthToken}`,
     },
     body: JSON.stringify({
       jsonrpc: "2.0",
@@ -551,16 +521,19 @@ async function callSandboxToolThroughPublishedMcp(
     throw new Error("Sandbox MCP returned invalid response");
   }
   if (isRecord(payload.error)) {
-    const message = typeof payload.error.message === "string"
-      ? payload.error.message
-      : JSON.stringify(payload.error);
+    const message =
+      typeof payload.error.message === "string"
+        ? payload.error.message
+        : JSON.stringify(payload.error);
     throw new Error(message);
   }
   const result = payload.result;
   if (
-    isRecord(result) && Array.isArray(result.content) &&
-    result.content.every((item) =>
-      isRecord(item) && item.type === "text" && typeof item.text === "string"
+    isRecord(result) &&
+    Array.isArray(result.content) &&
+    result.content.every(
+      (item) =>
+        isRecord(item) && item.type === "text" && typeof item.text === "string",
     )
   ) {
     return result as McpToolResult;
