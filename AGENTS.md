@@ -22,11 +22,20 @@ host から利用できます。
 - AI エージェントの実行ロジック (LLM、LangGraph 等) は takos 本体側に置く
 - コンテナは MCP (Model Context Protocol) 経由でツールを公開する
 - サンドボックスコンテナ: shell_exec, file__, process__ ツール
+- repository root は plain OpenTofu module。KV は Cloudflare provider、provider schema に
+  ない Container image/shape lifecycle は `terraform_data` から pinned official Wrangler
+  を実行し、同じ Run の apply/destroy に含める
+- runtime Interface / InterfaceBinding は Takosumi service-side InstallConfig が所有する。
+  module は普通の `launch_url` / `mcp_url` Output だけを返し、Interface や credential を
+  Output/manifest として宣言しない
 
 ## 作業ルール
 
 - Bun コマンドは `cd takos-apps/takos-computer && bun run ...` (test は `bun test`) を使う
 - コンテナイメージのビルドは `apps/sandbox/` の Dockerfile を使用
-- CF Worker のデプロイは `deploy/` の wrangler config を使用
-- `dist/` は local/CI 生成物。Worker bundle は Git release / CI artifact と
-  sha256 で OpenTofu に渡し、生成済み bundle を repository に commit しない
+- production install は root OpenTofu module を使う。`deploy/` Wrangler config は
+  operator/debug template であり、install authority ではない
+- `dist/` は local/CI 生成物で commit しない。OpenTofu deploy は source snapshot から
+  Wrangler が Workerを bundleし、Dockerfileまたは明示 `container_image` を deploy する
+- `install-options.json` は optional な source chooser で、Cloudflare の実 module だけを
+  提示する。credential / Interface / install authority は持たせず、既存 tag は書き換えない

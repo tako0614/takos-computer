@@ -73,6 +73,7 @@ function createEnv(
     appAuthRequired?: boolean;
     appAuthConfig?: boolean;
     launchConfig?: boolean;
+    interfaceOAuth?: boolean;
   } = {},
 ) {
   const states = new Map<string, SandboxSessionState>();
@@ -170,6 +171,12 @@ function createEnv(
     : options.mcpAuthToken;
   if (mcpAuthToken !== null) env.MCP_AUTH_TOKEN = mcpAuthToken;
   if (options.trustRoutedGuiApi) env.TAKOS_TRUST_ROUTED_GUI_API = "1";
+  if (options.interfaceOAuth) {
+    env.OIDC_ISSUER_URL = OIDC_ISSUER_URL;
+    env.MCP_URL = "https://sandbox-host.test/mcp";
+    env.APP_WORKSPACE_ID = "ws_interface";
+    env.APP_CAPSULE_ID = "cap_interface";
+  }
   if (options.appAuthRequired) env.APP_AUTH_REQUIRED = "1";
   if (options.appAuthRequired && options.appAuthConfig !== false) {
     env.APP_SESSION_SECRET = APP_SESSION_SECRET;
@@ -658,7 +665,7 @@ test("sandbox host health reports missing required bindings", async () => {
     missingBindings: [
       "SANDBOX_HOST_AUTH_TOKEN",
       "MCP_AUTH_TOKEN",
-      "PUBLISHED_MCP_AUTH_TOKEN",
+      "PUBLISHED_MCP_AUTH_TOKEN or Interface OAuth configuration",
       "SESSION_INDEX",
     ],
   });
@@ -681,7 +688,7 @@ test("sandbox host healthz is bootstrap-safe while readyz is strict", async () =
     missingBindings: [
       "SANDBOX_HOST_AUTH_TOKEN",
       "MCP_AUTH_TOKEN",
-      "PUBLISHED_MCP_AUTH_TOKEN",
+      "PUBLISHED_MCP_AUTH_TOKEN or Interface OAuth configuration",
       "SESSION_INDEX",
     ],
   });
@@ -712,7 +719,9 @@ test("sandbox host readyz fails when published MCP auth token is missing", async
   expect(await response.json()).toEqual({
     status: "misconfigured",
     service: "takos-sandbox-host",
-    missingBindings: ["PUBLISHED_MCP_AUTH_TOKEN"],
+    missingBindings: [
+      "PUBLISHED_MCP_AUTH_TOKEN or Interface OAuth configuration",
+    ],
   });
 });
 
@@ -1341,6 +1350,74 @@ test("sandbox host published MCP lists computer tools with published auth", asyn
   }
 });
 
+test("sandbox host published MCP accepts exact Interface OAuth and uses stable owner scope", async () => {
+  const { env, doNames } = createEnv({
+    publishedMcpAuthToken: null,
+    interfaceOAuth: true,
+  });
+  const userInfo = {
+    token_use: "interface_oauth",
+    sub: "svc_agent",
+    aud: "https://sandbox-host.test/mcp",
+    scope: "mcp.invoke",
+    takosumi: {
+      workspace_id: "ws_interface",
+      capsule_id: "cap_interface",
+      interface_id: "if_computer_mcp",
+      interface_binding_id: "ifb_agent",
+      interface_resolved_revision: 2,
+    },
+  };
+
+  await withFetch(async (input, init) => {
+    expect(fetchRequestUrl(input)).toBe(
+      "https://accounts.example.test/oauth/userinfo",
+    );
+    expect(new Headers(init?.headers).get("authorization")).toMatch(
+      /^Bearer taksrv_/u,
+    );
+    return Response.json(userInfo);
+  }, async () => {
+    const ready = await fetchWorker(env, "/readyz");
+    expect(ready.status).toBe(200);
+
+    for (const token of ["taksrv_first", "taksrv_rotated"]) {
+      const response = await fetchWorker(env, "/mcp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: token,
+          method: "tools/call",
+          params: {
+            name: "computer_session_create",
+            arguments: {
+              session_id: "shared-session",
+              space_id: "spoofed-space",
+              user_id: "spoofed-user",
+            },
+          },
+        }),
+      });
+      expect(response.status).toBe(200);
+      const payload = await response.json() as {
+        result: { content: Array<{ text: string }> };
+      };
+      expect(JSON.parse(payload.result.content[0]!.text)).toMatchObject({
+        session_id: "shared-session",
+        space_id: "ws_interface",
+        user_id: "svc_agent",
+      });
+    }
+  });
+
+  expect(new Set(doNames.filter((name) => name.includes("shared-session"))).size)
+    .toBe(1);
+});
+
 test("sandbox host published MCP requires published auth", async () => {
   const { env, mcpCalls } = createEnv();
 
@@ -1395,7 +1472,7 @@ test("sandbox host published MCP fails closed when publication auth token is mis
 
   expect(response.status).toEqual(503);
   expect(await response.json()).toEqual({
-    error: "Published MCP auth token is not configured",
+    error: "Direct MCP auth is not configured",
   });
   expect(mcpCalls).toEqual([]);
 });

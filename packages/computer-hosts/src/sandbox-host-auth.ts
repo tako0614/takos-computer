@@ -35,6 +35,10 @@ import {
 import { constantTimeEqual } from "@takos-computer/common/crypto";
 import type { DurableObjectStub } from "./cf-types.ts";
 import { getDOStub } from "./sandbox-session-container.ts";
+import {
+  authorizeInterfaceOAuthBearer,
+  hasValidInterfaceOAuthConfiguration,
+} from "./interface-oauth-auth.ts";
 import type { SandboxSessionContainer } from "./sandbox-session-container.ts";
 import {
   isPublishedScopedId,
@@ -52,6 +56,34 @@ export function resolvePublishedMcpAuthToken(env: Env): string | undefined {
   return env.PUBLISHED_MCP_AUTH_TOKEN || undefined;
 }
 
+export type PublishedMcpPrincipal =
+  | { kind: "direct"; namespaceSeed: string }
+  | {
+      kind: "interface_oauth";
+      namespaceSeed: string;
+      subject: string;
+      workspaceId: string;
+      capsuleId: string;
+      interfaceBindingId: string;
+    };
+
+const publishedMcpPrincipals = new WeakMap<object, PublishedMcpPrincipal>();
+
+export function publishedMcpPrincipal(
+  c: AppContext,
+): PublishedMcpPrincipal | null {
+  return publishedMcpPrincipals.get(c) ?? null;
+}
+
+export function hasPublishedMcpInterfaceOAuth(env: Env): boolean {
+  return hasValidInterfaceOAuthConfiguration({
+    issuerUrl: env.OIDC_ISSUER_URL,
+    audience: env.MCP_URL,
+    workspaceId: env.APP_WORKSPACE_ID,
+    capsuleId: env.APP_CAPSULE_ID,
+  });
+}
+
 export function authError(
   c: AppContext,
   status: 401 | 403 | 503,
@@ -61,8 +93,10 @@ export function authError(
 }
 
 export function isTrustedTakosRoutedRequest(c: AppContext): boolean {
-  return c.env.TAKOS_TRUST_ROUTED_GUI_API === "1" &&
-    c.req.header("X-Takos-Internal-Marker") === "1";
+  return (
+    c.env.TAKOS_TRUST_ROUTED_GUI_API === "1" &&
+    c.req.header("X-Takos-Internal-Marker") === "1"
+  );
 }
 
 export function isGuiPath(pathname: string): boolean {
@@ -86,15 +120,11 @@ export function extractBearerToken(c: AppContext): string | null {
   return null;
 }
 
-function buildAuthCookie(
-  c: AppContext,
-  name: string,
-  value: string,
-): string {
+function buildAuthCookie(c: AppContext, name: string, value: string): string {
   const secure = new URL(c.req.url).protocol === "https:" ? "; Secure" : "";
-  return `${name}=${
-    encodeURIComponent(value)
-  }; Path=/gui; Max-Age=${GUI_AUTH_COOKIE_MAX_AGE_SECONDS}; HttpOnly; SameSite=Strict${secure}`;
+  return `${name}=${encodeURIComponent(
+    value,
+  )}; Path=/gui; Max-Age=${GUI_AUTH_COOKIE_MAX_AGE_SECONDS}; HttpOnly; SameSite=Strict${secure}`;
 }
 
 function redirectWithoutGuiAuthQuery(
@@ -111,16 +141,13 @@ function redirectWithoutGuiAuthQuery(
     status: 302,
     headers: {
       "Cache-Control": "no-store",
-      "Location": location,
+      Location: location,
       "Set-Cookie": buildAuthCookie(c, cookieName, token),
     },
   });
 }
 
-function validateHostAdminToken(
-  c: AppContext,
-  token: string,
-): Response | null {
+function validateHostAdminToken(c: AppContext, token: string): Response | null {
   const expected = c.env.SANDBOX_HOST_AUTH_TOKEN;
   if (!expected) {
     return authError(c, 503, "Sandbox host auth token is not configured");
@@ -184,13 +211,12 @@ export function guiSessionOwnsSandbox(
   return true;
 }
 
-export async function authorizeGuiApp(
-  c: AppContext,
-): Promise<Response | null> {
+export async function authorizeGuiApp(c: AppContext): Promise<Response | null> {
   if (isTrustedTakosRoutedRequest(c)) return null;
 
   const url = new URL(c.req.url);
-  const adminQueryToken = url.searchParams.get("authToken")?.trim() ||
+  const adminQueryToken =
+    url.searchParams.get("authToken")?.trim() ||
     url.searchParams.get("hostToken")?.trim();
   if (adminQueryToken) {
     const auth = validateHostAdminToken(c, adminQueryToken);
@@ -270,17 +296,54 @@ export async function resolveHostAdminScope(
   return { response: authError(c, 401, "Unauthorized") };
 }
 
-export function requirePublishedMcpAuth(c: AppContext): Response | null {
+export async function requirePublishedMcpAuth(
+  c: AppContext,
+): Promise<Response | null> {
+  const token = extractBearerToken(c);
+  if (!token) return authError(c, 401, "Unauthorized");
+
+  if (token.startsWith("taksrv_")) {
+    if (!hasPublishedMcpInterfaceOAuth(c.env)) {
+      return authError(c, 503, "Interface OAuth is not configured");
+    }
+    const authorization = await authorizeInterfaceOAuthBearer(
+      c.req.raw,
+      token,
+      "mcp.invoke",
+      {
+        issuerUrl: c.env.OIDC_ISSUER_URL,
+        expectedAudience: c.env.MCP_URL!,
+        expectedWorkspaceId: c.env.APP_WORKSPACE_ID,
+        expectedCapsuleId: c.env.APP_CAPSULE_ID,
+      },
+    );
+    if (!authorization) return authError(c, 401, "Unauthorized");
+    publishedMcpPrincipals.set(c, {
+      kind: "interface_oauth",
+      namespaceSeed: [
+        "interface",
+        c.env.OIDC_ISSUER_URL,
+        authorization.workspaceId,
+        authorization.capsuleId,
+        authorization.interfaceBindingId,
+        authorization.subject,
+      ].join(":"),
+      subject: authorization.subject,
+      workspaceId: authorization.workspaceId,
+      capsuleId: authorization.capsuleId,
+      interfaceBindingId: authorization.interfaceBindingId,
+    });
+    return null;
+  }
+
   const expected = resolvePublishedMcpAuthToken(c.env);
   if (!expected) {
-    return authError(c, 503, "Published MCP auth token is not configured");
+    return authError(c, 503, "Direct MCP auth is not configured");
   }
-
-  const token = extractBearerToken(c);
-  if (!token || !constantTimeEqual(token, expected)) {
+  if (!constantTimeEqual(token, expected)) {
     return authError(c, 401, "Unauthorized");
   }
-
+  publishedMcpPrincipals.set(c, { kind: "direct", namespaceSeed: token });
   return null;
 }
 

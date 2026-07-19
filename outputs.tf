@@ -1,186 +1,59 @@
-output "app_deployment" {
-  value = {
-    name    = "takos-computer"
-    version = "0.1.0"
-
-    compute = {
-      web = {
-        kind      = "worker"
-        icon      = "/icons/computer.svg"
-        readiness = "/readyz"
-        containers = {
-          sandbox = {
-            image      = "apps/sandbox/Dockerfile"
-            dockerfile = "apps/sandbox/Dockerfile"
-            port       = 8080
-            cloudflare = {
-              container = {
-                className         = "SandboxSessionContainer"
-                binding           = "SANDBOX_CONTAINER"
-                name              = "takos-computer-sandbox"
-                imageBuildContext = "."
-                instanceType      = "basic"
-                maxInstances      = 100
-                migrationTag      = "v1"
-                sqlite            = true
-              }
-            }
-          }
-        }
-      }
-    }
-
-    resources = {
-      session_index = {
-        type = "key-value"
-        bind = "SESSION_INDEX"
-        to   = ["web"]
-      }
-      sandbox_host_auth_token = {
-        type     = "secret"
-        bind     = "SANDBOX_HOST_AUTH_TOKEN"
-        to       = ["web"]
-        generate = true
-      }
-      published_mcp_auth_token = {
-        type     = "secret"
-        bind     = "PUBLISHED_MCP_AUTH_TOKEN"
-        to       = ["web"]
-        generate = true
-      }
-      container_mcp_auth_token = {
-        type     = "secret"
-        bind     = "MCP_AUTH_TOKEN"
-        to       = ["web"]
-        generate = true
-      }
-      app_session_secret = {
-        type     = "secret"
-        bind     = "APP_SESSION_SECRET"
-        to       = ["web"]
-        generate = true
-      }
-    }
-
-    routes = [
-      {
-        id     = "root"
-        target = "web"
-        path   = "/gui"
-      },
-      {
-        id      = "health"
-        target  = "web"
-        path    = "/health"
-        methods = ["GET"]
-      },
-      {
-        id      = "readyz"
-        target  = "web"
-        path    = "/readyz"
-        methods = ["GET"]
-      },
-      {
-        id      = "mcp"
-        target  = "web"
-        path    = "/mcp"
-        methods = ["POST"]
-      },
-    ]
-
-    publish = [
-      {
-        name      = "launcher"
-        publisher = "web"
-        type      = "interface.ui.surface"
-        outputs = {
-          url = {
-            kind     = "url"
-            routeRef = "root"
-          }
-        }
-        display = {
-          title       = "Computer"
-          description = "Browser automation and sandbox computer with a Streamable HTTP MCP server."
-          icon        = "/icons/computer.svg"
-          category    = "app"
-          sortOrder   = 40
-        }
-        spec = {
-          launcher = true
-        }
-      },
-      {
-        name      = "takos-computer-mcp"
-        publisher = "web"
-        type      = "protocol.mcp.server"
-        outputs = {
-          url = {
-            kind     = "url"
-            routeRef = "mcp"
-          }
-        }
-        auth = {
-          bearer = {
-            secretRef = "PUBLISHED_MCP_AUTH_TOKEN"
-          }
-        }
-        display = {
-          title       = "Computer MCP"
-          description = "Sandbox shell, file, and process tools exposed over Streamable HTTP."
-        }
-        spec = {
-          protocol = "streamable-http"
-        }
-      },
-    ]
-
-    env = {}
-  }
+output "launch_url" {
+  description = "Ordinary URL Output mapped by Takosumi's service-side launcher Interface blueprint."
+  value       = local.launch_url
 }
 
-output "service_exports" {
-  value = [
-    {
-      name         = "launcher"
-      capabilities = ["interface.ui.surface"]
-      endpoints = [
-        {
-          name       = "default"
-          protocol   = "https"
-          pathPrefix = "/gui"
-        }
-      ]
-      metadata = {
-        title       = "Computer"
-        description = "Browser automation and sandbox computer with a Streamable HTTP MCP server."
-        icon        = "/icons/computer.svg"
-        category    = "app"
-      }
-      visibility = "space"
-    },
-    {
-      name         = "takos-computer-mcp"
-      capabilities = ["protocol.mcp.server"]
-      endpoints = [
-        {
-          name       = "streamable-http"
-          protocol   = "https"
-          pathPrefix = "/mcp"
-        }
-      ]
-      auth = [
-        {
-          scheme = "bearer"
-          scopes = ["mcp.invoke"]
-        }
-      ]
-      metadata = {
-        title       = "Computer MCP"
-        description = "Sandbox shell, file, and process tools exposed over Streamable HTTP."
-        protocol    = "streamable-http"
-      }
-      visibility = "space"
-    },
-  ]
+output "url" {
+  description = "Alias for launch_url for generic public URL smoke checks."
+  value       = local.launch_url
+}
+
+output "public_url" {
+  description = "Public Worker origin."
+  value       = local.public_origin != "" ? local.public_origin : null
+}
+
+output "api_url" {
+  description = "Public Worker API origin."
+  value       = local.public_origin != "" ? local.public_origin : null
+}
+
+output "mcp_url" {
+  description = "Ordinary MCP resource URL mapped by Takosumi's service-side MCP Interface blueprint."
+  value       = local.mcp_url
+}
+
+output "worker_name" {
+  description = "Cloudflare Worker name."
+  value       = local.worker_name
+}
+
+output "worker_managed_by_opentofu" {
+  description = "Whether this apply owns the Worker/Container deployment through the official Wrangler lifecycle."
+  value       = var.enable_cloudflare_resources
+}
+
+output "session_index_kv_namespace_id" {
+  description = "Provider-native KV namespace id used for the session index."
+  value       = try(cloudflare_workers_kv_namespace.session_index[0].id, null)
+}
+
+output "cloudflare_account_id" {
+  description = "Cloudflare account id used for deployed resources."
+  value       = var.enable_cloudflare_resources ? trimspace(var.cloudflare_account_id) : null
+}
+
+output "container_class_name" {
+  description = "Cloudflare Container Durable Object class exported by the Worker."
+  value       = "SandboxSessionContainer"
+}
+
+output "container_instance_type" {
+  description = "Cloudflare Container instance type used by the current module."
+  value       = "basic"
+}
+
+output "container_max_instances" {
+  description = "Configured maximum concurrent Container instances."
+  value       = var.container_max_instances
 }

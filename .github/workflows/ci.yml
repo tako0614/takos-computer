@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # pinned: v6.0.2 (2026)
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # pinned: v2.0.2
+        with:
+          bun-version: latest
+      - uses: opentofu/setup-opentofu@847eaa4afeb791b06daa46e8eafa8b1b68d7cfb4 # pinned: v2
+        with:
+          tofu_version: 1.12.1
+          tofu_wrapper: false
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run test:all
+      - run: bun run build:all
+      - run: bun run check:dist
+      - run: bun run check:opentofu
+      - name: Build the sandbox Container image
+        run: docker build --file apps/sandbox/Dockerfile --tag takos-computer-sandbox:ci .
+      - name: Validate and plan the OpenTofu Capsule
+        shell: bash
+        run: |
+          set -euo pipefail
+          tofu init -backend=false -input=false
+          tofu validate
+          tofu plan -input=false -refresh=false -lock=false \
+            -var enable_cloudflare_resources=true \
+            -var cloudflare_account_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+            -var cloudflare_workers_subdomain=example \
+            -var published_mcp_auth_token=12345678901234567890123456789012 \
+            -out=/tmp/takos-computer.tfplan

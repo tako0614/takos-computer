@@ -31,6 +31,9 @@ export interface SandboxHostEnv {
   INSTALL_LAUNCH_INSTALLATION_ID?: string;
   INSTALL_LAUNCH_CONSUME_PATH?: string;
   BASE_URL?: string;
+  MCP_URL?: string;
+  APP_WORKSPACE_ID?: string;
+  APP_CAPSULE_ID?: string;
   TAKOS_API_URL?: string;
   TAKOS_TOKEN?: string;
   TAKOS_TRUST_ROUTED_GUI_API?: string;

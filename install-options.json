@@ -1,0 +1,20 @@
+{
+  "apiVersion": "install.takosumi.com/v1alpha1",
+  "kind": "CapsuleSourceOptions",
+  "metadata": {
+    "name": "takos-computer",
+    "title": "Takos Computer",
+    "description": "Choose a deployment target for Takos Computer."
+  },
+  "options": [
+    {
+      "id": "cloudflare",
+      "title": "Cloudflare",
+      "description": "Deploy the Cloudflare Worker and Container OpenTofu module.",
+      "source": {
+        "url": "https://github.com/tako0614/takos-computer.git",
+        "path": "."
+      }
+    }
+  ]
+}
