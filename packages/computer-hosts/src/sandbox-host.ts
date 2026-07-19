@@ -30,6 +30,7 @@ import {
   guiSessionOwnsSandbox,
   resolveHostAdminScope,
   resolvePublishedMcpAuthToken,
+  hasPublishedMcpInterfaceOAuth,
 } from "./sandbox-host-auth.ts";
 import { handlePublishedMcp } from "./sandbox-host-published-mcp.ts";
 import {
@@ -104,17 +105,23 @@ async function readRequestTextWithLimit(
     if (!Number.isInteger(parsed) || parsed < 0) {
       return {
         ok: false,
-        response: Response.json({ error: "Invalid Content-Length" }, {
-          status: 400,
-        }),
+        response: Response.json(
+          { error: "Invalid Content-Length" },
+          {
+            status: 400,
+          },
+        ),
       };
     }
     if (parsed > maxBytes) {
       return {
         ok: false,
-        response: Response.json({ error: "MCP request body too large" }, {
-          status: 413,
-        }),
+        response: Response.json(
+          { error: "MCP request body too large" },
+          {
+            status: 413,
+          },
+        ),
       };
     }
   }
@@ -133,9 +140,12 @@ async function readRequestTextWithLimit(
       await reader.cancel();
       return {
         ok: false,
-        response: Response.json({ error: "MCP request body too large" }, {
-          status: 413,
-        }),
+        response: Response.json(
+          { error: "MCP request body too large" },
+          {
+            status: 413,
+          },
+        ),
       };
     }
     chunks.push(value);
@@ -168,22 +178,20 @@ function collectMissingRuntimeBindings(env: Env): string[] {
   if (!resolveContainerMcpAuthToken(env)) {
     missing.push("MCP_AUTH_TOKEN");
   }
-  if (!resolvePublishedMcpAuthToken(env)) {
-    missing.push("PUBLISHED_MCP_AUTH_TOKEN");
+  if (
+    !resolvePublishedMcpAuthToken(env) &&
+    !hasPublishedMcpInterfaceOAuth(env)
+  ) {
+    missing.push("PUBLISHED_MCP_AUTH_TOKEN or Interface OAuth configuration");
   }
   if (!env.SESSION_INDEX) missing.push("SESSION_INDEX");
   if (guiAppAuthRequired(env)) {
-    for (
-      const name of [
-        "APP_SESSION_SECRET",
-        "OIDC_ISSUER_URL",
-        "OIDC_CLIENT_ID",
-        "OIDC_CLIENT_SECRET",
-        "ACCOUNTS_BASE_URL",
-        "INSTALL_LAUNCH_INSTALLATION_ID",
-        "INSTALL_LAUNCH_CONSUME_PATH",
-      ] as const
-    ) {
+    for (const name of [
+      "APP_SESSION_SECRET",
+      "OIDC_ISSUER_URL",
+      "OIDC_CLIENT_ID",
+      "OIDC_CLIENT_SECRET",
+    ] as const) {
       if (!env[name]) missing.push(name);
     }
   }
@@ -203,11 +211,14 @@ app.get("/healthz", (c) => {
 
 function readinessResponse(c: AppContext): Response {
   const missing = collectMissingRuntimeBindings(c.env);
-  return c.json({
-    status: missing.length === 0 ? "ok" : "misconfigured",
-    service: "takos-sandbox-host",
-    missingBindings: missing,
-  }, missing.length === 0 ? 200 : 503);
+  return c.json(
+    {
+      status: missing.length === 0 ? "ok" : "misconfigured",
+      service: "takos-sandbox-host",
+      missingBindings: missing,
+    },
+    missing.length === 0 ? 200 : 503,
+  );
 }
 
 app.get("/health", readinessResponse);
@@ -257,13 +268,15 @@ async function listSessions(c: AppContext): Promise<Response> {
   // A GUI caller lists only its own owner-scoped prefix (so it never reads
   // other tenants' state); an admin lists the whole index. Both follow the KV
   // cursor so entries past the first page are not silently dropped.
-  const prefix = scope.kind === "gui"
-    ? ownerIndexPrefix(scope.guiSession.sub)
-    : SESSION_INDEX_GLOBAL_PREFIX;
+  const prefix =
+    scope.kind === "gui"
+      ? ownerIndexPrefix(scope.guiSession.sub)
+      : SESSION_INDEX_GLOBAL_PREFIX;
   const all = await listSessionStates(kv, prefix);
-  const sessions = scope.kind === "gui"
-    ? all.filter((val) => guiSessionOwnsSandbox(scope.guiSession, val))
-    : all;
+  const sessions =
+    scope.kind === "gui"
+      ? all.filter((val) => guiSessionOwnsSandbox(scope.guiSession, val))
+      : all;
   return c.json({ sessions });
 }
 
@@ -300,9 +313,12 @@ async function createSession(c: AppContext): Promise<Response> {
   // supply it explicitly); a GUI caller's space is derived above and may be
   // legitimately empty for a space-less session.
   if (!sessionId || !userId || (scope.kind !== "gui" && !spaceId)) {
-    return c.json({
-      error: "Missing required fields: sessionId, spaceId, userId",
-    }, 400);
+    return c.json(
+      {
+        error: "Missing required fields: sessionId, spaceId, userId",
+      },
+      400,
+    );
   }
 
   // The `pmcp-` id namespace is reserved for published-MCP sessions, which a
@@ -310,7 +326,9 @@ async function createSession(c: AppContext): Promise<Response> {
   // caller cannot create a session it would then be unable to access.
   if (isPublishedScopedId(sessionId)) {
     return c.json(
-      { error: `sessionId must not start with "${PUBLISHED_MCP_SCOPE_PREFIX}"` },
+      {
+        error: `sessionId must not start with "${PUBLISHED_MCP_SCOPE_PREFIX}"`,
+      },
       400,
     );
   }
@@ -332,10 +350,7 @@ async function createSession(c: AppContext): Promise<Response> {
       if (!existing && kv) {
         const owned = await countOwnerSessions(kv, userId);
         if (owned >= maxSessionsPerUser(c.env)) {
-          return c.json(
-            { error: "Active sandbox session limit reached" },
-            429,
-          );
+          return c.json({ error: "Active sandbox session limit reached" }, 429);
         }
       }
     }
