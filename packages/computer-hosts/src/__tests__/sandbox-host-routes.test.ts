@@ -14,6 +14,7 @@ type WorkerFetch = (
 
 class MemoryKv implements NonNullable<SandboxHostEnv["SESSION_INDEX"]> {
   private values = new Map<string, string>();
+  failNextDelete = false;
 
   get(key: string, options?: { type?: "text" }): Promise<string | null>;
   get(key: string, options: { type: "json" }): Promise<unknown>;
@@ -34,6 +35,10 @@ class MemoryKv implements NonNullable<SandboxHostEnv["SESSION_INDEX"]> {
   }
 
   delete(key: string): Promise<void> {
+    if (this.failNextDelete) {
+      this.failNextDelete = false;
+      return Promise.reject(new Error("transient KV delete failure"));
+    }
     this.values.delete(key);
     return Promise.resolve();
   }
@@ -47,6 +52,53 @@ class MemoryKv implements NonNullable<SandboxHostEnv["SESSION_INDEX"]> {
       .filter((name) => !options?.prefix || name.startsWith(options.prefix))
       .map((name) => ({ name }));
     return Promise.resolve({ keys, list_complete: true });
+  }
+}
+
+class MemoryQuotaNamespace {
+  private readonly reservations = new Map<string, Set<string>>();
+
+  idFromName(name: string): { toString(): string } {
+    return { toString: () => name };
+  }
+
+  get(id: { toString(): string }) {
+    const principal = id.toString();
+    return {
+      reserve: (sessionId: string, limit: number) => {
+        const sessions = this.reservations.get(principal) ?? new Set<string>();
+        if (sessions.has(sessionId)) {
+          return Promise.resolve({
+            ok: true,
+            created: false,
+            count: sessions.size,
+            limit,
+          });
+        }
+        if (sessions.size >= limit) {
+          return Promise.resolve({
+            ok: false,
+            created: false,
+            count: sessions.size,
+            limit,
+          });
+        }
+        sessions.add(sessionId);
+        this.reservations.set(principal, sessions);
+        return Promise.resolve({
+          ok: true,
+          created: true,
+          count: sessions.size,
+          limit,
+        });
+      },
+      release: (sessionId: string) => {
+        const sessions = this.reservations.get(principal);
+        const released = sessions?.delete(sessionId) ?? false;
+        if (sessions?.size === 0) this.reservations.delete(principal);
+        return Promise.resolve({ released });
+      },
+    };
   }
 }
 
@@ -87,7 +139,7 @@ function createEnv(
     createSession(
       payload: CreateSandboxSessionPayload,
     ): Promise<{ ok: true; proxyToken: string }> {
-      states.set(payload.sessionId, {
+      states.set(currentSessionId, {
         ...payload,
         status: "active",
         createdAt: "2026-04-20T00:00:00.000Z",
@@ -106,7 +158,8 @@ function createEnv(
       return states.get(currentSessionId) ?? null;
     },
     destroySession(): Promise<void> {
-      states.delete(currentSessionId);
+      const state = states.get(currentSessionId);
+      if (state) states.set(currentSessionId, { ...state, status: "stopped" });
       return Promise.resolve();
     },
     forwardToContainer(
@@ -154,6 +207,7 @@ function createEnv(
         return stub;
       },
     },
+    SANDBOX_QUOTA: new MemoryQuotaNamespace(),
     SESSION_INDEX: new MemoryKv(),
   } as unknown as SandboxHostEnv;
   const hostAuthToken = options.hostAuthToken === undefined
@@ -655,6 +709,7 @@ test("sandbox host health reports missing required bindings", async () => {
     publishedMcpAuthToken: null,
   });
   delete env.SESSION_INDEX;
+  delete env.SANDBOX_QUOTA;
 
   const response = await fetchWorker(env, "/health");
 
@@ -663,6 +718,7 @@ test("sandbox host health reports missing required bindings", async () => {
     status: "misconfigured",
     service: "takos-sandbox-host",
     missingBindings: [
+      "SANDBOX_QUOTA",
       "SANDBOX_HOST_AUTH_TOKEN",
       "MCP_AUTH_TOKEN",
       "PUBLISHED_MCP_AUTH_TOKEN or Interface OAuth configuration",
@@ -678,6 +734,7 @@ test("sandbox host healthz is bootstrap-safe while readyz is strict", async () =
     publishedMcpAuthToken: null,
   });
   delete env.SESSION_INDEX;
+  delete env.SANDBOX_QUOTA;
 
   const healthzResponse = await fetchWorker(env, "/healthz");
   expect(healthzResponse.status).toEqual(200);
@@ -686,6 +743,7 @@ test("sandbox host healthz is bootstrap-safe while readyz is strict", async () =
     service: "takos-sandbox-host",
     ready: false,
     missingBindings: [
+      "SANDBOX_QUOTA",
       "SANDBOX_HOST_AUTH_TOKEN",
       "MCP_AUTH_TOKEN",
       "PUBLISHED_MCP_AUTH_TOKEN or Interface OAuth configuration",
@@ -695,6 +753,30 @@ test("sandbox host healthz is bootstrap-safe while readyz is strict", async () =
 
   const readyzResponse = await fetchWorker(env, "/readyz");
   expect(readyzResponse.status).toEqual(503);
+});
+
+test("sandbox host lifecycle routes fail closed without the session index", async () => {
+  const { env } = createEnv();
+  delete env.SESSION_INDEX;
+
+  const create = await fetchWorker(env, "/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...hostAuthHeaders() },
+    body: JSON.stringify({
+      sessionId: "session-1",
+      spaceId: "space-1",
+      userId: "user-1",
+    }),
+  });
+  expect(create.status).toEqual(503);
+  expect(await create.json()).toEqual({
+    error: "SESSION_INDEX is not configured",
+  });
+
+  const list = await fetchWorker(env, "/gui/api/sandbox-sessions", {
+    headers: hostAuthHeaders(),
+  });
+  expect(list.status).toEqual(503);
 });
 
 test("sandbox host does not use host auth token as container MCP auth fallback", async () => {
@@ -933,9 +1015,9 @@ test("sandbox host authorizes consistently when a stale admin cookie rides along
   expect(mcpResponse.status).toEqual(200);
 });
 
-test("sandbox host enforces a per-user live-session quota", async () => {
+test("sandbox host atomically enforces and releases a per-principal session quota", async () => {
   const { env } = createEnv({ appAuthRequired: true });
-  env.MAX_SANDBOX_SESSIONS_PER_USER = "2";
+  env.MAX_SANDBOX_SESSIONS_PER_PRINCIPAL = "2";
   const cookie = await mintGuiSessionCookie(env, {
     sub: "user-a",
     spaceId: "space-a",
@@ -953,6 +1035,14 @@ test("sandbox host enforces a per-user live-session quota", async () => {
   expect((await create("s3")).status).toEqual(429);
   // Re-creating an already-owned session is not blocked by the quota.
   expect((await create("s1")).status).toEqual(201);
+
+  const destroy = await fetchWorker(
+    env,
+    "/gui/api/sandbox-session/s1",
+    { method: "DELETE", headers: { Cookie: cookie } },
+  );
+  expect(destroy.status).toEqual(200);
+  expect((await create("s3")).status).toEqual(201);
 });
 
 test("sandbox host rejects a reserved published-scope sessionId on create", async () => {
@@ -967,6 +1057,21 @@ test("sandbox host rejects a reserved published-scope sessionId on create", asyn
     }),
   });
   expect(response.status).toEqual(400);
+});
+
+test("sandbox host bounds session ids before Durable Object addressing", async () => {
+  const { env, doNames } = createEnv();
+  const response = await fetchWorker(env, "/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...hostAuthHeaders() },
+    body: JSON.stringify({
+      sessionId: "x".repeat(121),
+      spaceId: "space-1",
+      userId: "user-1",
+    }),
+  });
+  expect(response.status).toEqual(400);
+  expect(doNames).toEqual([]);
 });
 
 test("sandbox host compensates (destroys) a session whose index write fails", async () => {
@@ -997,6 +1102,54 @@ test("sandbox host compensates (destroys) a session whose index write fails", as
     headers: hostAuthHeaders(),
   });
   expect(getResponse.status).toEqual(404);
+});
+
+test("sandbox host retries index and quota cleanup from a stopped tombstone", async () => {
+  const { env } = createEnv();
+  const createResponse = await fetchWorker(env, "/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...hostAuthHeaders() },
+    body: JSON.stringify({
+      sessionId: "retry-delete",
+      spaceId: "space-1",
+      userId: "user-1",
+    }),
+  });
+  expect(createResponse.status).toEqual(201);
+
+  const index = env.SESSION_INDEX as MemoryKv;
+  index.failNextDelete = true;
+  const firstDelete = await fetchWorker(env, "/session/retry-delete", {
+    method: "DELETE",
+    headers: hostAuthHeaders(),
+  });
+  expect(firstDelete.status).toEqual(500);
+  const duringRetry = await fetchWorker(env, "/gui/api/sandbox-sessions", {
+    headers: hostAuthHeaders(),
+  });
+  const duringRetryBody = await duringRetry.json() as {
+    sessions: SandboxSessionState[];
+  };
+  expect(duringRetryBody.sessions[0]?.status).toEqual("stopped");
+
+  const retryDelete = await fetchWorker(env, "/session/retry-delete", {
+    method: "DELETE",
+    headers: hostAuthHeaders(),
+  });
+  expect(retryDelete.status).toEqual(200);
+
+  // The released reservation admits a replacement session at cap 1.
+  env.MAX_SANDBOX_SESSIONS_PER_PRINCIPAL = "1";
+  const replacement = await fetchWorker(env, "/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...hostAuthHeaders() },
+    body: JSON.stringify({
+      sessionId: "replacement",
+      spaceId: "space-1",
+      userId: "user-1",
+    }),
+  });
+  expect(replacement.status).toEqual(201);
 });
 
 test("sandbox host rejects unauthenticated session create", async () => {
@@ -1524,6 +1677,50 @@ test("sandbox host published MCP auto-creates a session and proxies tool calls",
       },
     },
   }]);
+});
+
+test("sandbox host published MCP shares the atomic session quota and releases it", async () => {
+  const { env } = createEnv();
+  env.MAX_SANDBOX_SESSIONS_PER_PRINCIPAL = "1";
+
+  const call = (name: string, sessionId: string) =>
+    fetchWorker(env, "/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...publishedMcpAuthHeaders(),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: sessionId,
+        method: "tools/call",
+        params: {
+          name,
+          arguments: { session_id: sessionId },
+        },
+      }),
+    });
+
+  const first = await call("computer_session_create", "mcp-1");
+  expect((await first.json() as { error?: unknown }).error).toEqual(undefined);
+
+  const overLimit = await call("computer_session_create", "mcp-2");
+  const overLimitBody = await overLimit.json() as {
+    error?: { code: number; message: string };
+  };
+  expect(overLimitBody.error?.code).toEqual(-32603);
+  expect(overLimitBody.error?.message).toContain(
+    "Active sandbox session limit reached",
+  );
+
+  const destroyed = await call("computer_session_destroy", "mcp-1");
+  expect((await destroyed.json() as { error?: unknown }).error).toEqual(
+    undefined,
+  );
+  const afterRelease = await call("computer_session_create", "mcp-2");
+  expect((await afterRelease.json() as { error?: unknown }).error).toEqual(
+    undefined,
+  );
 });
 
 test("sandbox host published MCP returns canonical -32603 when a tool handler throws", async () => {

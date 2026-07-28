@@ -93,7 +93,7 @@ function createEnv(): SandboxHostEnv {
         throw new Error("not used in direct DO tests");
       },
     } as SandboxHostEnv["SANDBOX_CONTAINER"],
-  };
+  } as unknown as SandboxHostEnv;
 }
 
 function createPayload(
@@ -140,14 +140,14 @@ test("sandbox session container does not use host auth token as MCP fallback", a
   });
 });
 
-test("sandbox session container hydrates persisted session state and clears it on destroy", async () => {
+test("sandbox session container retains an owner tombstone on destroy", async () => {
   const ctx: HostContainerContext = { storage: new MemoryStorage() };
   const first = new TestSandboxSessionContainer(ctx, createEnv());
 
   const payload = createPayload();
   const result = await first.createSession(payload);
   const createdState = await first.getSessionState();
-  expect(createdState).toBeTruthy();
+  if (!createdState) throw new Error("Expected created session state");
 
   const second = new TestSandboxSessionContainer(ctx, createEnv());
 
@@ -163,8 +163,19 @@ test("sandbox session container hydrates persisted session state and clears it o
   await second.destroySession();
 
   const third = new TestSandboxSessionContainer(ctx, createEnv());
-  expect(await third.getSessionState()).toEqual(null);
-  expect(await third.verifyProxyToken(result.proxyToken)).toEqual(null);
+  expect(await third.getSessionState()).toEqual({
+    ...createdState,
+    status: "stopped",
+  });
+  expect(await third.verifyProxyToken(result.proxyToken)).toEqual({
+    sessionId: payload.sessionId,
+    spaceId: payload.spaceId,
+    userId: payload.userId,
+  });
+  const stoppedForward = await third.forwardToContainer("/mcp", {
+    method: "POST",
+  });
+  expect(stoppedForward.status).toEqual(410);
   expect(second.destroyCalls).toEqual(1);
 });
 

@@ -129,13 +129,24 @@ export class ShellManager {
         timed_out: false,
       };
     }
+    if (
+      options.allow_takos_token === true && options.takos_token === undefined
+    ) {
+      return {
+        stdout: "",
+        stderr:
+          "allow_takos_token requires an explicit per-request takos_token",
+        exit_code: 1,
+        timed_out: false,
+      };
+    }
     const timeoutMs = normalizeTimeoutMs(options.timeout_ms);
 
     let timedOut = false;
     let aborted = false;
     let process: ManagedProcess | null = null;
     let groupKill = false;
-    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+    let forceKillPromise: Promise<void> | undefined;
 
     const terminate = (reason: "timeout" | "abort") => {
       if (reason === "timeout") timedOut = true;
@@ -146,10 +157,7 @@ export class ShellManager {
       // command was spawned via setsid, so backgrounded grandchildren do not
       // outlive the timeout/abort. Falls back to the direct pid otherwise.
       killManagedProcess(process, "SIGTERM", groupKill);
-
-      forceKillTimer = setTimeout(() => {
-        if (process) killManagedProcess(process, "SIGKILL", groupKill);
-      }, PROCESS_KILL_GRACE_MS);
+      forceKillPromise ??= forceKillAfterGrace(process, groupKill);
     };
 
     const timer = setTimeout(() => terminate("timeout"), timeoutMs);
@@ -173,9 +181,13 @@ export class ShellManager {
       ];
       // `setsid -w` makes the command its own session/process-group leader (so
       // child.pid == the new pgid) and waits for it, propagating the exit
-      // status. This lets terminate() kill the whole group on timeout/abort.
-      groupKill = setsidAvailable();
-      const argv = groupKill ? ["setsid", "-w", ...commandArgv] : commandArgv;
+      // status. The sandbox fails closed without it: direct-pid fallback lets
+      // background descendants escape cleanup.
+      if (!setsidAvailable()) {
+        throw new Error("setsid is required for sandbox process isolation");
+      }
+      groupKill = true;
+      const argv = ["setsid", "-w", ...commandArgv];
       const child = bunLike().spawn(argv, {
         cwd,
         env: buildCommandEnv(options.env, {
@@ -195,6 +207,8 @@ export class ShellManager {
         collectOutput(child.stdout),
         collectOutput(child.stderr),
       ]);
+      await forceKillPromise;
+      await cleanSurvivingProcessGroup(child, groupKill);
 
       return {
         stdout,
@@ -203,6 +217,11 @@ export class ShellManager {
         timed_out: timedOut,
       };
     } catch (err) {
+      if (process) {
+        killManagedProcess(process, "SIGTERM", groupKill);
+        await forceKillAfterGrace(process, groupKill);
+        await cleanSurvivingProcessGroup(process, groupKill);
+      }
       return {
         stdout: "",
         stderr: err instanceof Error ? err.message : String(err),
@@ -211,7 +230,6 @@ export class ShellManager {
       };
     } finally {
       clearTimeout(timer);
-      if (forceKillTimer !== undefined) clearTimeout(forceKillTimer);
       options.signal?.removeEventListener("abort", externalAbort);
     }
   }
@@ -219,7 +237,7 @@ export class ShellManager {
   killProcess(
     pid: number,
     signal: ProcessSignal = "SIGTERM",
-  ): ProcessKillResult {
+  ): Promise<ProcessKillResult> {
     if (!Number.isSafeInteger(pid) || pid <= 1) {
       throw new Error("pid must be a positive integer greater than 1");
     }
@@ -229,21 +247,43 @@ export class ShellManager {
 
     const tracked = this.managedProcesses.get(pid);
     if (!tracked) {
-      return {
+      return Promise.resolve({
         killed: false,
         pid,
         signal,
         error: "Process is not managed by this ShellManager",
-      };
+      });
     }
 
+    return this.killTrackedProcess(tracked, pid, signal);
+  }
+
+  private async killTrackedProcess(
+    tracked: TrackedProcess,
+    pid: number,
+    signal: ProcessSignal,
+  ): Promise<ProcessKillResult> {
     try {
-      if (tracked.groupKill) {
-        // Negative pid signals the whole process group (see exec/setsid).
-        sendSignal(-pid, signal);
-      } else {
-        tracked.process.kill(signal);
+      killManagedProcess(tracked.process, signal, tracked.groupKill);
+      if (signal !== "SIGKILL") {
+        await forceKillAfterGrace(tracked.process, tracked.groupKill);
       }
+      const exited = await Promise.race([
+        tracked.process.exited.then(() => true),
+        delay(PROCESS_KILL_GRACE_MS + 250).then(() => false),
+      ]);
+      if (!exited) {
+        return {
+          killed: false,
+          pid,
+          signal,
+          error: "Managed process did not exit after forced termination",
+        };
+      }
+      await cleanSurvivingProcessGroup(
+        tracked.process,
+        tracked.groupKill,
+      );
       return { killed: true, pid, signal };
     } catch (err) {
       return {
@@ -292,7 +332,7 @@ function buildCommandEnv(
     }
   }
   if (options.allowTakosToken) {
-    const takosToken = options.takosToken ?? processEnv.TAKOS_TOKEN;
+    const takosToken = options.takosToken;
     if (takosToken !== undefined) {
       validateDirectEnv("TAKOS_TOKEN", takosToken);
       env.TAKOS_TOKEN = takosToken;
@@ -305,6 +345,55 @@ function buildCommandEnv(
     env[key] = value;
   }
   return env;
+}
+
+async function forceKillAfterGrace(
+  process: ManagedProcess,
+  groupKill: boolean,
+): Promise<void> {
+  const exited = await Promise.race([
+    process.exited.then(() => true),
+    delay(PROCESS_KILL_GRACE_MS).then(() => false),
+  ]);
+  if (!exited || (groupKill && processGroupExists(process.pid))) {
+    killManagedProcess(process, "SIGKILL", groupKill);
+  }
+}
+
+async function cleanSurvivingProcessGroup(
+  process: ManagedProcess,
+  groupKill: boolean,
+): Promise<void> {
+  if (!groupKill || !processGroupExists(process.pid)) return;
+  killManagedProcess(process, "SIGTERM", true);
+  await Promise.race([
+    waitForProcessGroupExit(process.pid),
+    delay(PROCESS_KILL_GRACE_MS),
+  ]);
+  if (processGroupExists(process.pid)) {
+    killManagedProcess(process, "SIGKILL", true);
+    await Promise.race([
+      waitForProcessGroupExit(process.pid),
+      delay(250),
+    ]);
+  }
+}
+
+async function waitForProcessGroupExit(pid: number): Promise<void> {
+  while (processGroupExists(pid)) await delay(20);
+}
+
+function processGroupExists(pid: number): boolean {
+  try {
+    sendSignal(-pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 type ManagedProcess = {
@@ -345,7 +434,7 @@ let cachedSetsidAvailable: boolean | undefined;
 /**
  * Whether `setsid` is on PATH. When present, commands run as their own
  * session/process-group leader so the whole group can be killed on
- * timeout/abort; otherwise exec falls back to single-process termination.
+ * timeout/abort. Shell execution fails closed when it is unavailable.
  */
 function setsidAvailable(): boolean {
   if (cachedSetsidAvailable === undefined) {

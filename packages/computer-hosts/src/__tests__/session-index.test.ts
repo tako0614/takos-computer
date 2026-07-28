@@ -2,7 +2,6 @@ import { expect, test } from "bun:test";
 import type { KVNamespace } from "../cf-types.ts";
 import type { SandboxSessionState } from "../sandbox-session-types.ts";
 import {
-  countOwnerSessions,
   indexSession,
   listSessionStates,
   ownerIndexPrefix,
@@ -96,18 +95,6 @@ test("owner prefix isolates one user's sessions from another's", async () => {
   expect(a.map((s) => s.sessionId).sort()).toEqual(["a1", "a2"]);
   const b = await listSessionStates(kv, ownerIndexPrefix("user-b"));
   expect(b.map((s) => s.sessionId)).toEqual(["b1"]);
-});
-
-test("countOwnerSessions paginates and excludes published-scoped entries", async () => {
-  const kv = new PagingKv(2);
-  await indexSession(kv, state("user-a", "a1"));
-  await indexSession(kv, state("user-a", "a2"));
-  await indexSession(kv, state("user-a", "a3"));
-  // A published-token holder planted a pmcp- session under user-a's owner; it
-  // must not count against (or be claimable by) the GUI user.
-  await indexSession(kv, state("user-a", "pmcp-deadbeef:planted"));
-
-  expect(await countOwnerSessions(kv, "user-a")).toEqual(3);
 });
 
 test("unindexSession removes the owner-scoped key", async () => {

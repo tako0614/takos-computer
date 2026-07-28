@@ -19,3 +19,14 @@ export interface SandboxSessionState {
   status: "starting" | "active" | "stopped";
   createdAt: string;
 }
+
+export const MAX_SANDBOX_SESSION_ID_BYTES = 120;
+
+export function assertSandboxSessionId(sessionId: string): void {
+  const bytes = new TextEncoder().encode(sessionId).byteLength;
+  if (bytes === 0 || bytes > MAX_SANDBOX_SESSION_ID_BYTES) {
+    throw new Error(
+      `sessionId must be 1..${MAX_SANDBOX_SESSION_ID_BYTES} UTF-8 bytes`,
+    );
+  }
+}

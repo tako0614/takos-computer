@@ -183,6 +183,30 @@ test("ShellManager: exec kills backgrounded children on timeout", async () => {
   }
 });
 
+test("ShellManager: exec cleans backgrounded children after normal shell exit", async () => {
+  const tmpDir = await makeTempDir();
+  const marker = `${tmpDir}/normal-bg-marker`;
+  try {
+    const shell = new ShellManager(tmpDir);
+    const result = await shell.exec({
+      command:
+        `( while true; do date +%s%N > "${marker}"; sleep 0.05; done ) >/dev/null 2>&1 &`,
+      timeout_ms: 5_000,
+    });
+    expect(result.exit_code).toEqual(0);
+
+    if (Bun.which("setsid") !== null) {
+      await Bun.sleep(150);
+      await Bun.write(marker, "");
+      await Bun.sleep(300);
+      const after = await Bun.file(marker).text().catch(() => "");
+      expect(after).toEqual("");
+    }
+  } finally {
+    await remove(tmpDir, { recursive: true });
+  }
+});
+
 test("ShellManager: killProcess rejects unsafe pid and signal inputs", () => {
   const shell = new ShellManager("/tmp");
 
@@ -206,7 +230,7 @@ test("ShellManager: killProcess rejects unmanaged processes", async () => {
   });
 
   try {
-    const result = shell.killProcess(proc.pid);
+    const result = await shell.killProcess(proc.pid);
     expect(result.killed).toEqual(false);
     expect(result.pid).toEqual(proc.pid);
     expect(result.error?.includes("not managed")).toBeTruthy();
@@ -217,6 +241,31 @@ test("ShellManager: killProcess rejects unmanaged processes", async () => {
       // Process may already be gone.
     }
     await proc.exited;
+  }
+});
+
+test("ShellManager: killProcess waits for the managed process to exit", async () => {
+  const tmpDir = await makeTempDir();
+  const pidFile = `${tmpDir}/managed.pid`;
+  try {
+    const shell = new ShellManager(tmpDir);
+    const running = shell.exec({
+      command: `printf "%s" "$$" > "${pidFile}"; sleep 30`,
+      timeout_ms: 60_000,
+    });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (await Bun.file(pidFile).exists()) break;
+      await Bun.sleep(10);
+    }
+    const pid = Number(await Bun.file(pidFile).text());
+    expect(Number.isSafeInteger(pid)).toEqual(true);
+
+    const killed = await shell.killProcess(pid);
+    expect(killed.killed).toEqual(true);
+    const result = await running;
+    expect(result.exit_code).not.toEqual(0);
+  } finally {
+    await remove(tmpDir, { recursive: true });
   }
 });
 
@@ -256,7 +305,7 @@ test("ShellManager: exec does not inherit TAKOS_TOKEN by default", async () => {
   }
 });
 
-test("ShellManager: exec can explicitly inherit TAKOS_TOKEN", async () => {
+test("ShellManager: exec never inherits a host TAKOS_TOKEN", async () => {
   const tmpDir = await makeTempDir();
   const snapshot = {
     TAKOS_TOKEN: env.TAKOS_TOKEN,
@@ -270,8 +319,11 @@ test("ShellManager: exec can explicitly inherit TAKOS_TOKEN", async () => {
       allow_takos_token: true,
     });
 
-    expect(result.stdout).toEqual("takos-api-token");
-    expect(result.exit_code).toEqual(0);
+    expect(result.stdout).toEqual("");
+    expect(result.stderr).toContain(
+      "requires an explicit per-request takos_token",
+    );
+    expect(result.exit_code).toEqual(1);
   } finally {
     restoreEnv(snapshot);
     await remove(tmpDir, { recursive: true });

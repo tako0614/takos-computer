@@ -57,11 +57,10 @@ export class SandboxSessionContainer
       delete nextEnvVars.MCP_AUTH_TOKEN;
     }
 
-    // SECURITY (S1 secret exfil): TAKOS_TOKEN is a host-wide secret and must
-    // NOT live in the persistent container env — untrusted `shell_exec` could
-    // read it from /proc/1/environ, bypassing shell-manager's env denylist and
-    // the per-exec `allow_takos_token` gate. It is delivered only per-exec via
-    // the shell tool's `takos_token` argument when `allow_takos_token` is set.
+    // SECURITY (S1 secret exfil): even if an operator accidentally adds
+    // TAKOS_TOKEN to host env, it must NOT reach persistent container env —
+    // untrusted `shell_exec` could read /proc/1/environ. Takos API credentials
+    // are accepted only as an explicit per-exec `takos_token`.
     delete nextEnvVars.TAKOS_TOKEN;
 
     if (this.env.TAKOS_API_URL) {
@@ -223,7 +222,12 @@ export class SandboxSessionContainer
         status: "stopped",
       });
     }
-    await this.clearPersistedSession();
+    // Keep the stopped owner-bearing state and proxy token as a tombstone.
+    // Index deletion and quota release live in the Worker and can fail
+    // independently after the container has stopped; retaining this small
+    // record lets the same authenticated caller retry and finish those
+    // idempotent cleanup steps. `forwardToContainer` refuses stopped state, and
+    // a later create replaces both state and token.
     await this.destroy();
   }
 
@@ -263,6 +267,9 @@ export class SandboxSessionContainer
     init?: RequestInit,
   ): Promise<Response> {
     await this.ensureSessionStateLoaded();
+    if (!this.sessionState || this.sessionState.status === "stopped") {
+      return Response.json({ error: "Session is stopped" }, { status: 410 });
+    }
     this.applyContainerEnv();
     await this.ensureContainerStarted();
     this.renewActivityTimeout();

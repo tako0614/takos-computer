@@ -1,8 +1,16 @@
 .git
 .github
+.gitignore
+.env
+.env.*
+!.env.example
 .terraform
+.terraform.lock.hcl
+.takos-computer-local
 .wrangler
 dist
+packages/dashboard/dist
 node_modules
 *.tfstate
 *.tfstate.*
+*.tsbuildinfo

@@ -2,13 +2,28 @@ import { expect, test } from "bun:test";
 
 import {
   createLocalDevSandboxHost,
+  LOCAL_DEV_HOST,
   LOCAL_DEV_DEFAULTS,
+  sessionWorkspaceSegment,
 } from "../local-dev-simulator.ts";
 import { makeTempDir, remove } from "./fs-helpers.ts";
 
 const HOST_AUTH_TOKEN = "test-host-token";
 const PUBLISHED_MCP_AUTH_TOKEN = "test-published-mcp-token";
 const MCP_AUTH_TOKEN = "test-mcp-token";
+
+test("local dev simulator is loopback-only and maps ids injectively", () => {
+  expect(LOCAL_DEV_HOST).toEqual("127.0.0.1");
+  expect(sessionWorkspaceSegment("a/b")).not.toEqual(
+    sessionWorkspaceSegment("a?b"),
+  );
+  expect(sessionWorkspaceSegment("日本語")).toEqual(
+    sessionWorkspaceSegment("日本語"),
+  );
+  expect(() => sessionWorkspaceSegment("x".repeat(181))).toThrow(
+    "workspace session name must be 1..180 UTF-8 bytes",
+  );
+});
 
 test("local dev simulator exposes a ready sandbox host env", async () => {
   const workspaceRoot = await makeTempDir({

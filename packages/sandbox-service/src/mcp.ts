@@ -167,7 +167,7 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
       description:
         "Kill a process by PID if ShellManager is tracking it. Sends SIGTERM by default.",
       inputSchema: { type: "object" },
-      handle: (args) => {
+      handle: async (args) => {
         if (!isRecord(args)) {
           throw new Error("arguments must be an object");
         }
@@ -177,9 +177,9 @@ function createSandboxToolDefinitions(deps: McpServerDeps): ToolDefinition[] {
         const signal = typeof args.signal === "string"
           ? args.signal
           : "SIGTERM";
-        return Promise.resolve(mcpJson(
-          shell.killProcess(args.pid, signal as ProcessSignal),
-        ));
+        return mcpJson(
+          await shell.killProcess(args.pid, signal as ProcessSignal),
+        );
       },
     },
   ];

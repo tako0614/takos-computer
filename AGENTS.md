@@ -1,41 +1,47 @@
 # AGENTS.md
 
-takos-computer はエージェント向けの Linux サンドボックスコンテナと
-ダッシュボードを提供する独立リポジトリ / 独立 product です。
+> このファイルは `takos-control/engineering.policy.json` と `ecosystem.repos.json` から generator v1 で生成されています。手編集しないでください。
 
-Takosumi 上ではユーザーが選んで install する通常の Capsule app です。
-MCP / sandbox surface 自体に Takos-specific な結合はなく、 MCP 互換 agent
-host から利用できます。
+## Repository
 
-## リポジトリ構成
+- Scope: Installable agent computer Capsule providing a Linux sandbox, MCP surface, and dashboard.
+- Repository kind: `product`
+- Direct sibling dependencies: なし
+- Repository gate: `bun run check`
+- Canonical docs: [README.md](README.md)
 
-- `apps/sandbox/`: Linux サンドボックスコンテナ
-  (シェル実行、ファイルシステム操作)
-- `packages/sandbox-service/`: サンドボックス MCP サービス
-- `packages/computer-hosts/`: CF Worker コンテナホスト (dashboard proxy,
-  sandbox-host)
-- `packages/common/`: 共有ユーティリティ (logger, crypto, CF shim)
+## Ownership
 
-## 基本方針
+- Owns: Linux sandbox container and shell, file, and process MCP tools / Cloudflare Worker host, session lifecycle, and dashboard / Sandbox container image and product deployment artifacts
+- Does not own: LLM or agent orchestration / Takos core product state / Generic MCP host identity or Takosumi control ledgers
+- Hazards: The local simulator does not provide production container isolation. / Authentication, session, and container boundaries protect destructive tools.
 
-- takos-computer はエージェントが利用するコンテナ環境を提供する
-- AI エージェントの実行ロジック (LLM、LangGraph 等) は takos 本体側に置く
-- コンテナは MCP (Model Context Protocol) 経由でツールを公開する
-- サンドボックスコンテナ: shell_exec, file__, process__ ツール
-- repository root は plain OpenTofu module。KV は Cloudflare provider、provider schema に
-  ない Container image/shape lifecycle は `terraform_data` から pinned official Wrangler
-  を実行し、同じ Run の apply/destroy に含める
-- runtime Interface / InterfaceBinding は Takosumi service-side InstallConfig が所有する。
-  module は普通の `launch_url` / `mcp_url` Output だけを返し、Interface や credential を
-  Output/manifest として宣言しない
+## Required workflow
 
-## 作業ルール
+- repo固有の挙動・契約・architectureは、このrepo自身のsourceとdocsを正本にします。共通工学ルールをこのrepoで再定義しません。
+- 通常変更はこのrepo内に閉じます。横断変更はtask ledgerに対象repoと順序を宣言し、unrelatedなdirty workを変更・stage・commitしません。
+- handoff前に `bun run check` を実行します。これはread-onlyで、`format-check`, `lint-or-static-analysis`, `type-or-compile`, `portable-tests`, `portable-build` を完全に検証し、未実装項目をskipしてはいけません。
+- このrepoにformat writerはありません。`bun run fmt` は存在せず、実行するとcoreutilsのfmt(1)が動いて何もせず成功します。formatを直すときはformatterを直接呼びます。
+- task ledgerが必要な条件: The change modifies more than one repository. / The work changes production or release behavior. / The work changes a persisted schema or migrates data. / The work changes security, identity, credentials, authorization, billing, or authority. / The work destructively changes data or repository history.
+- secret、credential、production記録、private keyをrepoへcommitしません。
 
-- Bun コマンドは `cd takos-apps/takos-computer && bun run ...` (test は `bun test`) を使う
-- コンテナイメージのビルドは `apps/sandbox/` の Dockerfile を使用
-- production install は root OpenTofu module を使う。`deploy/` Wrangler config は
-  operator/debug template であり、install authority ではない
-- `dist/` は local/CI 生成物で commit しない。OpenTofu deploy は source snapshot から
-  Wrangler が Workerを bundleし、Dockerfileまたは明示 `container_image` を deploy する
-- `install-options.json` は optional な source chooser で、Cloudflare の実 module だけを
-  提示する。credential / Interface / install authority は持たせず、既存 tag は書き換えない
+## Deploy
+
+- このrepoがproduction targetを持つなら、入口は `bun run deploy` 一つです。無ければ作ります。承認待ちの列も、登録する先もありません。entrypointは副作用なしの `--contract` で、自分に立つtriggerと各obligationの果たし方を宣言します。
+- 実行するかどうかはoperatorの判断です。task ledger、branch名、green checkのいずれもdeployを承認しません。逆に、どれも欠けているからといってdeployが禁止されるわけでもありません。
+- どのsurfaceも次のobligationを負います。
+
+  - **provenance**: The published bytes belong to one reviewed commit, are built from that worktree, and the commit and artifact digest are recorded. Whatever validates them must cover those bytes.
+  - **post-conditions**: After publishing, state how you know the thing works for a real user, and confirm it.
+  - **reversal**: State how to get back. If you cannot get back, say so and name the forward-repair plan instead.
+  - **failure-handling**: State what the entrypoint prints on failure and what it refuses to do. Raw diagnostics, no blind retry, and a clear split between failing before and after the target was touched.
+
+- 次のtriggerが立つと義務が増えます。判別できないものはirreversible扱いです。
+
+  - **irreversible** (The step leaves the previous artifact unable to serve again: a schema or data migration, a topology change, or anything that rewrites durable state.) → pre-mutation-proof, independent-review
+  - **authority** (The step moves money, identity, authentication, authorization, or the deploy mechanism itself.) → independent-review
+  - **published-identity** (Publication mints a version, digest, or tag that consumers pin.) → no-overwrite
+  - **asynchronous** (Publication completes through an external review or staged delivery the deploy does not control, such as an app store.) → halt
+
+- 果たし方は各surfaceが自分の言葉で決めます。中央は義務を決め、機構は決めません。宣言を弱められませんが、強める分には自由です。
+- 利用者/operatorが自分の環境へself-host deployすることは別authorityで、このruleの対象外です。

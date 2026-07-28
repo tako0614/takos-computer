@@ -12,8 +12,8 @@
     "en": "Takos Computer"
   },
   "description": {
-    "ja": "ブラウザ操作とサンドボックスを MCP で使えるコンピューターサービスとして公開します。",
-    "en": "Deploys a browser automation and sandbox computer service with MCP."
+    "ja": "シェル・ファイル・プロセス操作の Linux サンドボックスを MCP で公開します。",
+    "en": "Deploys an MCP Linux sandbox for shell, file, and process operations."
   },
   "badge": {
     "ja": "追加候補",

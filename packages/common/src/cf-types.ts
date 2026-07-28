@@ -39,6 +39,23 @@ export interface DurableObjectNamespace<T = unknown> {
   get(id: DurableObjectId): DurableObjectStubOf<T>;
 }
 
+export interface DurableObjectStorageTransaction {
+  get<T = unknown>(key: string): Promise<T | undefined>;
+  put<T = unknown>(key: string, value: T): Promise<void>;
+  delete(key: string): Promise<boolean>;
+}
+
+export interface DurableObjectStorage
+  extends DurableObjectStorageTransaction {
+  transaction<T>(
+    closure: (transaction: DurableObjectStorageTransaction) => Promise<T>,
+  ): Promise<T>;
+}
+
+export interface DurableObjectState {
+  readonly storage: DurableObjectStorage;
+}
+
 // ---------------------------------------------------------------------------
 // KV Namespace
 // ---------------------------------------------------------------------------

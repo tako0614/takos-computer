@@ -7,6 +7,9 @@
 export type {
   DurableObjectId,
   DurableObjectNamespace,
+  DurableObjectState,
+  DurableObjectStorage,
+  DurableObjectStorageTransaction,
   DurableObjectStub,
   KVNamespace,
 } from "@takos-computer/common/cf-types";

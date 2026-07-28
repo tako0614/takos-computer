@@ -4,6 +4,7 @@
 
 import type { DurableObjectNamespace, KVNamespace } from "./cf-types.ts";
 import type { SandboxSessionContainer } from "./sandbox-host.ts";
+import type { SessionQuotaCoordinator } from "./session-quota.ts";
 
 // Wire shapes are owned by `common` so the host worker and dashboard share one
 // definition.
@@ -11,9 +12,14 @@ export type {
   CreateSandboxSessionPayload,
   SandboxSessionState,
 } from "@takos-computer/common/sandbox-session";
+export {
+  assertSandboxSessionId,
+  MAX_SANDBOX_SESSION_ID_BYTES,
+} from "@takos-computer/common/sandbox-session";
 
 export interface SandboxHostEnv {
   SANDBOX_CONTAINER: DurableObjectNamespace<SandboxSessionContainer>;
+  SANDBOX_QUOTA?: DurableObjectNamespace<SessionQuotaCoordinator>;
   SANDBOX_HOST_AUTH_TOKEN?: string;
   PUBLISHED_MCP_AUTH_TOKEN?: string;
   MCP_AUTH_TOKEN?: string;
@@ -37,7 +43,9 @@ export interface SandboxHostEnv {
   TAKOS_API_URL?: string;
   TAKOS_TOKEN?: string;
   TAKOS_TRUST_ROUTED_GUI_API?: string;
-  /** Per-GUI-principal cap on live sessions (default 10). */
+  /** Per GUI user or published-MCP principal cap (default 10). */
+  MAX_SANDBOX_SESSIONS_PER_PRINCIPAL?: string;
+  /** @deprecated Use MAX_SANDBOX_SESSIONS_PER_PRINCIPAL. */
   MAX_SANDBOX_SESSIONS_PER_USER?: string;
   SESSION_INDEX?: KVNamespace;
 }

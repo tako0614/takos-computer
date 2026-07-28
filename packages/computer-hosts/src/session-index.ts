@@ -13,10 +13,7 @@
  */
 
 import type { KVNamespace } from "./cf-types.ts";
-import {
-  isPublishedScopedId,
-  type SandboxSessionState,
-} from "./sandbox-session-types.ts";
+import type { SandboxSessionState } from "./sandbox-session-types.ts";
 
 export const SESSION_INDEX_GLOBAL_PREFIX = "session:";
 
@@ -70,28 +67,4 @@ export async function listSessionStates(
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
   return out;
-}
-
-/**
- * Count the live sandbox sessions a GUI principal owns (cursor-paginated key
- * count, no per-key value read). Published-MCP-scoped entries that a published
- * token holder may have planted under this owner are excluded so they cannot
- * inflate (or starve) a GUI user's quota.
- */
-export async function countOwnerSessions(
-  kv: KVNamespace,
-  userId: string,
-): Promise<number> {
-  const prefix = ownerIndexPrefix(userId);
-  let count = 0;
-  let cursor: string | undefined;
-  do {
-    const page = await kv.list({ prefix, cursor });
-    for (const key of page.keys) {
-      if (isPublishedScopedId(key.name.slice(prefix.length))) continue;
-      count += 1;
-    }
-    cursor = page.list_complete ? undefined : page.cursor;
-  } while (cursor);
-  return count;
 }

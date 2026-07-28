@@ -19,7 +19,7 @@ FROM oven/bun:1
 
 # Install common developer tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates git curl jq build-essential python3 \
+    ca-certificates git curl jq build-essential python3 util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /workspace

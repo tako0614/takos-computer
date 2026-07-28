@@ -41,8 +41,14 @@ import {
   resolveContainerMcpAuthToken,
 } from "./sandbox-session-container.ts";
 import { indexSession, unindexSession } from "./session-index.ts";
+import {
+  publishedQuotaPrincipal,
+  releaseSessionQuota,
+  reserveSessionQuota,
+} from "./session-quota.ts";
 import type { SandboxSessionContainer } from "./sandbox-session-container.ts";
 import {
+  assertSandboxSessionId,
   PUBLISHED_MCP_SCOPE_PREFIX,
   type SandboxHostEnv,
   type SandboxSessionState,
@@ -126,21 +132,28 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
       properties: publishedSessionInputProperties,
     },
     handle: async (args, c) => {
-      const { sessionId, scopedId, userId } =
+      const { sessionId, scopedId, userId, quotaPrincipal } =
         await resolvePublishedMcpSessionArgs(c, args);
       const stub = getDOStub(c.env, scopedId);
       // Load the stored owner before destroy so the owner-scoped index key
       // matches what `indexSession` wrote (the DO state holds the logical id, so
       // unindex always uses the scoped id as the key suffix).
       const state = await stub.getSessionState();
-      await stub.destroySession();
       const kv = c.env.SESSION_INDEX;
-      if (kv) {
-        await unindexSession(kv, {
-          userId: state?.userId ?? userId,
+      if (!kv) throw new Error("SESSION_INDEX is not configured");
+      await stub.destroySession();
+      if (state) {
+        await indexSession(kv, {
+          ...state,
           sessionId: scopedId,
+          status: "stopped",
         });
       }
+      await unindexSession(kv, {
+        userId: state?.userId ?? userId,
+        sessionId: scopedId,
+      });
+      await releaseSessionQuota(c.env, quotaPrincipal, scopedId);
       return mcpJson({ ok: true, session_id: sessionId });
     },
   },
@@ -166,12 +179,12 @@ const publishedMcpTools: PublishedMcpToolDefinition[] = [
         allow_takos_token: {
           type: "boolean",
           description:
-            "Set to true to include TAKOS_TOKEN in the child process environment.",
+            "Set to true together with takos_token to expose that per-request token to the child process.",
         },
         takos_token: {
           type: "string",
           description:
-            "Optional explicit TAKOS token to pass instead of the container token.",
+            "Required with allow_takos_token: a caller-supplied, downscoped TAKOS token for this command only.",
         },
       },
       required: ["command"],
@@ -357,6 +370,7 @@ type ResolvedPublishedMcpSession = {
   scopedId: string;
   spaceId: string;
   userId: string;
+  quotaPrincipal: string;
 };
 
 async function resolvePublishedMcpSessionArgs(
@@ -368,6 +382,7 @@ async function resolvePublishedMcpSessionArgs(
     ["session_id", "sessionId"],
     PUBLISHED_MCP_DEFAULT_SESSION_ID,
   );
+  assertSandboxSessionId(sessionId);
   const namespace = await publishedMcpTokenNamespace(c);
   const principal = publishedMcpPrincipal(c);
   if (!principal) throw new Error("Published MCP principal is not authorized");
@@ -390,6 +405,7 @@ async function resolvePublishedMcpSessionArgs(
             ["user_id", "userId"],
             PUBLISHED_MCP_DEFAULT_USER_ID,
           ),
+    quotaPrincipal: publishedQuotaPrincipal(namespace),
   };
 }
 
@@ -430,7 +446,7 @@ async function indexPublishedMcpSession(
   state: SandboxSessionState,
 ): Promise<void> {
   const kv = c.env.SESSION_INDEX;
-  if (!kv) return;
+  if (!kv) throw new Error("SESSION_INDEX is not configured");
   // Index under the token-scoped id so sessions with the same logical id but
   // different token namespaces do not collide or leak across token holders.
   //
@@ -456,26 +472,60 @@ async function ensurePublishedMcpSession(
   state: SandboxSessionState;
   sessionId: string;
 }> {
-  const { sessionId, scopedId, spaceId, userId } =
+  const { sessionId, scopedId, spaceId, userId, quotaPrincipal } =
     await resolvePublishedMcpSessionArgs(c, args);
   const stub = getDOStub(c.env, scopedId);
   const existing = await stub.getSessionState();
   if (existing && existing.status !== "stopped") {
+    const reservation = await reserveSessionQuota(
+      c.env,
+      quotaPrincipal,
+      scopedId,
+    );
+    if (!reservation.ok) {
+      throw new Error(
+        `Active sandbox session limit reached (${reservation.limit})`,
+      );
+    }
     return { stub, state: existing, sessionId };
   }
 
-  // Store the logical sessionId in the session state/proxy token so the
-  // caller-facing id is preserved; the DO is addressed by the scoped id.
-  await stub.createSession({ sessionId, spaceId, userId });
-  const state = (await stub.getSessionState()) ?? {
-    sessionId,
-    spaceId,
-    userId,
-    status: "active" as const,
-    createdAt: new Date().toISOString(),
-  };
-  await indexPublishedMcpSession(c, scopedId, state);
-  return { stub, state, sessionId };
+  const reservation = await reserveSessionQuota(
+    c.env,
+    quotaPrincipal,
+    scopedId,
+  );
+  if (!reservation.ok) {
+    throw new Error(
+      `Active sandbox session limit reached (${reservation.limit})`,
+    );
+  }
+
+  try {
+    // Store the logical sessionId in the session state/proxy token so the
+    // caller-facing id is preserved; the DO is addressed by the scoped id.
+    await stub.createSession({ sessionId, spaceId, userId });
+    const state = await stub.getSessionState() ?? {
+      sessionId,
+      spaceId,
+      userId,
+      status: "active" as const,
+      createdAt: new Date().toISOString(),
+    };
+    await indexPublishedMcpSession(c, scopedId, state);
+    return { stub, state, sessionId };
+  } catch (error) {
+    try {
+      await stub.destroySession();
+      const kv = c.env.SESSION_INDEX;
+      if (!kv) throw new Error("SESSION_INDEX is not configured");
+      await unindexSession(kv, { userId, sessionId: scopedId });
+      await releaseSessionQuota(c.env, quotaPrincipal, scopedId);
+    } catch {
+      // Preserve the reservation until an idempotent retry completes cleanup.
+    }
+    throw error;
+  }
 }
 
 async function callSandboxToolThroughPublishedMcp(

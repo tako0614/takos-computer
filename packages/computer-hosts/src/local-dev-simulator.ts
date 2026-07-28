@@ -15,6 +15,7 @@ import type {
   SandboxSessionState,
   SandboxSessionTokenInfo,
 } from "./sandbox-session-types.ts";
+import type { SessionQuotaCoordinator } from "./session-quota.ts";
 
 /**
  * Platform-shim bridges for the local Bun simulator.
@@ -41,7 +42,14 @@ function bridgeLocalSandboxNamespace(
   return namespace as unknown as SandboxHostEnv["SANDBOX_CONTAINER"];
 }
 
+function bridgeLocalQuotaNamespace(
+  namespace: LocalSessionQuotaNamespace,
+): NonNullable<SandboxHostEnv["SANDBOX_QUOTA"]> {
+  return namespace as unknown as NonNullable<SandboxHostEnv["SANDBOX_QUOTA"]>;
+}
+
 const DEFAULT_LOCAL_PORT = 8788;
+export const LOCAL_DEV_HOST = "127.0.0.1";
 const DEFAULT_LOCAL_WORKSPACE_ROOT = ".takos-computer-local/workspaces";
 
 export const LOCAL_DEV_DEFAULTS = {
@@ -71,6 +79,7 @@ export interface LocalDevSandboxHost {
   fetch: (request: Request) => Promise<Response>;
   sessionIndex: KVNamespace;
   sandboxContainer: LocalSandboxSessionNamespace;
+  sessionQuota: LocalSessionQuotaNamespace;
 }
 
 export class MemoryKvNamespace implements KVNamespace {
@@ -158,7 +167,7 @@ class LocalSandboxSession {
     payload: CreateSandboxSessionPayload,
   ): Promise<{ ok: true; proxyToken: string }> {
     const sessionWorkspace = `${this.workspaceRoot}/${
-      safePathSegment(this.id.name ?? this.id.toString())
+      sessionWorkspaceSegment(this.id.name ?? this.id.toString())
     }`;
     await mkdir(sessionWorkspace, { recursive: true });
 
@@ -196,14 +205,15 @@ class LocalSandboxSession {
   }
 
   destroySession(): Promise<void> {
-    this.state = null;
-    this.proxyToken = null;
+    if (this.state) this.state = { ...this.state, status: "stopped" };
     this.sandboxApp = null;
     return Promise.resolve();
   }
 
   forwardToContainer(path: string, init?: RequestInit): Promise<Response> {
-    if (!this.state || !this.sandboxApp) {
+    if (
+      !this.state || this.state.status === "stopped" || !this.sandboxApp
+    ) {
       return Promise.resolve(
         Response.json({ error: "Session not found" }, { status: 404 }),
       );
@@ -246,6 +256,70 @@ export class LocalSandboxSessionNamespace {
   }
 }
 
+class LocalSessionQuota {
+  private readonly sessions = new Set<string>();
+
+  reserve(
+    sessionId: string,
+    limit: number,
+  ): Promise<{ ok: boolean; created: boolean; count: number; limit: number }> {
+    if (this.sessions.has(sessionId)) {
+      return Promise.resolve({
+        ok: true,
+        created: false,
+        count: this.sessions.size,
+        limit,
+      });
+    }
+    if (this.sessions.size >= limit) {
+      return Promise.resolve({
+        ok: false,
+        created: false,
+        count: this.sessions.size,
+        limit,
+      });
+    }
+    this.sessions.add(sessionId);
+    return Promise.resolve({
+      ok: true,
+      created: true,
+      count: this.sessions.size,
+      limit,
+    });
+  }
+
+  release(sessionId: string): Promise<{ released: boolean }> {
+    return Promise.resolve({ released: this.sessions.delete(sessionId) });
+  }
+}
+
+export class LocalSessionQuotaNamespace {
+  private readonly coordinators = new Map<string, LocalSessionQuota>();
+
+  idFromName(name: string): DurableObjectId {
+    return new LocalDurableObjectId(name);
+  }
+
+  idFromString(id: string): DurableObjectId {
+    return new LocalDurableObjectId(id);
+  }
+
+  newUniqueId(): DurableObjectId {
+    return new LocalDurableObjectId(crypto.randomUUID());
+  }
+
+  get(id: DurableObjectId): DurableObjectStub & SessionQuotaCoordinator {
+    const name = id.name ?? id.toString();
+    let coordinator = this.coordinators.get(name);
+    if (!coordinator) {
+      coordinator = new LocalSessionQuota();
+      this.coordinators.set(name, coordinator);
+    }
+    return coordinator as unknown as DurableObjectStub &
+      SessionQuotaCoordinator;
+  }
+}
+
 export function createLocalDevSandboxHost(
   options: LocalDevSimulatorOptions = {},
 ): LocalDevSandboxHost {
@@ -266,11 +340,14 @@ export function createLocalDevSandboxHost(
     options.workspaceRoot ?? DEFAULT_LOCAL_WORKSPACE_ROOT,
   );
   env.SANDBOX_CONTAINER = bridgeLocalSandboxNamespace(sandboxContainer);
+  const sessionQuota = new LocalSessionQuotaNamespace();
+  env.SANDBOX_QUOTA = bridgeLocalQuotaNamespace(sessionQuota);
 
   return {
     env,
     sessionIndex,
     sandboxContainer,
+    sessionQuota,
     fetch: (request) => (worker.fetch as WorkerFetch)(request, env),
   };
 }
@@ -281,15 +358,26 @@ export function startLocalDevSandboxHost(
   const host = createLocalDevSandboxHost(options);
   const port = options.port ?? DEFAULT_LOCAL_PORT;
   const server = bunLike().serve({
+    hostname: LOCAL_DEV_HOST,
     port,
     fetch: (request) => host.fetch(request),
   });
   return { ...host, server };
 }
 
-function safePathSegment(value: string): string {
-  const normalized = value.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 100);
-  return normalized || "session";
+/**
+ * Encode the full DO name rather than replacing characters. Replacement made
+ * distinct ids such as `a/b` and `a?b` share one local workspace. Session ids
+ * are bounded so the injective base64url component remains a valid filename.
+ */
+export function sessionWorkspaceSegment(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  if (bytes.length === 0 || bytes.length > 180) {
+    throw new Error("workspace session name must be 1..180 UTF-8 bytes");
+  }
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `s-${btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "")}`;
 }
 
 function readEnvOrDefault(name: string, fallback: string): string {
@@ -330,7 +418,9 @@ if (import.meta.main) {
     trustRoutedGuiApi: process.env.TAKOS_TRUST_ROUTED_GUI_API === "1",
   });
 
-  console.log(`takos-computer local simulator listening on :${port}`);
+  console.log(
+    `takos-computer local simulator listening on ${LOCAL_DEV_HOST}:${port}`,
+  );
   console.log(
     `dashboard: http://127.0.0.1:${port}/gui?authToken=${hostAuthToken}`,
   );
@@ -344,6 +434,7 @@ type BunServer = {
 
 type BunLike = {
   serve(options: {
+    hostname: string;
     port: number;
     fetch: (request: Request) => Response | Promise<Response>;
   }): BunServer;
