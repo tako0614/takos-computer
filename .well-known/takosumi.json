@@ -1,0 +1,151 @@
+{
+  "apiVersion": "takosumi.com/v1alpha1",
+  "kind": "Repository",
+  "install": {
+    "modules": {
+      ".": {
+        "inputs": [
+          {
+            "name": "project_name",
+            "source": {
+              "kind": "capsule_name"
+            },
+            "type": "string",
+            "format": "subdomain",
+            "label": {
+              "ja": "サービス名",
+              "en": "Service name"
+            }
+          },
+          {
+            "name": "public_url",
+            "source": {
+              "kind": "user"
+            },
+            "type": "string",
+            "format": "url",
+            "required": false,
+            "label": {
+              "ja": "公開URL",
+              "en": "Public URL"
+            },
+            "helper": {
+              "ja": "空欄の場合は利用可能なWorker URLを使います。",
+              "en": "Uses an available Worker URL when omitted."
+            },
+            "placeholder": "https://computer.example.com"
+          },
+          {
+            "name": "takosumi_accounts_issuer_url",
+            "source": {
+              "kind": "module_default"
+            },
+            "type": "string",
+            "format": "url",
+            "label": {
+              "ja": "Takosumi Accounts発行者",
+              "en": "Takosumi Accounts issuer"
+            },
+            "advanced": true
+          },
+          {
+            "name": "oidc_client_id",
+            "source": {
+              "kind": "module_default"
+            },
+            "type": "string",
+            "label": {
+              "ja": "OIDCクライアント",
+              "en": "OIDC client"
+            },
+            "advanced": true
+          },
+          {
+            "name": "oidc_redirect_uri",
+            "source": {
+              "kind": "module_default"
+            },
+            "type": "string",
+            "format": "url",
+            "label": {
+              "ja": "OIDCリダイレクトURL",
+              "en": "OIDC redirect URL"
+            },
+            "advanced": true
+          },
+          {
+            "name": "container_image",
+            "source": {
+              "kind": "user"
+            },
+            "type": "string",
+            "required": false,
+            "label": {
+              "ja": "コンテナイメージ",
+              "en": "Container image"
+            },
+            "helper": {
+              "ja": "runnerでビルドできない場合だけ、レビュー済みのイメージを指定します。",
+              "en": "Set a reviewed image only when the runner cannot build it."
+            },
+            "advanced": true
+          },
+          {
+            "name": "container_max_instances",
+            "source": {
+              "kind": "user"
+            },
+            "type": "number",
+            "required": false,
+            "label": {
+              "ja": "最大コンテナ数",
+              "en": "Maximum containers"
+            },
+            "advanced": true
+          },
+          {
+            "name": "max_sandbox_sessions_per_user",
+            "source": {
+              "kind": "user"
+            },
+            "type": "number",
+            "required": false,
+            "label": {
+              "ja": "ユーザーごとの最大セッション数",
+              "en": "Maximum sessions per user"
+            },
+            "advanced": true
+          }
+        ],
+        "installExperience": {
+          "projections": [
+            {
+              "kind": "service_name",
+              "variable": "project_name"
+            },
+            {
+              "kind": "public_endpoint",
+              "variables": {
+                "url": "public_url"
+              }
+            },
+            {
+              "kind": "oidc_client",
+              "variables": {
+                "issuerUrl": "takosumi_accounts_issuer_url",
+                "clientId": "oidc_client_id",
+                "redirectUri": "oidc_redirect_uri"
+              },
+              "callbackPath": "/gui/api/auth/callback",
+              "scopes": [
+                "openid",
+                "profile",
+                "email"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  }
+}
