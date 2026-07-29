@@ -247,8 +247,8 @@ Durable Object で管理されます。各セッションは個別のコンテ�
 
 ## OpenTofu Capsule deploy
 
-repository root は実行可能な plain OpenTofu module です。Takosumi 専用 manifest / DSL
-を必要とせず、通常の generated root から child module として呼べます。
+repository root は実行可能な plain OpenTofu module で、通常の generated root
+から child module として呼べます。
 
 ```hcl
 module "computer" {
@@ -300,9 +300,12 @@ material の sensitive digest も lifecycle trigger に含めるため、値の 
 `tofu apply` で Worker secret を更新します。
 
 root の `install-options.json` は optional な Capsule Source Options chooser 文書です。
-Cloudflare の実 module だけを提示し、credential / provider config / Interface / install
-authority は持ちません。`source.ref` を省略しているため、外部 install link では
-Takosumi が最高の stable SemVer Git tag を解決し、通常の Capsule flow へ渡します。
+別の [`.well-known/takosumi.json`](.well-known/takosumi.json) は一般
+`Repository` manifest として、同じ Git commit にある root module の入力名と表示
+projection だけを提案します。credential / provider config / secret / Interface /
+install authority は持ちません。`source.ref` を省略しているため、外部 install link
+では Takosumi が最高の stable SemVer Git tag を解決し、検証済みの宣言を
+DB-owned InstallConfig へ compile して通常の Capsule flow へ渡します。
 
 ## ライセンス
 
