@@ -85,8 +85,8 @@
               "en": "Container image"
             },
             "helper": {
-              "ja": "runnerでビルドできない場合だけ、レビュー済みのイメージを指定します。",
-              "en": "Set a reviewed image only when the runner cannot build it."
+              "ja": "runnerでビルドできない場合だけ、sha256 digestで固定したレビュー済みイメージを指定します。",
+              "en": "Set a reviewed sha256-pinned image only when the runner cannot build it."
             },
             "advanced": true
           },

@@ -1,4 +1,6 @@
-FROM oven/bun:1 AS builder
+# Bun 1.3.14, linux/amd64. Pin the image manifest so a reviewed source commit
+# cannot silently rebuild against different runtime or base-system bytes.
+FROM docker.io/oven/bun@sha256:50317d83cd5a5ae1d8b35b3379c69f57ce1a0dbf4def91f0965653d767851834 AS builder
 WORKDIR /workspace
 
 # Copy workspace config and lockfile.
@@ -15,7 +17,7 @@ COPY apps/sandbox/ ./apps/sandbox/
 RUN bun install --frozen-lockfile
 
 # Production stage
-FROM oven/bun:1
+FROM docker.io/oven/bun@sha256:50317d83cd5a5ae1d8b35b3379c69f57ce1a0dbf4def91f0965653d767851834
 
 # Install common developer tools
 RUN apt-get update && apt-get install -y --no-install-recommends \

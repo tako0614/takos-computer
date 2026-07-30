@@ -40,7 +40,8 @@ async function main(): Promise<number> {
     ]);
     if (
       fileStat.size < 10_000 ||
-      !generated.includes("SandboxSessionContainer")
+      !generated.includes("SandboxSessionContainer") ||
+      !generated.includes("SessionQuotaCoordinator")
     ) {
       console.error("sandbox-host bundle generation produced an invalid file.");
       return 1;

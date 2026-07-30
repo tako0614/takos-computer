@@ -16,7 +16,7 @@ terraform {
 variable "enable_cloudflare_resources" {
   description = "Provision the Takos Computer Cloudflare KV namespace and deploy its Worker + Container through the official Wrangler lifecycle."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "cloudflare_account_id" {
@@ -81,13 +81,13 @@ variable "enable_workers_dev_subdomain" {
 }
 
 variable "container_image" {
-  description = "Optional prebuilt public/authorized Container image reference. Empty builds apps/sandbox/Dockerfile with Docker during apply."
+  description = "Optional prebuilt public/authorized Container image pinned by sha256 digest. Empty builds apps/sandbox/Dockerfile with Docker during apply."
   type        = string
   default     = ""
 
   validation {
-    condition     = trimspace(var.container_image) == "" || (!strcontains(trimspace(var.container_image), " ") && !strcontains(trimspace(var.container_image), "\n"))
-    error_message = "container_image must be empty or a whitespace-free image reference."
+    condition     = trimspace(var.container_image) == "" || can(regex("^[^[:space:]@]+@sha256:[a-f0-9]{64}$", trimspace(var.container_image)))
+    error_message = "container_image must be empty or an immutable image reference pinned by sha256 digest."
   }
 }
 
@@ -177,7 +177,7 @@ variable "oidc_client_id" {
 }
 
 variable "oidc_client_secret" {
-  description = "OIDC client secret used when enable_app_oidc is true."
+  description = "Optional OIDC client secret for confidential clients. Takosumi Accounts Capsule clients use public PKCE and leave this empty."
   type        = string
   default     = ""
   sensitive   = true
@@ -338,16 +338,12 @@ resource "terraform_data" "sandbox_host" {
     }
   }
 
-  provisioner "local-exec" {
-    when        = destroy
-    command     = "bun run destroy:opentofu"
-    working_dir = path.module
-    environment = {
-      TAKOS_COMPUTER_DEPLOY_CONFIG = jsonencode(self.input)
-    }
-  }
-
   lifecycle {
+    # Wrangler deploy updates the existing Worker in place. Creating the new
+    # deployment receipt before retiring the old terraform_data instance avoids
+    # deleting a healthy Worker during source, input, or secret rotation.
+    create_before_destroy = true
+
     precondition {
       condition     = local.public_origin != ""
       error_message = "public_url or cloudflare_workers_subdomain is required when Cloudflare resources are enabled."
@@ -383,10 +379,39 @@ resource "terraform_data" "sandbox_host" {
       condition = !var.enable_app_oidc || (
         local.accounts_issuer != "" &&
         trimspace(var.oidc_client_id) != "" &&
-        trimspace(var.oidc_client_secret) != "" &&
         local.oidc_redirect_uri != ""
       )
-      error_message = "enable_app_oidc requires the Accounts issuer, OIDC client id/secret, and a resolvable redirect URI."
+      error_message = "enable_app_oidc requires the Accounts issuer, OIDC client id, and a resolvable redirect URI."
     }
   }
+}
+
+# Keep final teardown separate from deployment replacement. This resource is
+# side-effect free on ordinary updates; its destroy hook runs only when the
+# module instance (or an account/name Worker identity) is actually retired.
+resource "terraform_data" "sandbox_host_cleanup" {
+  count = var.enable_cloudflare_resources ? 1 : 0
+  input = local.deploy_input
+
+  triggers_replace = [
+    trimspace(var.cloudflare_account_id),
+    local.worker_name,
+  ]
+  depends_on = [terraform_data.sandbox_host]
+
+  provisioner "local-exec" {
+    when        = destroy
+    command     = "bun run destroy:opentofu"
+    working_dir = path.module
+    environment = {
+      TAKOS_COMPUTER_DEPLOY_CONFIG = jsonencode(self.input)
+    }
+  }
+
+  # Deliberately no create_before_destroy: OpenTofu skips destroy-time
+  # provisioners on resources that enable it. A Worker account/name change is
+  # an explicit fail-closed replacement: delete the old identity before the
+  # new deploy, accepting a short outage rather than orphaning a live endpoint.
+  # Ordinary source/input/secret updates replace only sandbox_host above and
+  # leave this cleanup owner in place.
 }
