@@ -91,7 +91,6 @@ function authMissing(env: AppRuntimeEnv): string[] {
     ["APP_SESSION_SECRET", config.sessionSecret],
     ["OIDC_ISSUER_URL", config.issuer],
     ["OIDC_CLIENT_ID", config.clientId],
-    ["OIDC_CLIENT_SECRET", config.clientSecret],
   ];
   return requiredValues.flatMap(([name, value]) => value ? [] : [name]);
 }
@@ -231,13 +230,12 @@ async function exchangeCode(
   const response = await fetch(endpoints.tokenEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
+    body: createTokenExchangeParameters({
+      clientId: config.clientId!,
+      clientSecret: config.clientSecret,
       code,
-      client_id: config.clientId!,
-      client_secret: config.clientSecret!,
-      redirect_uri: callbackUrl(request, env),
-      code_verifier: codeVerifier,
+      redirectUri: callbackUrl(request, env),
+      codeVerifier,
     }),
   });
   if (!response.ok) {
@@ -248,6 +246,26 @@ async function exchangeCode(
     throw new Error("OAuth token response missing access_token or id_token");
   }
   return body;
+}
+
+export function createTokenExchangeParameters(input: {
+  clientId: string;
+  clientSecret?: string;
+  code: string;
+  redirectUri: string;
+  codeVerifier: string;
+}): URLSearchParams {
+  const parameters = new URLSearchParams({
+    grant_type: "authorization_code",
+    code: input.code,
+    client_id: input.clientId,
+    redirect_uri: input.redirectUri,
+    code_verifier: input.codeVerifier,
+  });
+  if (input.clientSecret) {
+    parameters.set("client_secret", input.clientSecret);
+  }
+  return parameters;
 }
 
 async function fetchUserInfo(

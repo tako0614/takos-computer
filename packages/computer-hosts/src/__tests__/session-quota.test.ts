@@ -4,7 +4,7 @@ import type {
   DurableObjectStorage,
   DurableObjectStorageTransaction,
 } from "../cf-types.ts";
-import { SessionQuotaCoordinator } from "../session-quota.ts";
+import { SessionQuotaStore } from "../session-quota.ts";
 
 class AtomicMemoryStorage implements DurableObjectStorage {
   private readonly values = new Map<string, unknown>();
@@ -32,13 +32,13 @@ class AtomicMemoryStorage implements DurableObjectStorage {
   }
 }
 
-function coordinator(): SessionQuotaCoordinator {
-  return new SessionQuotaCoordinator({
+function coordinator(): SessionQuotaStore {
+  return new SessionQuotaStore({
     storage: new AtomicMemoryStorage(),
   } satisfies DurableObjectState);
 }
 
-test("SessionQuotaCoordinator admits at most the configured concurrent cap", async () => {
+test("SessionQuotaStore admits at most the configured concurrent cap", async () => {
   const quota = coordinator();
   const results = await Promise.all(
     Array.from({ length: 20 }, (_, index) =>
@@ -50,7 +50,7 @@ test("SessionQuotaCoordinator admits at most the configured concurrent cap", asy
   expect(results.filter((result) => !result.ok).length).toEqual(17);
 });
 
-test("SessionQuotaCoordinator makes retry and release idempotent", async () => {
+test("SessionQuotaStore makes retry and release idempotent", async () => {
   const quota = coordinator();
 
   expect(await quota.reserve("same-session", 1)).toMatchObject({

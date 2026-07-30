@@ -43,7 +43,6 @@ import {
 import {
   releaseSessionQuota,
   reserveSessionQuota,
-  SessionQuotaCoordinator,
   userQuotaPrincipal,
 } from "./session-quota.ts";
 import {
@@ -54,7 +53,7 @@ import {
   type SandboxHostEnv,
 } from "./sandbox-session-types.ts";
 
-export { SandboxSessionContainer, SessionQuotaCoordinator };
+export { SandboxSessionContainer };
 
 // ---------------------------------------------------------------------------
 // Environment types
@@ -188,7 +187,6 @@ function collectMissingRuntimeBindings(env: Env): string[] {
       "APP_SESSION_SECRET",
       "OIDC_ISSUER_URL",
       "OIDC_CLIENT_ID",
-      "OIDC_CLIENT_SECRET",
     ] as const) {
       if (!env[name]) missing.push(name);
     }

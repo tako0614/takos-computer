@@ -34,6 +34,9 @@ describe("OpenTofu deploy configuration", () => {
     });
 
     expect(config.name).toBe("takos-computer-test");
+    expect(config.main).toBe(
+      "../../../packages/computer-hosts/src/sandbox-host-worker.ts",
+    );
     expect(config.containers).toEqual([
       {
         class_name: "SandboxSessionContainer",
@@ -49,8 +52,22 @@ describe("OpenTofu deploy configuration", () => {
           name: "SANDBOX_CONTAINER",
           class_name: "SandboxSessionContainer",
         },
+        {
+          name: "SANDBOX_QUOTA",
+          class_name: "SessionQuotaCoordinator",
+        },
       ],
     });
+    expect(config.migrations).toEqual([
+      {
+        tag: "v1",
+        new_sqlite_classes: ["SandboxSessionContainer"],
+      },
+      {
+        tag: "v2",
+        new_sqlite_classes: ["SessionQuotaCoordinator"],
+      },
+    ]);
     expect(config.vars).toMatchObject({
       MCP_URL: "https://computer.example.test/mcp",
       OIDC_ISSUER_URL: "https://accounts.example.test",
@@ -68,6 +85,11 @@ describe("OpenTofu deploy configuration", () => {
     expect(() =>
       parseOpenTofuDeployConfig(JSON.stringify({ ...valid, capsuleId: "" })),
     ).toThrow("workspaceId and capsuleId");
+    expect(() =>
+      parseOpenTofuDeployConfig(
+        JSON.stringify({ ...valid, containerImage: "oven/bun:1" }),
+      ),
+    ).toThrow("immutable image digest");
   });
 
   test("keeps secrets out of config and requires the two runtime-internal bearers", () => {

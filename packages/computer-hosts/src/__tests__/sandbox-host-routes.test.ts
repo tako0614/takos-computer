@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { createTokenExchangeParameters } from "../app-auth.ts";
 import worker from "../sandbox-host.ts";
 import type {
   CreateSandboxSessionPayload,
@@ -478,6 +479,27 @@ test("sandbox host OIDC login creates state cookie and PKCE redirect", async () 
   });
 });
 
+test("OIDC token exchange supports Takosumi public PKCE clients and optional confidential clients", () => {
+  const publicClient = createTokenExchangeParameters({
+    clientId: "public-client",
+    code: "code",
+    codeVerifier: "verifier",
+    redirectUri: "https://computer.example.test/gui/api/auth/callback",
+  });
+  expect(publicClient.get("client_id")).toBe("public-client");
+  expect(publicClient.get("code_verifier")).toBe("verifier");
+  expect(publicClient.has("client_secret")).toBe(false);
+
+  const confidentialClient = createTokenExchangeParameters({
+    clientId: "confidential-client",
+    clientSecret: "secret",
+    code: "code",
+    codeVerifier: "verifier",
+    redirectUri: "https://computer.example.test/gui/api/auth/callback",
+  });
+  expect(confidentialClient.get("client_secret")).toBe("secret");
+});
+
 test("sandbox host OIDC callback verifies id token and creates GUI session", async () => {
   const { env } = createEnv({ appAuthRequired: true });
   const keyPair = await crypto.subtle.generateKey(
@@ -614,7 +636,6 @@ test("sandbox host reports missing OIDC env when app auth is required", async ()
       "APP_SESSION_SECRET",
       "OIDC_ISSUER_URL",
       "OIDC_CLIENT_ID",
-      "OIDC_CLIENT_SECRET",
     ],
   });
 
@@ -624,6 +645,20 @@ test("sandbox host reports missing OIDC env when app auth is required", async ()
   if (!readyBody.missingBindings.includes("APP_SESSION_SECRET")) {
     throw new Error("Expected app auth env in readyz missing bindings");
   }
+});
+
+test("sandbox host readiness accepts a public OIDC client without a client secret", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+  delete env.OIDC_CLIENT_SECRET;
+
+  const response = await fetchWorker(env, "/readyz");
+
+  expect(response.status).toEqual(200);
+  expect(await response.json()).toEqual({
+    status: "ok",
+    service: "takos-sandbox-host",
+    missingBindings: [],
+  });
 });
 
 test("sandbox host consumes launch token into GUI session", async () => {

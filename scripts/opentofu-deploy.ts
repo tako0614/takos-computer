@@ -184,8 +184,13 @@ export function parseOpenTofuDeployConfig(raw: string): OpenTofuDeployConfig {
       `${CONFIG_ENV}.sessionIndexId must be a Cloudflare KV namespace id`,
     );
   }
-  if (config.containerImage !== "" && /\s/u.test(config.containerImage)) {
-    throw new Error(`${CONFIG_ENV}.containerImage must not contain whitespace`);
+  if (
+    config.containerImage !== "" &&
+    !/^[^@\s]+@sha256:[a-f0-9]{64}$/u.test(config.containerImage)
+  ) {
+    throw new Error(
+      `${CONFIG_ENV}.containerImage must be an immutable image digest`,
+    );
   }
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(config.compatibilityDate)) {
     throw new Error(`${CONFIG_ENV}.compatibilityDate must be YYYY-MM-DD`);
@@ -256,7 +261,10 @@ export function createWranglerConfig(
     account_id: config.accountId,
     main: configPath(
       input.configDirectory,
-      resolve(input.repoRoot, "packages/computer-hosts/src/sandbox-host.ts"),
+      resolve(
+        input.repoRoot,
+        "packages/computer-hosts/src/sandbox-host-worker.ts",
+      ),
     ),
     compatibility_date: config.compatibilityDate,
     compatibility_flags: [
@@ -271,12 +279,20 @@ export function createWranglerConfig(
           name: "SANDBOX_CONTAINER",
           class_name: "SandboxSessionContainer",
         },
+        {
+          name: "SANDBOX_QUOTA",
+          class_name: "SessionQuotaCoordinator",
+        },
       ],
     },
     migrations: [
       {
         tag: "v1",
         new_sqlite_classes: ["SandboxSessionContainer"],
+      },
+      {
+        tag: "v2",
+        new_sqlite_classes: ["SessionQuotaCoordinator"],
       },
     ],
     containers: [

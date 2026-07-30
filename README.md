@@ -130,7 +130,9 @@ HttpOnly `SameSite=Strict` cookie を `/gui` 配下に設定し、クリーン U
 Takosumi install では、service-side InstallConfig が `APP_AUTH_REQUIRED=1` と
 `OIDC_*` の入力を通常の module 変数へ写像します。GUI は `state` + `nonce` +
 PKCE S256 の OIDC authorization code flow を使い、`/gui` scoped の HttpOnly
-session cookie を発行します。
+session cookie を発行します。Takosumi Accounts が発行する Capsule app client は
+public clientなのでclient secretを作りません。外部のconfidential OIDC providerを
+使う場合だけ `OIDC_CLIENT_SECRET` を設定します。
 
 ## 開発
 
@@ -224,7 +226,7 @@ Durable Object で管理されます。各セッションは個別のコンテ�
 | `APP_SESSION_SECRET`         | _(none)_    | `/gui` session / OIDC state cookie の HMAC secret                                                                                            |
 | `OIDC_ISSUER_URL`            | _(none)_    | Takosumi Accounts OIDC issuer URL                                                                                                            |
 | `OIDC_CLIENT_ID`             | _(none)_    | Takosumi Accounts OIDC client ID                                                                                                             |
-| `OIDC_CLIENT_SECRET`         | _(none)_    | Takosumi Accounts OIDC client secret                                                                                                         |
+| `OIDC_CLIENT_SECRET`         | _(none)_    | 外部confidential OIDC client用の任意secret。Takosumi Accounts public PKCE clientでは設定しない                                               |
 | `OIDC_REDIRECT_URI`          | _(derived)_ | OIDC callback URI。managed install では Cloud が確定した redirect URI を inject。standalone/dev のみ trusted configured base URL から derive |
 | `MCP_URL`                    | _(none)_    | Interface OAuth の exact resource audience (`mcp_url` Output と同じ URL)                                                                     |
 | `APP_WORKSPACE_ID`           | _(none)_    | Interface OAuth evidence で照合する owning Workspace                                                                                         |
@@ -240,6 +242,7 @@ Durable Object で管理されます。各セッションは個別のコンテ�
 | Binding             | Type           | 説明                                         |
 | ------------------- | -------------- | -------------------------------------------- |
 | `SANDBOX_CONTAINER` | Durable Object | サンドボックスセッションコンテナの namespace |
+| `SANDBOX_QUOTA`     | Durable Object | Workspace/User単位の同時セッションquota      |
 | `SESSION_INDEX`     | KV Namespace   | GUI 一覧用のセッションメタデータインデックス |
 
 消費側ワーカーはこのデプロイ済みワーカーを `SANDBOX_HOST` としてバインドします
@@ -272,11 +275,40 @@ provider 5.19.1 は Container image / instance type / max instances を resource
 manifest は使いません。Docker が利用できない runner は、事前にレビュー済みの
 `container_image` を明示してください。
 
-managed install は `takosumi_accounts_issuer_url`、`app_workspace_id`、
-`app_capsule_id` を設定します。Takosumi 側の service-side
-`InstallConfig.interfaceBlueprints` が普通の `mcp_url` / `launch_url` Output を
-Interface input へ明示 mapping し、Interface ledger / binding / authorization を所有
-します。この module は Interface を宣言・付与せず、credential を Output に出しません。
+`enable_cloudflare_resources` は既定で `true` です。root module を選んだ install が
+成功扱いの空graphになることはありません。moduleの入力だけを検査する場合は
+`enable_cloudflare_resources = false` を明示してください。source、設定、secretの
+更新は既存Workerへ先にdeployし、更新のたびにWorkerをdeleteしません。
+Cloudflare Workerのidentityは `cloudflare_account_id` と
+`worker_name` (`project_name` の既定値) の組です。どちらかを変更すると新しいWorkerを
+作る前に、以前のaccount/nameを記録したcleanup ownerが古いWorkerを削除します。
+これは古いendpointを取り残さないfail-closedな破壊的変更で、短い停止が発生します。
+旧accountを削除できないcredentialへ同時に切り替えると、新しいWorkerをdeployせず
+applyが失敗します。その場合は旧identityを削除できるcredentialで再実行してください。
+通常更新とidentity変更を同じ操作として扱わないでください。
+
+repository内のDockerfileは `linux/amd64` のBun 1.3.14 image manifestをdigestで固定
+しています。`container_image` を上書きする場合もtagではなくレビュー済みdigestを
+指定してください。
+
+managed install のoperatorは、このGit sourceとmodule path `.`だけに一致する
+service-side `InstallConfig` を先に用意する必要があります。そのconfigは少なくとも:
+
+- `enable_cloudflare_resources = true` を固定し、`app_workspace_id` /
+  `app_capsule_id` をinstall contextから注入する
+- GUI OIDCを有効にする場合はAccountsのpublic PKCE clientからissuer、client id、
+  redirect URIだけを写像し、存在しないclient secretを要求しない
+- custom routeを別途作らない場合は `enable_workers_dev_subdomain = true` と
+  `cloudflare_workers_subdomain` を指定し、実際に到達できるURLを作る
+- `launch_url` と `mcp_url` を必須URLとして `outputAllowlist` に列挙する
+- `launch_url` から `interface.ui.surface` + `ui.open` launcherを作る
+- `mcp_url` から `mcp.server` (`2025-11-25`, streamable HTTP) +
+  `mcp.invoke` OAuth bindingを作る
+
+というauthorityを持ちます。exact-source configがないgeneric installでこのmoduleを
+成功扱いにしてはいけません。repositoryの `.well-known/takosumi.json` は入力と表示
+だけを提案し、Interface、Binding、Output公開policyを宣言・付与しません。このmodule
+もcredentialをOutputに出しません。
 
 主な通常 Output:
 

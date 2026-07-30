@@ -8,7 +8,7 @@ type TargetName = "sandbox";
 
 const targets: Record<TargetName, { entry: string; outfile: string }> = {
   sandbox: {
-    entry: "../src/sandbox-host.ts",
+    entry: "../src/sandbox-host-worker.ts",
     outfile: "../../../dist/sandbox-host.js",
   },
 };

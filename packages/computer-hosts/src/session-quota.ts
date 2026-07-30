@@ -25,7 +25,22 @@ export type SessionQuotaReservation = {
   limit: number;
 };
 
-export class SessionQuotaCoordinator {
+export interface SessionQuotaRpc {
+  reserve(
+    sessionId: string,
+    limit: number,
+  ): Promise<SessionQuotaReservation>;
+  release(sessionId: string): Promise<{ released: boolean }>;
+}
+
+/**
+ * Runtime-independent quota state machine.
+ *
+ * The Cloudflare RPC entrypoint lives in session-quota-coordinator.ts. Keeping
+ * storage semantics here lets local tests exercise concurrency without
+ * pretending that a plain class is a deployable Durable Object RPC class.
+ */
+export class SessionQuotaStore implements SessionQuotaRpc {
   constructor(private readonly ctx: DurableObjectState) {}
 
   async reserve(
@@ -87,7 +102,7 @@ export class SessionQuotaCoordinator {
 }
 
 export type SessionQuotaEnv = {
-  SANDBOX_QUOTA?: DurableObjectNamespace<SessionQuotaCoordinator>;
+  SANDBOX_QUOTA?: DurableObjectNamespace<SessionQuotaRpc>;
   MAX_SANDBOX_SESSIONS_PER_PRINCIPAL?: string;
   /** Compatibility alias; new deployments should use the principal name. */
   MAX_SANDBOX_SESSIONS_PER_USER?: string;

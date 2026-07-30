@@ -15,7 +15,7 @@ import type {
   SandboxSessionState,
   SandboxSessionTokenInfo,
 } from "./sandbox-session-types.ts";
-import type { SessionQuotaCoordinator } from "./session-quota.ts";
+import type { SessionQuotaRpc } from "./session-quota.ts";
 
 /**
  * Platform-shim bridges for the local Bun simulator.
@@ -308,15 +308,14 @@ export class LocalSessionQuotaNamespace {
     return new LocalDurableObjectId(crypto.randomUUID());
   }
 
-  get(id: DurableObjectId): DurableObjectStub & SessionQuotaCoordinator {
+  get(id: DurableObjectId): DurableObjectStub & SessionQuotaRpc {
     const name = id.name ?? id.toString();
     let coordinator = this.coordinators.get(name);
     if (!coordinator) {
       coordinator = new LocalSessionQuota();
       this.coordinators.set(name, coordinator);
     }
-    return coordinator as unknown as DurableObjectStub &
-      SessionQuotaCoordinator;
+    return coordinator as unknown as DurableObjectStub & SessionQuotaRpc;
   }
 }
 

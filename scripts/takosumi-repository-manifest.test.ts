@@ -59,6 +59,47 @@ test("manifest references real variables and no secret or host authority", () =>
   ]) {
     expect(text).not.toContain(forbidden);
   }
+  for (const authorityField of [
+    "interfaceBlueprints",
+    "outputAllowlist",
+    "bindings",
+    "permissions",
+  ]) {
+    expect(text).not.toContain(`"${authorityField}"`);
+  }
+});
+
+test("the selected root module deploys instead of silently applying an empty graph", () => {
+  expect(variableBlock(moduleSource, "enable_cloudflare_resources")).toMatch(
+    /\n\s+default\s+=\s+true(?:\s|$)/,
+  );
+  expect(moduleSource).toContain(
+    'resource "terraform_data" "sandbox_host_cleanup"',
+  );
+  expect(
+    moduleSource.match(/command\s+=\s+"bun run destroy:opentofu"/g),
+  ).toHaveLength(1);
+
+  const deployResource = moduleSource.slice(
+    moduleSource.indexOf('resource "terraform_data" "sandbox_host"'),
+    moduleSource.indexOf(
+      'resource "terraform_data" "sandbox_host_cleanup"',
+    ),
+  );
+  expect(deployResource).not.toContain("when        = destroy");
+  expect(deployResource).toContain("create_before_destroy = true");
+
+  const cleanupResource = moduleSource.slice(
+    moduleSource.indexOf(
+      'resource "terraform_data" "sandbox_host_cleanup"',
+    ),
+  );
+  expect(cleanupResource).toContain("when        = destroy");
+  expect(cleanupResource).not.toContain("create_before_destroy = true");
+  expect(cleanupResource).toContain(
+    "trimspace(var.cloudflare_account_id)",
+  );
+  expect(cleanupResource).toContain("local.worker_name");
 });
 
 function variableBlock(source: string, name: string): string {
