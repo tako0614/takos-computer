@@ -194,6 +194,46 @@ cd packages/dashboard
 bunx vite --config vite.config.ts
 ```
 
+### Source release
+
+Takosumi が install source として解決する stable SemVer は、GitHub Release のasset
+ではなく、このrepositoryのimmutable Git tagです。次のrelease identityは
+`package.json` のversionから一意に導出され、現在は `v2.1.4` です。任意のtag名を
+command lineから渡すことはできません。
+
+deploy contractの確認は副作用を持ちません。
+
+```bash
+bun run deploy -- --contract
+```
+
+release候補の検証は、cleanな `main` のHEADが `origin/main` と完全一致する状態で
+実行します。full gateの前後でsource identityと既存tagを再確認し、ここではtagを
+作りません。
+
+```bash
+bun run deploy -- takos-computer-source-release
+```
+
+検証結果が `DRY_RUN_VERIFIED` になった同じcommitでだけ、operatorが明示的に
+`--execute` を付けてannotated tagを作成できます。
+
+```bash
+bun run deploy -- takos-computer-source-release --execute
+```
+
+entrypointはlocal tag、origin tag、GitHub Git ref、GitHub Releaseのいずれかに
+同じidentityがあれば停止します。作成時もforce、update、remote deleteを使いません。
+push後はoriginの `refs/tags/v2.1.4` がannotated tag objectであり、
+`refs/tags/v2.1.4^{}` が検証済みのsource commitに一致することをread backします。
+このreleaseをGitHub Actionsが作ることはなく、GitHub Releaseも作成しません。
+
+tag作成開始後にcommandやreadbackが失敗した場合、publicationはindeterminateです。
+再実行や削除をせず、local、origin、GitHubのrefを確認してください。remote identityを
+上書きまたは削除して修復する経路はありません。不具合は前releaseをpinしたまま、
+より高いSemVerで修正します。originに同名refがないことをauthoritativeに確認でき、
+local tagだけが残った場合に限り、そのlocal-only refの整理をoperatorが判断します。
+
 ## アーキテクチャ
 
 ```

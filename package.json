@@ -1,6 +1,6 @@
 {
   "name": "@takos-apps/takos-computer",
-  "version": "0.1.0",
+  "version": "2.1.4",
   "license": "MIT",
   "private": true,
   "type": "module",
@@ -15,6 +15,7 @@
     "build:sandbox-host": "bun packages/computer-hosts/scripts/build-host.ts sandbox",
     "build:all": "bun run build:dashboard && bun run build:sandbox-host",
     "build:portable": "bun run build:all && bun run check:dist",
+    "deploy": "bun scripts/deploy.ts",
     "deploy:opentofu": "bun scripts/opentofu-deploy.ts deploy",
     "destroy:opentofu": "bun scripts/opentofu-deploy.ts destroy",
     "check:opentofu": "bun scripts/check-opentofu-deploy.ts",
