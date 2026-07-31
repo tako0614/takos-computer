@@ -1,5 +1,5 @@
 {
-  "apiVersion": "takosumi.com/v1alpha1",
+  "apiVersion": "takosumi.com/v1",
   "kind": "Repository",
   "install": {
     "modules": {
@@ -10,6 +10,7 @@
             "source": {
               "kind": "capsule_name"
             },
+            "role": "service_name",
             "type": "string",
             "format": "subdomain",
             "label": {
@@ -117,34 +118,32 @@
             "advanced": true
           }
         ],
-        "installExperience": {
-          "projections": [
-            {
-              "kind": "service_name",
-              "variable": "project_name"
-            },
-            {
-              "kind": "public_endpoint",
+        "requires": [
+          {
+            "kind": "http.endpoint",
+            "deliver": {
               "variables": {
                 "url": "public_url"
               }
-            },
-            {
-              "kind": "oidc_client",
+            }
+          },
+          {
+            "kind": "identity.oidc",
+            "callbackPath": "/gui/api/auth/callback",
+            "scopes": [
+              "openid",
+              "profile",
+              "email"
+            ],
+            "deliver": {
               "variables": {
                 "issuerUrl": "takosumi_accounts_issuer_url",
                 "clientId": "oidc_client_id",
                 "redirectUri": "oidc_redirect_uri"
-              },
-              "callbackPath": "/gui/api/auth/callback",
-              "scopes": [
-                "openid",
-                "profile",
-                "email"
-              ]
+              }
             }
-          ]
-        }
+          }
+        ]
       }
     }
   }
