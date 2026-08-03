@@ -18,7 +18,7 @@ test("Takos Computer publishes the closed Repository manifest for its selectable
     "install",
     "kind",
   ]);
-  expect(manifest.apiVersion).toBe("takosumi.com/v1alpha1");
+  expect(manifest.apiVersion).toBe("takosumi.com/v1");
   expect(manifest.kind).toBe("Repository");
   expect(Object.keys(manifest.install)).toEqual(["modules"]);
   expect(Object.keys(manifest.install.modules)).toEqual(["."]);
