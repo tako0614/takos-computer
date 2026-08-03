@@ -177,12 +177,22 @@ describe("Takos Computer immutable source release", () => {
     );
   });
 
-  test("package.json owns v2.1.4 and the product deploy entrypoint", async () => {
-    const packageJson = JSON.parse(
-      await readFile(new URL("../package.json", import.meta.url), "utf8"),
-    ) as { version: string; scripts: Record<string, string> };
+  test("package.json and README own the reviewed source-release identity", async () => {
+    const [packageSource, readme] = await Promise.all([
+      readFile(new URL("../package.json", import.meta.url), "utf8"),
+      readFile(new URL("../README.md", import.meta.url), "utf8"),
+    ]);
+    const packageJson = JSON.parse(packageSource) as {
+      version: string;
+      scripts: Record<string, string>;
+    };
     expect(packageJson.version).toBe("2.1.4");
     expect(packageJson.scripts.deploy).toBe("bun scripts/deploy.ts");
+    expect(readme).toContain(`v${packageJson.version}`);
+    expect(readme).toContain(
+      "bun run deploy -- takos-computer-source-release",
+    );
+    expect(readme).toContain(`refs/tags/v${packageJson.version}`);
   });
 
   test.each([
