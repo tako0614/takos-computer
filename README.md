@@ -371,13 +371,20 @@ Recipe から apply 時だけ materialize され、Wrangler の一時 secrets fi
 material の sensitive digest も lifecycle trigger に含めるため、値の rotation は次の
 `tofu apply` で Worker secret を更新します。
 
-root の `install-options.json` は optional な Capsule Source Options chooser 文書です。
-別の [`.well-known/takosumi.json`](.well-known/takosumi.json) は一般
-`Repository` manifest として、同じ Git commit にある root module の入力名と表示
-projection だけを提案します。credential / provider config / secret / Interface /
-install authority は持ちません。`source.ref` を省略しているため、外部 install link
-では Takosumi が最高の stable SemVer Git tag を解決し、検証済みの宣言を
-DB-owned InstallConfig へ compile して通常の Capsule flow へ渡します。
+### Takosumi でインストール
+
+Takosumi の「新しいアプリ」または `/install` 画面へ Git repository URL を渡します。
+
+```text
+https://app.takosumi.com/install?git=https%3A%2F%2Fgithub.com%2Ftako0614%2Ftakos-computer.git
+```
+
+Takosumi は指定した Git revision の OpenTofu tree を走査し、
+[`.well-known/takosumi.json`](.well-known/takosumi.json) から入力 UI hint と host
+service declaration を読み取ります。必要な場合だけ画面で ref、module path、
+サービス名を上書きしてください。専用の source-options 文書はなく、選択した
+module directory の `.tf`、`.tofu`、`.tf.json`、`.tofu.json` を一つの tree として
+compatibility 判定に渡します。
 
 ## ライセンス
 

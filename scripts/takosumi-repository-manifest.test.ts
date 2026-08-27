@@ -2,17 +2,11 @@ import { expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
-const text = await readFile(
-  new URL(".well-known/takosumi.json", root),
-  "utf8",
-);
+const text = await readFile(new URL(".well-known/takosumi.json", root), "utf8");
 const manifest = JSON.parse(text) as RepositoryManifest;
-const options = JSON.parse(
-  await readFile(new URL("install-options.json", root), "utf8"),
-) as { options: Array<{ source: { path: string } }> };
 const moduleSource = await readFile(new URL("main.tf", root), "utf8");
 
-test("Takos Computer publishes the closed Repository manifest for its selectable module", () => {
+test("Takos Computer publishes repository input and service hints", () => {
   expect(Object.keys(manifest).sort()).toEqual([
     "apiVersion",
     "install",
@@ -22,10 +16,10 @@ test("Takos Computer publishes the closed Repository manifest for its selectable
   expect(manifest.kind).toBe("Repository");
   expect(Object.keys(manifest.install)).toEqual(["modules"]);
   expect(Object.keys(manifest.install.modules)).toEqual(["."]);
-  expect(options.options.map((option) => option.source.path)).toEqual(["."]);
+  expect(manifest.install.modules["."]).toBeDefined();
 });
 
-test("manifest references real variables and no secret or host authority", () => {
+test("repository install hints reference real variables and carry no secret or host authority", () => {
   const module = manifest.install.modules["."];
   const variables = new Set(
     Array.from(
@@ -43,6 +37,23 @@ test("manifest references real variables and no secret or host authority", () =>
         /\n\s+default\s+=/,
       );
     }
+    expect(input.name).toMatch(/^[A-Za-z_][A-Za-z0-9_]*$/);
+    expect(typeof input.label.ja).toBe("string");
+    expect(typeof input.label.en).toBe("string");
+  }
+  for (const requirement of module.requires ?? []) {
+    expect(["http.endpoint", "identity.oidc", "interface.consume"]).toContain(
+      requirement.kind,
+    );
+    if (requirement.deliver) {
+      expect(Object.keys(requirement.deliver)).toHaveLength(1);
+    }
+  }
+  for (const service of module.interfaces ?? []) {
+    expect(typeof service.name).toBe("string");
+    expect(typeof service.spec.type).toBe("string");
+    expect(typeof service.spec.version).toBe("string");
+    expect(service.spec.access).toBeDefined();
   }
   for (const forbidden of [
     "cloudflare_account_id",
@@ -59,17 +70,9 @@ test("manifest references real variables and no secret or host authority", () =>
   ]) {
     expect(text).not.toContain(forbidden);
   }
-  for (const authorityField of [
-    "interfaceBlueprints",
-    "outputAllowlist",
-    "bindings",
-    "permissions",
-  ]) {
-    expect(text).not.toContain(`"${authorityField}"`);
-  }
 });
 
-test("the selected root module deploys instead of silently applying an empty graph", () => {
+test("the root OpenTofu module deploys instead of silently applying an empty graph", () => {
   expect(variableBlock(moduleSource, "enable_cloudflare_resources")).toMatch(
     /\n\s+default\s+=\s+true(?:\s|$)/,
   );
@@ -82,23 +85,17 @@ test("the selected root module deploys instead of silently applying an empty gra
 
   const deployResource = moduleSource.slice(
     moduleSource.indexOf('resource "terraform_data" "sandbox_host"'),
-    moduleSource.indexOf(
-      'resource "terraform_data" "sandbox_host_cleanup"',
-    ),
+    moduleSource.indexOf('resource "terraform_data" "sandbox_host_cleanup"'),
   );
   expect(deployResource).not.toContain("when        = destroy");
   expect(deployResource).toContain("create_before_destroy = true");
 
   const cleanupResource = moduleSource.slice(
-    moduleSource.indexOf(
-      'resource "terraform_data" "sandbox_host_cleanup"',
-    ),
+    moduleSource.indexOf('resource "terraform_data" "sandbox_host_cleanup"'),
   );
   expect(cleanupResource).toContain("when        = destroy");
   expect(cleanupResource).not.toContain("create_before_destroy = true");
-  expect(cleanupResource).toContain(
-    "trimspace(var.cloudflare_account_id)",
-  );
+  expect(cleanupResource).toContain("trimspace(var.cloudflare_account_id)");
   expect(cleanupResource).toContain("local.worker_name");
 });
 
@@ -129,7 +126,20 @@ interface RepositoryModule {
   inputs: Array<{
     name: string;
     source: { kind: string };
+    label: { ja: string; en: string };
     secret?: boolean;
+  }>;
+  requires?: Array<{
+    kind: string;
+    deliver?: Record<string, unknown>;
+  }>;
+  interfaces?: Array<{
+    name: string;
+    spec: {
+      type: string;
+      version: string;
+      access: Record<string, unknown>;
+    };
   }>;
   installExperience?: {
     projections: Array<{
