@@ -40,7 +40,7 @@ bun run dev:local
 - MCP SDK
 - Zod
 - Cloudflare Containers
-- SolidJS 1.9 + Vite 6.3
+- SolidJS 1.9 + Vite
 
 ## パッケージ構成
 
