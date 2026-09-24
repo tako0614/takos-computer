@@ -9,6 +9,30 @@ Takos Workspace へユーザーが明示的に install する通常の Capsule A
 Takosumi 上で動作します。サンドボックス / MCP 表面自体は Takos 固有の結合を持たず、任意の
 MCP 対応エージェントホストから利用できます。
 
+## できること
+
+- エージェント専用のサンドボックスセッションを作り、状態を確認し、破棄できます
+- サンドボックス内でシェルコマンドを実行できます
+- サンドボックスのファイルを読む・書く・一覧する・メタデータを取得できます
+- 実行中プロセスの一覧と停止ができます
+- ダッシュボードからセッションの様子を確認できます
+
+MCP ツールの完全な一覧と引数は [公開 MCP ツール](#公開-mcp-ツール) にあります。
+
+## 始め方
+
+Bun と Cloudflare account が必要です。ローカルで動かすだけなら Containers /
+Durable Objects なしでも起動できます。
+
+```bash
+cd takos-computer
+bun install
+bun run dev:local
+```
+
+サンドボックスサービス単体はポート 8080 で待ち受けます。詳しい前提条件と
+セットアップは [開発](#開発) を参照してください。
+
 ## 主要技術
 
 - Bun tooling + Bun-based sandbox container
@@ -53,7 +77,7 @@ evidence が完全一致する短命の Takosumi Interface OAuth bearer を使�
 
 `POST` が MCP リクエスト用メソッドです。`OPTIONS` は許可メソッドを返します。
 他の MCP メソッド (Streamable HTTP の server-to-client `GET` ストリームを含む)
-は `405 Method Not Allowed` で fail-fast
+は `405 Method Not Allowed` ですぐエラーにする
 し、サンドボックスコンテナにはプロキシしません。
 
 ### 公開 MCP ツール
@@ -146,7 +170,7 @@ public clientなのでclient secretを作りません。外部のconfidential OI
 ### Setup
 
 ```bash
-cd takos-apps/takos-computer
+cd takos-computer
 
 bun install
 bun run test:all
@@ -168,7 +192,7 @@ Cloudflare Containers / Durable Objects なしで Worker host と sandbox MCP �
 `.takos-computer-local/workspaces/` 配下に作られます。
 
 ```bash
-cd takos-apps/takos-computer
+cd takos-computer
 bun run dev:local
 ```
 
@@ -197,7 +221,7 @@ bunx vite --config vite.config.ts
 ### Source release
 
 Takosumi が install source として解決する stable SemVer は、GitHub Release のasset
-ではなく、このrepositoryのimmutable Git tagです。次のrelease identityは
+ではなく、このrepositoryの変更不可の Git tagです。次のrelease identityは
 `package.json` のversionから一意に導出され、現在は `v2.1.4` です。任意のtag名を
 command lineから渡すことはできません。
 
@@ -322,7 +346,7 @@ manifest は使いません。Docker が利用できない runner は、事前�
 Cloudflare Workerのidentityは `cloudflare_account_id` と
 `worker_name` (`project_name` の既定値) の組です。どちらかを変更すると新しいWorkerを
 作る前に、以前のaccount/nameを記録したcleanup ownerが古いWorkerを削除します。
-これは古いendpointを取り残さないfail-closedな破壊的変更で、短い停止が発生します。
+これは古いendpointを取り残さないための、安全側に倒した破壊的変更で、短い停止が発生します。
 旧accountを削除できないcredentialへ同時に切り替えると、新しいWorkerをdeployせず
 applyが失敗します。その場合は旧identityを削除できるcredentialで再実行してください。
 通常更新とidentity変更を同じ操作として扱わないでください。
@@ -366,7 +390,7 @@ service-side `InstallConfig` を先に用意する必要があります。その
 | sandbox-host | `basic`       | 0.25 | 1 GiB | 100 (prod) / 10 (staging) |
 
 secret は sensitive module variable または runner の Provider Connection / Credential
-Recipe から apply 時だけ materialize され、Wrangler の一時 secrets file は mode
+Recipe から apply 時だけ実体として用意され、Wrangler の一時 secrets file は mode
 `0600` で作成後に削除されます。値は config・通常 Output・log に書きません。secret
 material の sensitive digest も lifecycle trigger に含めるため、値の rotation は次の
 `tofu apply` で Worker secret を更新します。
