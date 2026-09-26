@@ -3,7 +3,41 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>takos computer</title>
+    <title>Takos Computer</title>
+    <meta
+      name="description"
+      content="Dashboard for the Takos Computer containerized sandbox environment for AI agents."
+    >
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="theme-color" content="#0f172a">
+    <script>
+      /* Pre-hydration language init: mirrors i18n.ts detectInitialLanguage
+         (takos-lang storage, ja* browser => ja, else en) so <html lang> is
+         correct before the bundle runs. */
+      (function () {
+        try {
+          var lang = localStorage.getItem("takos-lang");
+          if (lang !== "ja" && lang !== "en") {
+            lang = (navigator.language || "").toLowerCase().startsWith("ja")
+              ? "ja"
+              : "en";
+          }
+          document.documentElement.lang = lang;
+        } catch {
+          /* localStorage may be unavailable; the app will apply the language. */
+        }
+      })();
+    </script>
+    <style>
+      /* Pre-hydration flash guard — must match styles.css body background /
+         color so there is no color jump when the stylesheet loads. */
+      html,
+      body {
+        margin: 0;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+    </style>
   </head>
   <body>
     <div id="app"></div>
