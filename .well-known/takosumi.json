@@ -1,5 +1,5 @@
 {
-  "apiVersion": "takosumi.com/v1",
+  "apiVersion": "takosumi.com/v2.1",
   "kind": "Repository",
   "install": {
     "modules": {
@@ -35,6 +35,19 @@
               "en": "Uses an available Worker URL when omitted."
             },
             "placeholder": "https://computer.example.com"
+          },
+          {
+            "name": "takosumi_accounts_url",
+            "source": {
+              "kind": "module_default"
+            },
+            "type": "string",
+            "format": "url",
+            "label": {
+              "ja": "Takosumi Accounts URL",
+              "en": "Takosumi Accounts URL"
+            },
+            "advanced": true
           },
           {
             "name": "takosumi_accounts_issuer_url",
@@ -137,11 +150,91 @@
             ],
             "deliver": {
               "variables": {
+                "accountsUrl": "takosumi_accounts_url",
                 "issuerUrl": "takosumi_accounts_issuer_url",
                 "clientId": "oidc_client_id",
                 "redirectUri": "oidc_redirect_uri"
               }
             }
+          }
+        ],
+        "interfaces": [
+          {
+            "key": "launcher",
+            "name": "takos-computer.launcher",
+            "spec": {
+              "type": "interface.ui.surface",
+              "version": "1",
+              "document": {
+                "launcher": true,
+                "display": {
+                  "title": "Takos Computer"
+                }
+              },
+              "inputs": {
+                "url": {
+                  "source": "output",
+                  "outputName": "launch_url",
+                  "outputType": "url"
+                }
+              },
+              "access": {
+                "visibility": "workspace"
+              }
+            },
+            "bindingRequests": [
+              {
+                "key": "installer",
+                "subject": {
+                  "source": "installing_principal"
+                },
+                "permissions": [
+                  "ui.open"
+                ],
+                "delivery": {
+                  "type": "none"
+                }
+              }
+            ]
+          },
+          {
+            "key": "mcp",
+            "name": "takos-computer.mcp",
+            "spec": {
+              "type": "mcp.server",
+              "version": "2025-11-25",
+              "document": {
+                "transport": "streamable-http",
+                "display": {
+                  "title": "Takos Computer"
+                }
+              },
+              "inputs": {
+                "endpoint": {
+                  "source": "output",
+                  "outputName": "mcp_url",
+                  "outputType": "url"
+                }
+              },
+              "access": {
+                "visibility": "workspace",
+                "resourceUriInput": "endpoint"
+              }
+            },
+            "bindingRequests": [
+              {
+                "key": "installer",
+                "subject": {
+                  "source": "installing_principal"
+                },
+                "permissions": [
+                  "mcp.invoke"
+                ],
+                "delivery": {
+                  "type": "oauth2"
+                }
+              }
+            ]
           }
         ]
       }

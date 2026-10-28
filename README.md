@@ -360,19 +360,25 @@ service-side `InstallConfig` を先に用意する必要があります。その
 
 - `enable_cloudflare_resources = true` を固定し、`app_workspace_id` /
   `app_capsule_id` をinstall contextから注入する
-- GUI OIDCを有効にする場合はAccountsのpublic PKCE clientからissuer、client id、
-  redirect URIだけを写像し、存在しないclient secretを要求しない
+- GUI OIDCを有効にする場合はAccountsのpublic PKCE登録からAccounts URL、issuer、
+  client id、登録済みredirect URIを写像し、存在しないclient secretを要求しない。
+  callbackはcanonical public URLの `/gui/api/auth/callback` と一致させる
 - custom routeを別途作らない場合は `enable_workers_dev_subdomain = true` と
   `cloudflare_workers_subdomain` を指定し、実際に到達できるURLを作る
-- `launch_url` と `mcp_url` を必須URLとして `outputAllowlist` に列挙する
-- `launch_url` から `interface.ui.surface` + `ui.open` launcherを作る
-- `mcp_url` から `mcp.server` (`2025-11-25`, streamable HTTP) +
-  `mcp.invoke` OAuth bindingを作る
+- Repository manifest が要求する `launch_url` / `mcp_url` の公開、
+  `interface.ui.surface` / `mcp.server`、`ui.open` / `mcp.invoke` を許可するpolicyを持つ
 
-というauthorityを持ちます。exact-source configがないgeneric installでこのmoduleを
-成功扱いにしてはいけません。repositoryの `.well-known/takosumi.json` は入力と表示
-だけを提案し、Interface、Binding、Output公開policyを宣言・付与しません。このmodule
-もcredentialをOutputに出しません。
+というauthorityを持ちます。repositoryの `.well-known/takosumi.json` は、既存の
+`launch_url` (`/gui`) を開くlauncherと、`mcp_url` のStreamable HTTP MCPを要求します。
+どちらもinstalling principalだけを対象にしたbinding requestです。compilerがservice-side
+policyで受理した後、実際のInterface / BindingはDB-owned stateから確定します。
+manifestや通常のURL Outputだけでアクセス権が付与されることはありません。
+
+Workspace / Capsule contextの注入とGUI OIDCの有効化は引き続き正当なoperator設定が
+必要です。また、現root moduleにはWranglerを呼ぶ `local-exec` があり、one-touch
+installerの現compatibility policyでは未対応です。launcherの宣言を、実行adapterや
+認証設定が整った証明、導入成功の証明として扱いません。このmoduleもcredentialを
+Outputに出しません。
 
 主な通常 Output:
 
@@ -397,9 +403,9 @@ material の sensitive digest も lifecycle trigger に含めるため、値の 
 
 root の `install-options.json` は optional な Capsule Source Options chooser 文書です。
 別の [`.well-known/takosumi.json`](.well-known/takosumi.json) は一般
-`Repository` manifest として、同じ Git commit にある root module の入力名と表示
-projection だけを提案します。credential / provider config / secret / Interface /
-install authority は持ちません。`source.ref` を省略しているため、外部 install link
+`Repository` manifestとして、同じGit commitにあるroot moduleの入力・launcher・MCPを
+要求します。credential / provider config / secret / install authorityは持ちません。
+`source.ref` を省略しているため、外部 install link
 では Takosumi が最高の stable SemVer Git tag を解決し、検証済みの宣言を
 DB-owned InstallConfig へ compile して通常の Capsule flow へ渡します。
 
