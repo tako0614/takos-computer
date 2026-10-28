@@ -40,12 +40,17 @@ export default function FileBrowser(
   );
 
   const navigate = (name: string) => {
-    const current = props.cwd().replace(/\/+$/, "");
-    props.setCwd(
-      name === ".."
-        ? (current.replace(/\/[^/]+$/, "") || "/")
-        : current + "/" + name,
-    );
+    const current = props.cwd().replace(/\/+$/, "") || ".";
+    if (name === "..") {
+      props.setCwd(
+        current === "."
+          ? "."
+          : current.replace(/\/[^/]+$/, "") ||
+            (current.startsWith("/") ? "/" : "."),
+      );
+      return;
+    }
+    props.setCwd(current === "/" ? `/${name}` : `${current}/${name}`);
   };
 
   return (
@@ -82,43 +87,56 @@ export default function FileBrowser(
           }
         >
           <Show
-            when={(entries() ?? []).length > 0}
+            when={!entries.error}
             fallback={
-              <div style="padding:0.75rem" class="muted">
-                {t("emptyDirectory")}
+              <div role="alert" style="padding:0.75rem; color:#fca5a5">
+                {t("error", {
+                  message: entries.error instanceof Error
+                    ? entries.error.message
+                    : String(entries.error),
+                })}
               </div>
             }
           >
-            <For each={entries()}>
-              {(e) => (
-                <div
-                  class="flex gap-2 items-center"
-                  style={`padding:0.375rem 0.75rem; border-bottom:1px solid #0f172a;${
-                    e.type === "directory" ? "cursor:pointer" : ""
-                  }`}
-                  onClick={() => {
-                    if (e.type === "directory") navigate(e.name);
-                  }}
-                >
-                  <span>
-                    {e.type === "directory" ? "\u{1F4C1}" : "\u{1F4C4}"}
-                  </span>
-                  <span
-                    class="flex-1"
-                    style={{
-                      color: e.type === "directory" ? "#60a5fa" : "#e2e8f0",
+            <Show
+              when={(entries() ?? []).length > 0}
+              fallback={
+                <div style="padding:0.75rem" class="muted">
+                  {t("emptyDirectory")}
+                </div>
+              }
+            >
+              <For each={entries()}>
+                {(e) => (
+                  <div
+                    class="flex gap-2 items-center"
+                    style={`padding:0.375rem 0.75rem; border-bottom:1px solid #0f172a;${
+                      e.type === "directory" ? "cursor:pointer" : ""
+                    }`}
+                    onClick={() => {
+                      if (e.type === "directory") navigate(e.name);
                     }}
                   >
-                    {e.name}
-                  </span>
-                  <Show when={e.type === "file"}>
-                    <span class="mono muted" style="font-size:0.75rem">
-                      {formatSize(e.size)}
+                    <span>
+                      {e.type === "directory" ? "\u{1F4C1}" : "\u{1F4C4}"}
                     </span>
-                  </Show>
-                </div>
-              )}
-            </For>
+                    <span
+                      class="flex-1"
+                      style={{
+                        color: e.type === "directory" ? "#60a5fa" : "#e2e8f0",
+                      }}
+                    >
+                      {e.name}
+                    </span>
+                    <Show when={e.type === "file"}>
+                      <span class="mono muted" style="font-size:0.75rem">
+                        {formatSize(e.size)}
+                      </span>
+                    </Show>
+                  </div>
+                )}
+              </For>
+            </Show>
           </Show>
         </Show>
       </div>

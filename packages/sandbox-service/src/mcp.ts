@@ -50,7 +50,10 @@ type ToolDefinition = {
 export type McpRequestHandler = (request: Request) => Promise<Response>;
 
 function errorText(err: unknown): McpToolResult {
-  return mcpText(`Error: ${err instanceof Error ? err.message : String(err)}`);
+  return {
+    ...mcpText(`Error: ${err instanceof Error ? err.message : String(err)}`),
+    isError: true,
+  };
 }
 
 function objectArgs(args: unknown): Record<string, unknown> {

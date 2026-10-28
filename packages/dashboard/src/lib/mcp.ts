@@ -20,6 +20,16 @@ export async function mcpCall<T = unknown>(
   if (json.error) {
     throw new Error(json.error.message || JSON.stringify(json.error));
   }
+  if (json.result?.isError === true) {
+    const content = Array.isArray(json.result.content)
+      ? json.result.content
+      : [];
+    const message = content.find(
+      (item: { type?: unknown; text?: unknown }) =>
+        item.type === "text" && typeof item.text === "string",
+    )?.text;
+    throw new Error(typeof message === "string" ? message : "MCP tool failed");
+  }
   const content = json.result?.content;
   if (!content || !content.length) return null;
   const first = content[0];

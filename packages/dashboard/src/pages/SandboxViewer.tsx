@@ -14,7 +14,7 @@ export default function SandboxViewer() {
   const mcpUrl = () =>
     `/gui/api/sandbox-session/${encodeURIComponent(sessionId())}/mcp`;
 
-  const [cwd, setCwd] = createSignal("/home/sandbox/workspace");
+  const [cwd, setCwd] = createSignal(".");
 
   // Status polling
   const [statusVersion, setStatusVersion] = createSignal(0);

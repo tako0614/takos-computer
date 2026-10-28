@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { env } from "node:process";
 import { ShellManager } from "../shell-manager.ts";
-import { makeTempDir, remove, symlink } from "./fs-helpers.ts";
+import { makeTempDir, mkdir, remove, symlink } from "./fs-helpers.ts";
 
 function restoreEnv(snapshot: Record<string, string | undefined>): void {
   for (const [key, value] of Object.entries(snapshot)) {
@@ -29,10 +29,12 @@ test("ShellManager: exec simple command returns stdout", async () => {
 
 test("ShellManager: exec with custom cwd", async () => {
   const tmpDir = await makeTempDir();
+  const childDir = `${tmpDir}/child`;
   try {
-    const shell = new ShellManager("/tmp");
-    const result = await shell.exec({ command: "pwd", cwd: tmpDir });
-    expect(result.stdout.trim()).toEqual(tmpDir);
+    await mkdir(childDir);
+    const shell = new ShellManager(tmpDir);
+    const result = await shell.exec({ command: "pwd", cwd: childDir });
+    expect(result.stdout.trim()).toEqual(childDir);
     expect(result.exit_code).toEqual(0);
   } finally {
     await remove(tmpDir, { recursive: true });
