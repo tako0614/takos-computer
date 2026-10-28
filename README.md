@@ -309,6 +309,9 @@ GUI OIDC は署名済みの `takosumi.capsule_id` を `APP_CAPSULE_ID` と照合
 新しい app claim がない既存 session と Workspace identity field は互換性を保ちます。
 旧 `role` は管理権限へ昇格させず、sandbox の作成・一覧・操作は従来のユーザー所有
 ルールに従います。
+`appRole` / `canManageApp` はログイン時点の表示用情報で、session の有効期限は
+最大 12 時間です。このアプリは access token を保存せず、役割の変更・削除を
+オンラインで再確認しません。これらの値を現在の管理操作の認可に使ってはいけません。
 
 ## Cloudflare Worker Bindings
 

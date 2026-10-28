@@ -9,6 +9,9 @@
   Legacy `role` does not grant new management authority.
 - App management: `/gui/api/auth/me` exposes `capsuleId`, `appRole`, and
   `canManageApp`. Existing per-user sandbox ACLs remain authoritative.
+  The role is a display-only login snapshot with a maximum 12-hour session
+  lifetime. No access token is retained; no live role refresh or revocation
+  lookup exists. The snapshot must not authorize current management operations.
 - Runtime wiring: `main.tf` already passes install-context `app_capsule_id` and
   `app_workspace_id` to the OpenTofu deploy adapter, which injects both Worker
   variables; retain this reviewed path.

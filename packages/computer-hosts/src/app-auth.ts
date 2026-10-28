@@ -572,6 +572,7 @@ export function registerGuiAuthRoutes(
       role: session?.role,
       capsuleId: session?.capsuleId,
       appRole: session?.appRole,
+      // Display-only login snapshot (up to 12 hours), never sandbox authority.
       canManageApp: session?.appRole === "owner" || session?.appRole === "member",
     });
   });
