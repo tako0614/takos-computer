@@ -18,7 +18,9 @@
 - Validation: focused auth/session and deploy-configuration tests plus static
   checks locally; the full repository gate runs in CI under the Phase 7 resource
   constraint. No deploy, live sign-in, live database, provider, or secret changes.
-  Local results: 63 focused tests pass, `bun run typecheck` passes, and
+  Local results: 64 focused tests pass, `bun run typecheck` passes, and
   `git diff --check` passes. Tests cover verified OIDC callbacks, current Capsule
   rechecks, malformed roles, legacy compatibility, and unchanged sandbox ACLs.
+- Independent review: malformed explicit Takosumi claim envelopes now fail
+  authentication instead of receiving legacy ordinary-user compatibility.
 - Reversal: revert this commit; no schema or durable-state migration is required.

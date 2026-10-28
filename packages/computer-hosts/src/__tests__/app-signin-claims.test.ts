@@ -39,6 +39,13 @@ describe("per-app sign-in claims", () => {
         .toThrow("Capsule mismatch");
     }
   });
+
+  test("rejects explicitly malformed Takosumi claim envelopes", () => {
+    for (const evidence of [null, false, "malformed", 1, []]) {
+      expect(() => resolveAppSignInClaims(evidence, "cap_test"))
+        .toThrow("Invalid Takosumi sign-in claims");
+    }
+  });
 });
 
 async function signedCookie(name: string, value: Record<string, unknown>): Promise<string> {
@@ -117,7 +124,7 @@ test("verified OIDC callbacks expose app management only for the matching owner/
   };
   const app = new Hono<{ Bindings: SandboxHostEnv }>();
   registerGuiAuthRoutes(app);
-  let evidence: Record<string, unknown> = {};
+  let evidence: unknown = {};
   const originalFetch = globalThis.fetch;
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
@@ -151,6 +158,7 @@ test("verified OIDC callbacks expose app management only for the matching owner/
       { workspace_id: "ws_test", role: "owner" },
       { capsule_id: "cap_other", app_role: "owner" },
       { capsule_id: "cap_test", app_role: "admin" },
+      null, false, "malformed", [],
     ]) {
       evidence = claims;
       const stateCookie = await signedCookie("takos_computer_oauth_state", {
@@ -160,7 +168,10 @@ test("verified OIDC callbacks expose app management only for the matching owner/
       const callback = await app.request("https://computer.example.test/gui/api/auth/callback?code=test-code&state=test-state", {
         headers: { Cookie: stateCookie },
       }, callbackEnv);
-      if (claims.capsule_id === "cap_other" || claims.app_role === "admin") {
+      if (
+        !claims || typeof claims !== "object" || Array.isArray(claims) ||
+        claims.capsule_id === "cap_other" || claims.app_role === "admin"
+      ) {
         expect(callback.status).toBe(502);
         expect(callback.headers.get("set-cookie")).toBeNull();
         continue;

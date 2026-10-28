@@ -9,8 +9,9 @@ export function resolveAppSignInClaims(
   evidence: unknown,
   expectedCapsuleId: string | undefined,
 ): AppSignInClaims {
+  if (evidence === undefined) return {};
   if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) {
-    return {};
+    throw new Error("Invalid Takosumi sign-in claims");
   }
   const claims = evidence as Record<string, unknown>;
   if (claims.capsule_id === undefined && claims.app_role === undefined) {
