@@ -606,6 +606,7 @@ test("sandbox host OIDC callback verifies id token and creates GUI session", asy
       spaceId: "space-1",
       appId: "jp.takos.computer",
       role: "owner",
+      canManageApp: false,
     });
   });
 });

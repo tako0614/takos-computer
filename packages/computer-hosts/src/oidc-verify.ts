@@ -69,6 +69,8 @@ export type IdTokenClaims = {
     space_id?: unknown;
     app_id?: unknown;
     role?: unknown;
+    capsule_id?: unknown;
+    app_role?: unknown;
   };
 };
 

@@ -18,6 +18,10 @@ import {
   verifyIdToken,
 } from "./oidc-verify.ts";
 import type { SandboxHostEnv } from "./sandbox-session-types.ts";
+import {
+  type AppSignInClaims,
+  resolveAppSignInClaims,
+} from "./app-signin-claims.ts";
 
 const SESSION_COOKIE = "takos_computer_session";
 const STATE_COOKIE = "takos_computer_oauth_state";
@@ -37,7 +41,7 @@ type OAuthState = {
   exp: number;
 };
 
-export type GuiSession = {
+export type GuiSession = AppSignInClaims & {
   sub: string;
   name?: string;
   accountId?: string;
@@ -318,6 +322,16 @@ export async function readGuiSession(
   if (!raw) return null;
   const session = await unseal<GuiSession>(raw, config.sessionSecret);
   if (!session || session.exp <= Math.floor(Date.now() / 1000)) return null;
+  // Recheck the binding for every request, including sessions minted before a
+  // runtime configuration change. Claim-absent legacy sessions stay valid.
+  try {
+    resolveAppSignInClaims({
+      capsule_id: session.capsuleId,
+      app_role: session.appRole,
+    }, envValue(env, "APP_CAPSULE_ID"));
+  } catch {
+    return null;
+  }
   return session;
 }
 
@@ -511,6 +525,10 @@ export function registerGuiAuthRoutes(
       if (!subject || user.sub !== subject) {
         throw new Error("OAuth userinfo subject mismatch");
       }
+      const appClaims = resolveAppSignInClaims(
+        claims.takosumi,
+        envValue(c.env, "APP_CAPSULE_ID"),
+      );
       const headers = new Headers({
         "Cache-Control": "no-store",
         "Location": state.returnTo,
@@ -529,6 +547,7 @@ export function registerGuiAuthRoutes(
           spaceId: stringClaim(claims.takosumi?.space_id),
           appId: stringClaim(claims.takosumi?.app_id),
           role: stringClaim(claims.takosumi?.role),
+          ...appClaims,
         }),
       );
       return new Response(null, { status: 302, headers });
@@ -551,6 +570,9 @@ export function registerGuiAuthRoutes(
       spaceId: session?.spaceId,
       appId: session?.appId,
       role: session?.role,
+      capsuleId: session?.capsuleId,
+      appRole: session?.appRole,
+      canManageApp: session?.appRole === "owner" || session?.appRole === "member",
     });
   });
 

@@ -294,12 +294,21 @@ Durable Object で管理されます。各セッションは個別のコンテ�
 | `OIDC_REDIRECT_URI`          | _(derived)_ | OIDC callback URI。managed install では Cloud が確定した redirect URI を inject。standalone/dev のみ trusted configured base URL から derive |
 | `MCP_URL`                    | _(none)_    | Interface OAuth の exact resource audience (`mcp_url` Output と同じ URL)                                                                     |
 | `APP_WORKSPACE_ID`           | _(none)_    | Interface OAuth evidence で照合する owning Workspace                                                                                         |
-| `APP_CAPSULE_ID`             | _(none)_    | Interface OAuth evidence で照合する owning Capsule                                                                                           |
+| `APP_CAPSULE_ID`             | _(none)_    | GUI OIDC sign-in と Interface OAuth evidence で照合する owning Capsule                                                                         |
 | `MCP_ALLOW_UNAUTHENTICATED`  | `false`     | `true` でローカル / 開発時のみ `MCP_AUTH_TOKEN` 無しでサンドボックスサービス `/mcp` を許可                                                   |
 | `TAKOS_TOKEN`                | _(none)_    | サンドボックスサービスに渡せる Takos API bearer トークン。シェル子プロセスは `allow_takos_token` が設定された場合のみ継承                    |
 | `TAKOS_API_URL`              | _(none)_    | サンドボックスコンテナに `TAKOS_API_URL` として注入される Takos API エンドポイント                                                           |
 | `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_    | Takos dispatch 経由でルーティングされた GUI / API 要求の `X-Takos-Internal-Marker: 1` 認証を有効化する場合のみ `1` を設定                    |
 | `SHUTDOWN_GRACE_MS`          | `15000`     | SIGTERM 時の強制終了までの猶予 (ms)                                                                                                          |
+
+GUI OIDC は署名済みの `takosumi.capsule_id` を `APP_CAPSULE_ID` と照合します。
+一致する `takosumi.app_role` が `owner` / `member` の場合、
+`/gui/api/auth/me` は `appRole` と `canManageApp: true` を返します。役割のない
+同じアプリのユーザーも sign-in できます。別 Capsule、不正な明示 role、照合先が
+未設定のアプリ claim は拒否し、session の読み取り時にも再照合します。
+新しい app claim がない既存 session と Workspace identity field は互換性を保ちます。
+旧 `role` は管理権限へ昇格させず、sandbox の作成・一覧・操作は従来のユーザー所有
+ルールに従います。
 
 ## Cloudflare Worker Bindings
 
