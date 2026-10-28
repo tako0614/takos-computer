@@ -141,6 +141,17 @@ variable "container_mcp_auth_token" {
   }
 }
 
+variable "takosumi_accounts_url" {
+  description = "Public Accounts URL delivered by the installer's reviewed OIDC registration."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = trimspace(var.takosumi_accounts_url) == "" || can(regex("^https://[^/?#@[:space:]]+/?$", trimspace(var.takosumi_accounts_url)))
+    error_message = "takosumi_accounts_url must be empty or a bare-origin HTTPS URL."
+  }
+}
+
 variable "takosumi_accounts_issuer_url" {
   description = "Optional bare-origin Takosumi Accounts issuer for Interface OAuth and browser OIDC."
   type        = string
@@ -382,6 +393,11 @@ resource "terraform_data" "sandbox_host" {
         local.oidc_redirect_uri != ""
       )
       error_message = "enable_app_oidc requires the Accounts issuer, OIDC client id, and a resolvable redirect URI."
+    }
+
+    precondition {
+      condition     = !var.enable_app_oidc || local.oidc_redirect_uri == "${local.public_origin}/gui/api/auth/callback"
+      error_message = "The registered Accounts callback must match the canonical Computer public URL."
     }
   }
 }
