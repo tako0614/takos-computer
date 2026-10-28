@@ -9,6 +9,19 @@ interface FileEntry {
   modified: string | null;
 }
 
+function isFileEntry(value: unknown): value is FileEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.name === "string" &&
+    typeof entry.type === "string" &&
+    ["file", "directory", "symlink", "unknown"].includes(entry.type) &&
+    typeof entry.size === "number" && Number.isFinite(entry.size) &&
+    entry.size >= 0 &&
+    (entry.modified === null || typeof entry.modified === "string")
+  );
+}
+
 function formatSize(bytes: number): string {
   if (bytes < 1024) return bytes + " B";
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " K";
@@ -24,12 +37,17 @@ export default function FileBrowser(
   const [entries] = createResource(
     () => ({ cwd: props.cwd(), v: version() }),
     async ({ cwd }) => {
-      const result = await mcpCall<{ entries: FileEntry[] }>(
+      const result = await mcpCall<unknown>(
         props.mcpUrl,
         "file_list",
         { path: cwd },
       );
-      const items = result?.entries ?? [];
+      const items = result && typeof result === "object"
+        ? (result as { entries?: unknown }).entries
+        : undefined;
+      if (!Array.isArray(items) || !items.every(isFileEntry)) {
+        throw new Error("Invalid file list response");
+      }
       items.sort((a, b) => {
         if (a.type === "directory" && b.type !== "directory") return -1;
         if (a.type !== "directory" && b.type === "directory") return 1;
@@ -107,34 +125,48 @@ export default function FileBrowser(
               }
             >
               <For each={entries()}>
-                {(e) => (
-                  <div
-                    class="flex gap-2 items-center"
-                    style={`padding:0.375rem 0.75rem; border-bottom:1px solid #0f172a;${
-                      e.type === "directory" ? "cursor:pointer" : ""
-                    }`}
-                    onClick={() => {
-                      if (e.type === "directory") navigate(e.name);
-                    }}
-                  >
-                    <span>
-                      {e.type === "directory" ? "\u{1F4C1}" : "\u{1F4C4}"}
-                    </span>
-                    <span
-                      class="flex-1"
-                      style={{
-                        color: e.type === "directory" ? "#60a5fa" : "#e2e8f0",
-                      }}
-                    >
-                      {e.name}
-                    </span>
-                    <Show when={e.type === "file"}>
-                      <span class="mono muted" style="font-size:0.75rem">
-                        {formatSize(e.size)}
+                {(e) => {
+                  const content = () => (
+                    <>
+                      <span>
+                        {e.type === "directory" ? "\u{1F4C1}" : "\u{1F4C4}"}
                       </span>
-                    </Show>
-                  </div>
-                )}
+                      <span
+                        class="flex-1"
+                        style={{
+                          "min-width": "0",
+                          "overflow-wrap": "anywhere",
+                          color: e.type === "directory" ? "#60a5fa" : "#e2e8f0",
+                        }}
+                      >
+                        {e.name}
+                      </span>
+                      <Show when={e.type === "file"}>
+                        <span class="mono muted" style="font-size:0.75rem">
+                          {formatSize(e.size)}
+                        </span>
+                      </Show>
+                    </>
+                  );
+                  const rowStyle =
+                    "padding:0.375rem 0.75rem; border-bottom:1px solid #0f172a;";
+                  return e.type === "directory"
+                    ? (
+                      <button
+                        type="button"
+                        class="flex gap-2 items-center"
+                        style={`${rowStyle}width:100%; border-top:0; border-left:0; border-right:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer`}
+                        onClick={() => navigate(e.name)}
+                      >
+                        {content()}
+                      </button>
+                    )
+                    : (
+                      <div class="flex gap-2 items-center" style={rowStyle}>
+                        {content()}
+                      </div>
+                    );
+                }}
               </For>
             </Show>
           </Show>
