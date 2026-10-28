@@ -1539,73 +1539,76 @@ test("sandbox host published MCP lists computer tools with published auth", asyn
   }
 });
 
-test("sandbox host published MCP accepts exact Interface OAuth and uses stable owner scope", async () => {
-  const { env, doNames } = createEnv({
-    publishedMcpAuthToken: null,
-    interfaceOAuth: true,
-  });
-  const userInfo = {
-    token_use: "interface_oauth",
-    sub: "svc_agent",
-    aud: "https://sandbox-host.test/mcp",
-    scope: "mcp.invoke",
-    takosumi: {
-      workspace_id: "ws_interface",
-      capsule_id: "cap_interface",
-      interface_id: "if_computer_mcp",
-      interface_binding_id: "ifb_agent",
-      interface_resolved_revision: 2,
-    },
-  };
+for (const workspaceMode of ["legacy", "config_only", "capsule_only"] as const) {
+  test(`sandbox host published MCP accepts exact Interface OAuth with ${workspaceMode} context`, async () => {
+    const { env, doNames } = createEnv({
+      publishedMcpAuthToken: null,
+      interfaceOAuth: true,
+    });
+    if (workspaceMode === "capsule_only") delete env.APP_WORKSPACE_ID;
+    const userInfo = {
+      token_use: "interface_oauth",
+      sub: "svc_agent",
+      aud: "https://sandbox-host.test/mcp",
+      scope: "mcp.invoke",
+      takosumi: {
+        ...(workspaceMode === "legacy" ? { workspace_id: "ws_interface" } : {}),
+        capsule_id: "cap_interface",
+        interface_id: "if_computer_mcp",
+        interface_binding_id: "ifb_agent",
+        interface_resolved_revision: 2,
+      },
+    };
 
-  await withFetch(async (input, init) => {
-    expect(fetchRequestUrl(input)).toBe(
-      "https://accounts.example.test/oauth/userinfo",
-    );
-    expect(new Headers(init?.headers).get("authorization")).toMatch(
-      /^Bearer taksrv_/u,
-    );
-    return Response.json(userInfo);
-  }, async () => {
-    const ready = await fetchWorker(env, "/readyz");
-    expect(ready.status).toBe(200);
+    await withFetch(async (input, init) => {
+      expect(fetchRequestUrl(input)).toBe(
+        "https://accounts.example.test/oauth/userinfo",
+      );
+      expect(new Headers(init?.headers).get("authorization")).toMatch(
+        /^Bearer taksrv_/u,
+      );
+      return Response.json(userInfo);
+    }, async () => {
+      const ready = await fetchWorker(env, "/readyz");
+      expect(ready.status).toBe(200);
 
-    for (const token of ["taksrv_first", "taksrv_rotated"]) {
-      const response = await fetchWorker(env, "/mcp", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: token,
-          method: "tools/call",
-          params: {
-            name: "computer_session_create",
-            arguments: {
-              session_id: "shared-session",
-              space_id: "spoofed-space",
-              user_id: "spoofed-user",
-            },
+      for (const token of ["taksrv_first", "taksrv_rotated"]) {
+        const response = await fetchWorker(env, "/mcp", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
-        }),
-      });
-      expect(response.status).toBe(200);
-      const payload = await response.json() as {
-        result: { content: Array<{ text: string }> };
-      };
-      expect(JSON.parse(payload.result.content[0]!.text)).toMatchObject({
-        session_id: "shared-session",
-        space_id: "ws_interface",
-        user_id: "svc_agent",
-      });
-    }
-  });
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: token,
+            method: "tools/call",
+            params: {
+              name: "computer_session_create",
+              arguments: {
+                session_id: "shared-session",
+                space_id: "spoofed-space",
+                user_id: "spoofed-user",
+              },
+            },
+          }),
+        });
+        expect(response.status).toBe(200);
+        const payload = await response.json() as {
+          result: { content: Array<{ text: string }> };
+        };
+        expect(JSON.parse(payload.result.content[0]!.text)).toMatchObject({
+          session_id: "shared-session",
+          space_id: workspaceMode === "capsule_only" ? "" : "ws_interface",
+          user_id: "svc_agent",
+        });
+      }
+    });
 
-  expect(new Set(doNames.filter((name) => name.includes("shared-session"))).size)
-    .toBe(1);
-});
+    expect(new Set(doNames.filter((name) => name.includes("shared-session"))).size)
+      .toBe(1);
+  });
+}
 
 test("sandbox host published MCP requires published auth", async () => {
   const { env, mcpCalls } = createEnv();

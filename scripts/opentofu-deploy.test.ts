@@ -84,12 +84,25 @@ describe("OpenTofu deploy configuration", () => {
     ).toThrow("closed deployment-config shape");
     expect(() =>
       parseOpenTofuDeployConfig(JSON.stringify({ ...valid, capsuleId: "" })),
-    ).toThrow("workspaceId and capsuleId");
+    ).toThrow("accountsIssuer and capsuleId");
     expect(() =>
       parseOpenTofuDeployConfig(
         JSON.stringify({ ...valid, containerImage: "oven/bun:1" }),
       ),
     ).toThrow("immutable image digest");
+  });
+
+  test("supports Capsule-only Interface OAuth installation context", () => {
+    const parsed = parseOpenTofuDeployConfig(JSON.stringify({ ...valid, workspaceId: "" }));
+    const config = createWranglerConfig(parsed, {
+      repoRoot: "/repo", configDirectory: "/repo/.wrangler/opentofu/test",
+    });
+    expect(config.vars).toMatchObject({
+      APP_CAPSULE_ID: "cap_test", OIDC_ISSUER_URL: "https://accounts.example.test",
+    });
+    expect(config.vars).not.toHaveProperty("APP_WORKSPACE_ID");
+    expect(() => parseOpenTofuDeployConfig(JSON.stringify({ ...valid, workspaceId: "", accountsIssuer: "" })))
+      .toThrow("accountsIssuer and capsuleId");
   });
 
   test("keeps secrets out of config and requires the two runtime-internal bearers", () => {

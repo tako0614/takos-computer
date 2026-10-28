@@ -38,7 +38,64 @@ function options(value: unknown = claims) {
 }
 
 describe("Takos Computer Interface OAuth", () => {
-  test("accepts exact mcp.invoke audience and owner evidence", async () => {
+  test("accepts Capsule-only machine evidence without an app role", async () => {
+    const { workspace_id: _legacyWorkspace, ...appEvidence } = claims.takosumi;
+    const appClaims = { ...claims, takosumi: appEvidence };
+    for (const expectedWorkspaceId of [undefined, "ws_test"]) {
+      const result = await authorizeInterfaceOAuthBearer(
+        new Request(audience, { method: "POST" }),
+        "taksrv_test",
+        "mcp.invoke",
+        { ...options(appClaims), expectedWorkspaceId },
+      );
+      expect(result).toMatchObject({
+        subject: "svc_agent", capsuleId: "cap_test", permission: "mcp.invoke",
+      });
+      expect(result?.workspaceId).toBe(expectedWorkspaceId);
+    }
+  });
+
+  test("validates optional workspace evidence without deriving app authority from it", async () => {
+    const config = { ...options(), expectedWorkspaceId: undefined };
+    expect(await authorizeInterfaceOAuthBearer(
+      new Request(audience), "taksrv_test", "mcp.invoke", config,
+    )).toMatchObject({ capsuleId: "cap_test" });
+    for (const workspaceId of [null, "", "bad workspace", [], 7]) {
+      expect(await authorizeInterfaceOAuthBearer(
+        new Request(audience), "taksrv_test", "mcp.invoke", {
+          ...options({ ...claims, takosumi: { ...claims.takosumi, workspace_id: workspaceId } }),
+          expectedWorkspaceId: undefined,
+        },
+      )).toBeNull();
+    }
+  });
+
+  test("Capsule-only grants still require exact app capability evidence", async () => {
+    const { workspace_id: _legacyWorkspace, ...appEvidence } = claims.takosumi;
+    for (const mutation of [
+      { ...claims, token_use: "access_token", takosumi: appEvidence },
+      { ...claims, aud: "https://foreign.example.test/mcp", takosumi: appEvidence },
+      { ...claims, scope: "mcp.invoke mcp.admin", takosumi: appEvidence },
+      ...[
+        { capsule_id: undefined }, { capsule_id: "cap_other" },
+        { interface_id: "" }, { interface_binding_id: "" },
+        { interface_resolved_revision: 0 }, { interface_resolved_revision: 1.5 },
+      ].map((evidence) => ({ ...claims, takosumi: { ...appEvidence, ...evidence } })),
+    ]) {
+      expect(await authorizeInterfaceOAuthBearer(
+        new Request(audience), "taksrv_test", "mcp.invoke", {
+          ...options(mutation), expectedWorkspaceId: undefined,
+        },
+      )).toBeNull();
+    }
+    expect(await authorizeInterfaceOAuthBearer(
+      new Request(audience), "taksrv_test", "mcp.invoke", {
+        ...options(), expectedCapsuleId: undefined, expectedWorkspaceId: undefined,
+      },
+    )).toBeNull();
+  });
+
+  test("accepts exact mcp.invoke audience and capability evidence", async () => {
     const result = await authorizeInterfaceOAuthBearer(
       new Request(audience, { method: "POST" }),
       "taksrv_test",
@@ -98,6 +155,13 @@ describe("Takos Computer Interface OAuth", () => {
   });
 
   test("configuration is fail-closed", () => {
+    expect(hasValidInterfaceOAuthConfiguration({
+      issuerUrl: "https://accounts.example.test", audience, capsuleId: "cap_test",
+    })).toBe(true);
+    expect(hasValidInterfaceOAuthConfiguration({
+      issuerUrl: "https://accounts.example.test", audience,
+      capsuleId: "cap_test", workspaceId: "bad workspace",
+    })).toBe(false);
     expect(
       hasValidInterfaceOAuthConfiguration({
         issuerUrl: "https://accounts.example.test",

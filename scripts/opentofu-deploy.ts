@@ -204,9 +204,13 @@ export function parseOpenTofuDeployConfig(raw: string): OpenTofuDeployConfig {
       `${CONFIG_ENV}.accountsIssuer`,
     );
   }
-  const ownerValues = [config.workspaceId, config.capsuleId];
-  if (ownerValues.some(Boolean) && !ownerValues.every(Boolean)) {
-    throw new Error("workspaceId and capsuleId must be configured together");
+  if (
+    (config.workspaceId || config.capsuleId) &&
+    (!config.accountsIssuer || !config.capsuleId)
+  ) {
+    throw new Error(
+      "Interface OAuth requires accountsIssuer and capsuleId; workspaceId is optional",
+    );
   }
   config.oidcRedirectUri = optionalHttpsUrl(
     config.oidcRedirectUri,
@@ -241,10 +245,8 @@ export function createWranglerConfig(
     MAX_SANDBOX_SESSIONS_PER_USER: String(config.maxUserSessions),
   };
   if (config.accountsIssuer) vars.OIDC_ISSUER_URL = config.accountsIssuer;
-  if (config.workspaceId && config.capsuleId) {
-    vars.APP_WORKSPACE_ID = config.workspaceId;
-    vars.APP_CAPSULE_ID = config.capsuleId;
-  }
+  if (config.workspaceId) vars.APP_WORKSPACE_ID = config.workspaceId;
+  if (config.capsuleId) vars.APP_CAPSULE_ID = config.capsuleId;
   if (config.appOidc) {
     vars.APP_AUTH_REQUIRED = "1";
     vars.OIDC_CLIENT_ID = config.oidcClientId;

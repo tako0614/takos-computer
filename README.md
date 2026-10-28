@@ -293,7 +293,7 @@ Durable Object で管理されます。各セッションは個別のコンテ�
 | `OIDC_CLIENT_SECRET`         | _(none)_    | 外部confidential OIDC client用の任意secret。Takosumi Accounts public PKCE clientでは設定しない                                               |
 | `OIDC_REDIRECT_URI`          | _(derived)_ | OIDC callback URI。managed install では Cloud が確定した redirect URI を inject。standalone/dev のみ trusted configured base URL から derive |
 | `MCP_URL`                    | _(none)_    | Interface OAuth の exact resource audience (`mcp_url` Output と同じ URL)                                                                     |
-| `APP_WORKSPACE_ID`           | _(none)_    | Interface OAuth evidence で照合する owning Workspace                                                                                         |
+| `APP_WORKSPACE_ID`           | _(none)_    | 任意の旧 Workspace context。Interface OAuth evidence に workspace_id がある場合だけ一致を照合                                                |
 | `APP_CAPSULE_ID`             | _(none)_    | GUI OIDC sign-in と Interface OAuth evidence で照合する owning Capsule                                                                         |
 | `MCP_ALLOW_UNAUTHENTICATED`  | `false`     | `true` でローカル / 開発時のみ `MCP_AUTH_TOKEN` 無しでサンドボックスサービス `/mcp` を許可                                                   |
 | `TAKOS_TOKEN`                | _(none)_    | サンドボックスサービスに渡せる Takos API bearer トークン。シェル子プロセスは `allow_takos_token` が設定された場合のみ継承                    |
@@ -312,6 +312,14 @@ GUI OIDC は署名済みの `takosumi.capsule_id` を `APP_CAPSULE_ID` と照合
 `appRole` / `canManageApp` はログイン時点の表示用情報で、session の有効期限は
 最大 12 時間です。このアプリは access token を保存せず、役割の変更・削除を
 オンラインで再確認しません。これらの値を現在の管理操作の認可に使ってはいけません。
+
+Interface OAuth は issuer、`APP_CAPSULE_ID`、`MCP_URL` があれば有効になります。
+machine capability は exact audience / `mcp.invoke` scope / Capsule / Interface /
+binding / 正の revision で検証し、`app_role` は要求しません。旧 `workspace_id` evidence
+は省略でき、明示される場合は形式を検証し、`APP_WORKSPACE_ID` 設定があれば一致も
+確認します。Capsule の期待値を token の claim から決めることはありません。
+Workspace 設定のない sandbox の旧 space context は空文字になり、caller が指定した
+space/user は利用しません。
 
 ## Cloudflare Worker Bindings
 
@@ -370,8 +378,8 @@ repository内のDockerfileは `linux/amd64` のBun 1.3.14 image manifestをdiges
 managed install のoperatorは、このGit sourceとmodule path `.`だけに一致する
 service-side `InstallConfig` を先に用意する必要があります。そのconfigは少なくとも:
 
-- `enable_cloudflare_resources = true` を固定し、`app_workspace_id` /
-  `app_capsule_id` をinstall contextから注入する
+- `enable_cloudflare_resources = true` を固定し、`app_capsule_id` を install
+  context から注入する。`app_workspace_id` は旧環境との互換用の任意設定
 - GUI OIDCを有効にする場合はAccountsのpublic PKCE登録からAccounts URL、issuer、
   client id、登録済みredirect URIを写像し、存在しないclient secretを要求しない。
   callbackはcanonical public URLの `/gui/api/auth/callback` と一致させる
@@ -386,7 +394,7 @@ service-side `InstallConfig` を先に用意する必要があります。その
 policyで受理した後、実際のInterface / BindingはDB-owned stateから確定します。
 manifestや通常のURL Outputだけでアクセス権が付与されることはありません。
 
-Workspace / Capsule contextの注入とGUI OIDCの有効化は引き続き正当なoperator設定が
+Capsule contextの注入とGUI OIDCの有効化は引き続き正当なoperator設定が
 必要です。また、現root moduleにはWranglerを呼ぶ `local-exec` があり、one-touch
 installerの現compatibility policyでは未対応です。launcherの宣言を、実行adapterや
 認証設定が整った証明、導入成功の証明として扱いません。このmoduleもcredentialを

@@ -164,7 +164,7 @@ variable "takosumi_accounts_issuer_url" {
 }
 
 variable "app_workspace_id" {
-  description = "Owning Takosumi Workspace id required for Interface OAuth evidence."
+  description = "Optional legacy Takosumi Workspace context for Interface OAuth evidence."
   type        = string
   default     = ""
 }
@@ -251,7 +251,6 @@ locals {
   accounts_issuer    = trimsuffix(trimspace(var.takosumi_accounts_issuer_url), "/")
   interface_oauth_enabled = (
     local.accounts_issuer != "" &&
-    trimspace(var.app_workspace_id) != "" &&
     trimspace(var.app_capsule_id) != "" &&
     local.mcp_url != null
   )
@@ -362,15 +361,15 @@ resource "terraform_data" "sandbox_host" {
 
     precondition {
       condition     = trimspace(var.published_mcp_auth_token) != "" || local.interface_oauth_enabled
-      error_message = "Configure either published_mcp_auth_token for direct/self-host MCP or Accounts issuer + app_workspace_id + app_capsule_id for Interface OAuth."
+      error_message = "Configure either published_mcp_auth_token for direct/self-host MCP or Accounts issuer + app_capsule_id for Interface OAuth."
     }
 
     precondition {
       condition = (
         (trimspace(var.app_workspace_id) == "" && trimspace(var.app_capsule_id) == "") ||
-        (local.accounts_issuer != "" && trimspace(var.app_workspace_id) != "" && trimspace(var.app_capsule_id) != "")
+        (local.accounts_issuer != "" && trimspace(var.app_capsule_id) != "")
       )
-      error_message = "Interface OAuth ownership requires Accounts issuer, app_workspace_id, and app_capsule_id together."
+      error_message = "Interface OAuth requires Accounts issuer and app_capsule_id; app_workspace_id is optional legacy context."
     }
 
     precondition {
