@@ -70,6 +70,7 @@ export function mcpOptionsPreflight(): Response {
 /** Result shape returned by an MCP tool handler. */
 export type McpToolResult = {
   content: Array<{ type: "text"; text: string }>;
+  isError?: boolean;
 };
 
 /** Wrap a plain string in the MCP tool-result text envelope. */

@@ -1,19 +1,76 @@
-import { createSignal, Show } from "solid-js";
+import {
+  createEffect,
+  createSignal,
+  createUniqueId,
+  onCleanup,
+  Show,
+} from "solid-js";
 import { useI18n } from "../i18n.ts";
 
 export default function CreateModal(props: {
   open: boolean;
   onClose: () => void;
-  onCreate: (
-    payload: { sessionId: string; spaceId: string; userId: string },
-  ) => Promise<void>;
+  onCreate: (payload: {
+    sessionId: string;
+    spaceId: string;
+    userId: string;
+  }) => Promise<void>;
 }) {
   const { t } = useI18n();
+  const id = createUniqueId();
   const [loading, setLoading] = createSignal(false);
   let formRef!: HTMLFormElement;
+  let dialogRef!: HTMLDivElement;
+  const close = () => {
+    if (!loading()) props.onClose();
+  };
+
+  createEffect(() => {
+    if (!props.open) return;
+    const previous = document.activeElement;
+    let open = true;
+    const focusable = () =>
+      Array.from(
+        dialogRef.querySelectorAll<HTMLElement>(
+          'input:not([disabled]), button:not([disabled]), [href], [tabindex="0"]',
+        ),
+      );
+    queueMicrotask(() => {
+      if (open) focusable()[0]?.focus();
+    });
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      } else if (event.key === "Tab") {
+        const fields = focusable();
+        const first = fields[0];
+        const last = fields[fields.length - 1];
+        if (
+          !dialogRef.contains(document.activeElement) ||
+          (event.shiftKey && document.activeElement === first)
+        ) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", handleKey, true);
+    onCleanup(() => {
+      open = false;
+      document.removeEventListener("keydown", handleKey, true);
+      if (previous instanceof HTMLElement && previous.isConnected)
+        previous.focus();
+    });
+  });
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
+    if (loading()) return;
     setLoading(true);
     const fd = new FormData(formRef);
     const payload = {
@@ -41,31 +98,47 @@ export default function CreateModal(props: {
       <div
         class="modal-overlay"
         onClick={(e) => {
-          if (e.target === e.currentTarget) props.onClose();
+          if (e.target === e.currentTarget) close();
         }}
       >
-        <div class="modal-content">
-          <h2 style="font-size:1rem; font-weight:600; margin-bottom:1rem">
+        <div
+          class="modal-content"
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={`${id}-title`}
+          aria-busy={loading()}
+        >
+          <h2
+            id={`${id}-title`}
+            style="font-size:1rem; font-weight:600; margin-bottom:1rem"
+          >
             {t("createSandboxSession")}
           </h2>
           <form ref={formRef} onSubmit={handleSubmit}>
-            <label>{t("sessionId")}</label>
+            <label for={`${id}-session`}>{t("sessionId")}</label>
             <input
+              id={`${id}-session`}
               name="sessionId"
+              readOnly={loading()}
               required
               placeholder={t("sessionIdPlaceholder")}
             />
 
-            <label>{t("spaceId")}</label>
+            <label for={`${id}-space`}>{t("spaceId")}</label>
             <input
+              id={`${id}-space`}
               name="spaceId"
+              readOnly={loading()}
               required
               placeholder={t("spaceIdPlaceholder")}
             />
 
-            <label>{t("userId")}</label>
+            <label for={`${id}-user`}>{t("userId")}</label>
             <input
+              id={`${id}-user`}
               name="userId"
+              readOnly={loading()}
               required
               placeholder={t("userIdPlaceholder")}
             />
@@ -77,7 +150,8 @@ export default function CreateModal(props: {
               <button
                 type="button"
                 class="btn btn-ghost"
-                onClick={props.onClose}
+                disabled={loading()}
+                onClick={close}
               >
                 {t("cancel")}
               </button>

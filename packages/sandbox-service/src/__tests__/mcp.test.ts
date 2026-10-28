@@ -88,3 +88,49 @@ test("MCP process_kill rejects unmanaged pids", async () => {
     await proc.exited;
   }
 });
+
+test("MCP file_list returns path jail failures as tool errors", async () => {
+  const handler = createMcpRequestHandler(
+    { shell: new ShellManager(process.cwd()), fs: new FsManager(process.cwd()) },
+    MCP_AUTH_TOKEN,
+  );
+
+  const res = await handler(createRequest({
+    jsonrpc: "2.0",
+    method: "tools/call",
+    params: { name: "file_list", arguments: { path: "../outside" } },
+    id: 3,
+  }));
+
+  expect(res.status).toEqual(200);
+  const body = await res.json() as {
+    result?: { isError?: boolean; content: Array<{ type: "text"; text: string }> };
+    error?: unknown;
+  };
+  expect(body.error).toBeUndefined();
+  expect(body.result?.isError).toBe(true);
+  expect(body.result?.content[0]?.text).toContain("outside workspace");
+});
+
+test("MCP shell nonzero exit remains a successful tool result", async () => {
+  const handler = createMcpRequestHandler(
+    { shell: new ShellManager(process.cwd()), fs: new FsManager(process.cwd()) },
+    MCP_AUTH_TOKEN,
+  );
+
+  const res = await handler(createRequest({
+    jsonrpc: "2.0",
+    method: "tools/call",
+    params: { name: "shell_exec", arguments: { command: "exit 7" } },
+    id: 4,
+  }));
+
+  const body = await res.json() as {
+    result?: { isError?: boolean; content: Array<{ type: "text"; text: string }> };
+  };
+  const result = JSON.parse(body.result?.content[0]?.text ?? "{}") as {
+    exit_code?: number;
+  };
+  expect(body.result?.isError).toBeUndefined();
+  expect(result.exit_code).toEqual(7);
+});
