@@ -51,7 +51,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function exactKeys(value: Record<string, unknown>): boolean {
   const actual = Object.keys(value).sort();
-  const expected = [...DEPLOY_KEYS].sort();
+  const expected = DEPLOY_KEYS.filter(
+    (key) => key !== "workspaceId" || Object.hasOwn(value, key),
+  ).sort();
   return (
     actual.length === expected.length &&
     actual.every((key, index) => key === expected[index])
@@ -158,7 +160,9 @@ export function parseOpenTofuDeployConfig(raw: string): OpenTofuDeployConfig {
     compatibilityDate: requiredString(decoded, "compatibilityDate"),
     sourceDigest: requiredString(decoded, "sourceDigest"),
     accountsIssuer: requiredString(decoded, "accountsIssuer"),
-    workspaceId: requiredString(decoded, "workspaceId"),
+    workspaceId: Object.hasOwn(decoded, "workspaceId")
+      ? requiredString(decoded, "workspaceId")
+      : "",
     capsuleId: requiredString(decoded, "capsuleId"),
     appOidc: requiredBoolean(decoded, "appOidc"),
     oidcClientId: requiredString(decoded, "oidcClientId"),

@@ -93,7 +93,11 @@ describe("OpenTofu deploy configuration", () => {
   });
 
   test("supports Capsule-only Interface OAuth installation context", () => {
-    const parsed = parseOpenTofuDeployConfig(JSON.stringify({ ...valid, workspaceId: "" }));
+    const { workspaceId: _legacyWorkspace, ...capsuleOnly } = valid;
+    const parsed = parseOpenTofuDeployConfig(JSON.stringify(capsuleOnly));
+    expect(parsed.workspaceId).toBe("");
+    expect(parseOpenTofuDeployConfig(JSON.stringify({ ...capsuleOnly, workspaceId: "" })).workspaceId)
+      .toBe("");
     const config = createWranglerConfig(parsed, {
       repoRoot: "/repo", configDirectory: "/repo/.wrangler/opentofu/test",
     });
