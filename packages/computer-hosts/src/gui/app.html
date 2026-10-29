@@ -10,6 +10,9 @@
     >
     <meta name="robots" content="noindex, nofollow">
     <meta name="theme-color" content="#0f172a">
+    <!-- Home-screen install. The Worker serves these before the /gui/* auth gate. -->
+    <link rel="manifest" href="/gui/manifest.webmanifest">
+    <link rel="apple-touch-icon" sizes="180x180" href="/gui/icons/apple-touch-icon.png">
     <script>
       /* Pre-hydration language init: mirrors i18n.ts detectInitialLanguage
          (takos-lang storage, ja* browser => ja, else en) so <html lang> is

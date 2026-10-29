@@ -1,0 +1,32 @@
+{
+  "id": "/gui",
+  "name": "Takos Computer",
+  "short_name": "Computer",
+  "description": "Dashboard for the Takos Computer containerized sandbox environment for AI agents.",
+  "lang": "en",
+  "start_url": "/gui",
+  "scope": "/gui",
+  "display": "standalone",
+  "theme_color": "#0f172a",
+  "background_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/gui/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/gui/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/gui/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

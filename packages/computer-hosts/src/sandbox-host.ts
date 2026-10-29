@@ -20,7 +20,7 @@ import {
   guiSessionCanCreateSandbox,
   registerGuiAuthRoutes,
 } from "./app-auth.ts";
-import { appHtml } from "./gui/assets.ts";
+import { appHtml, webAppIcons, webAppManifest } from "./gui/assets.ts";
 import { computerIconSvg } from "./gui/icon.ts";
 import {
   getDOStub,
@@ -247,6 +247,26 @@ function serveComputerIcon(): Response {
 
 app.get("/icons/computer.svg", serveComputerIcon);
 app.get("/gui/icons/computer.svg", serveComputerIcon);
+
+// Home-screen install files. Browsers fetch the manifest and its icons without
+// credentials, so these are registered before the auth-gated `/gui/*` route.
+app.get("/gui/manifest.webmanifest", () =>
+  new Response(webAppManifest, {
+    headers: {
+      "Content-Type": "application/manifest+json; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  }));
+for (const [path, base64] of Object.entries(webAppIcons)) {
+  const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+  app.get(path, () =>
+    new Response(bytes, {
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=86400",
+      },
+    }));
+}
 registerGuiAuthRoutes(app);
 app.get("/gui", serveGuiApp);
 app.get("/gui/", serveGuiApp);

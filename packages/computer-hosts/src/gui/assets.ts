@@ -6,6 +6,6 @@
  * support.
  */
 
-import { appHtml } from "./assets.generated.ts";
+import { appHtml, webAppIcons, webAppManifest } from "./assets.generated.ts";
 
-export { appHtml };
+export { appHtml, webAppIcons, webAppManifest };
