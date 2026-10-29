@@ -22,7 +22,7 @@ function restoredDirectory(state: unknown, sessionId: string): string {
 }
 
 export default function SandboxViewer() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const params = useParams<{ id: string }>();
   const sessionId = () => params.id;
   const location = useLocation();
@@ -66,6 +66,7 @@ export default function SandboxViewer() {
   onCleanup(() => clearInterval(timer));
 
   const badgeClass = () => {
+    if (status.loading || !status()) return "badge";
     const s = status()?.status;
     return s === "active"
       ? "badge badge-active"
@@ -75,11 +76,12 @@ export default function SandboxViewer() {
   };
 
   const statusLabel = () => {
+    if (status.loading) return t("loading");
     const value = status()?.status;
     if (value === "active" || value === "starting" || value === "stopped") {
       return t(value);
     }
-    return t("loading");
+    return language() === "ja" ? "状態を取得できません" : "Status unavailable";
   };
 
   const destroySession = async () => {
@@ -107,7 +109,20 @@ export default function SandboxViewer() {
         </span>
         <div class="flex-1" />
         <LanguageSwitcher />
-        <span class={badgeClass()}>{statusLabel()}</span>
+        <span class={badgeClass()} role="status" aria-live="polite">
+          {statusLabel()}
+        </span>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          aria-disabled={status.loading}
+          style={{ opacity: status.loading ? 0.5 : 1 }}
+          onClick={() => {
+            if (!status.loading) setStatusVersion((v) => v + 1);
+          }}
+        >
+          {language() === "ja" ? "状態を更新" : "Refresh status"}
+        </button>
         <button
           type="button"
           class="btn btn-danger btn-sm"
