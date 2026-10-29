@@ -164,7 +164,7 @@ variable "takosumi_accounts_issuer_url" {
 }
 
 variable "app_workspace_id" {
-  description = "Optional legacy Takosumi Workspace context for Interface OAuth evidence."
+  description = "Optional legacy Takosumi Workspace context for GUI membership and Interface OAuth evidence."
   type        = string
   default     = ""
 }
@@ -367,9 +367,9 @@ resource "terraform_data" "sandbox_host" {
     precondition {
       condition = (
         (trimspace(var.app_workspace_id) == "" && trimspace(var.app_capsule_id) == "") ||
-        (local.accounts_issuer != "" && trimspace(var.app_capsule_id) != "")
+        (local.accounts_issuer != "" && (trimspace(var.app_capsule_id) != "" || var.enable_app_oidc))
       )
-      error_message = "Interface OAuth requires Accounts issuer and app_capsule_id; app_workspace_id is optional legacy context."
+      error_message = "App context requires Accounts issuer and app_capsule_id for Interface OAuth, or enable_app_oidc for legacy Workspace sign-in."
     }
 
     precondition {

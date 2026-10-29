@@ -1,37 +1,58 @@
-# TASK-0118 Phase 7: per-app sign-in claims
+# TASK-0118 Phase 7: app sign-in and funded sandbox creation
 
-- Scope: takos-computer GUI OIDC claims/session readback and machine Interface
-  OAuth capability validation, including Capsule-only OpenTofu installation.
-- Authority: the verified ID token's `takosumi.capsule_id` must match the
-  install-context `APP_CAPSULE_ID`; `app_role` accepts only `owner` or `member`.
-  A matching Capsule without a role is an ordinary app user. Foreign Capsules
-  and explicit malformed roles fail authentication, including on session reads.
-- Compatibility: claim-absent legacy sessions and identity fields remain valid.
-  Legacy `role` does not grant new management authority.
-- App management: `/gui/api/auth/me` exposes `capsuleId`, `appRole`, and
-  `canManageApp`. Existing per-user sandbox ACLs remain authoritative.
-  The role is a display-only login snapshot with a maximum 12-hour session
-  lifetime. No access token is retained; no live role refresh or revocation
-  lookup exists. The snapshot must not authorize current management operations.
-- Runtime wiring: `main.tf` already passes install-context `app_capsule_id` and
-  `app_workspace_id` to the OpenTofu deploy adapter, which injects both Worker
-  variables. Capsule-only installs now inject `APP_CAPSULE_ID` independently;
-  the Workspace variable is optional legacy context. Interface OAuth always
-  requires the configured exact Capsule, audience, scope, Interface, binding,
-  and positive revision; it does not require an app role. Workspace evidence
-  may be omitted even with a configured legacy Workspace, and when supplied
-  must be bounded and match that configuration if present.
-- Coordination: PR #9 and PR #8 are merged. Their active local worktrees were
-  clean and their owned files matched `origin/main` before this change. No
-  unmerged overlap was found; no TASK-0117 worktree was edited.
-- Validation: focused auth/session and deploy-configuration tests plus static
-  checks locally; the full repository gate runs in CI under the Phase 7 resource
-  constraint. No deploy, live sign-in, live database, provider, or secret changes.
-  Local results: 73 focused tests, `bun run typecheck`, and
-  `git diff --check` pass. Tests cover verified OIDC callbacks, current Capsule
-  rechecks, malformed roles, legacy compatibility, and unchanged sandbox ACLs.
-  Capsule-only configuration/capability regression was RED before the change;
-  full CI also plans a Capsule-only installation without a direct bearer.
-- Independent review: malformed explicit Takosumi claim envelopes now fail
-  authentication instead of receiving legacy ordinary-user compatibility.
-- Reversal: revert this commit; no schema or durable-state migration is required.
+- Scope: takos-computer GUI OIDC claims/session readback, funded GUI sandbox
+  creation, machine Interface OAuth, and Capsule/legacy OpenTofu context.
+- Authority: configured `APP_CAPSULE_ID` is the exact Capsule binding. Explicit
+  `app_role` accepts only `owner` or `member`. A foreign Capsule or malformed
+  explicit role/envelope fails authentication. A matching ordinary identity
+  may sign in without gaining permission to create a funded sandbox.
+- Current Accounts compatibility: the verified ID token currently carries
+  `takosumi.{capsule_id,workspace_id,role}` and top-level string-array
+  `workspace_memberships`, without `app_role`. When `app_role` is absent, only
+  the configured matching `APP_WORKSPACE_ID` grants legacy membership. Legacy
+  owner maps to owner; admin/member/viewer retain their previous ability to
+  create a sandbox as compatible members. Capsule-scoped compatibility also
+  requires the matching nested Workspace id. A matching membership array alone
+  grants member only in legacy Capsule-claim-absent or Capsule-unconfigured
+  context, never owner. Malformed or conflicting supplied legacy evidence
+  fails closed. An ordinary identity with no matching membership gets no grant.
+- Legacy OIDC: when `APP_CAPSULE_ID` is unset, the issuer's valid Capsule claim
+  is ignored and cannot define the expected binding. Configured Workspace
+  membership remains supported. OpenTofu permits this with `enable_app_oidc`
+  and a direct MCP bearer; it does not enable machine Interface OAuth.
+- Funded creation: the shared create handler checks GUI app/legacy membership
+  before parsing the payload or accessing the Container/quota/index. A normal
+  signed-in user gets 403. Only an operator's explicit Worker setting
+  `APP_ALLOW_PUBLIC_SANDBOX_CREATION=true` opens creation to other authenticated
+  users. It does not allow anonymous creation. Host-admin/trusted-router and
+  machine authorities keep their existing boundaries.
+- Session readback: `/gui/api/auth/me` exposes `capsuleId`, `appRole`, and
+  `canManageApp`. Membership is a login snapshot with a maximum 12-hour session
+  lifetime, used for sandbox creation. No access token is retained and there
+  is no live role refresh or revocation lookup. Each request rechecks configured
+  Capsule and compatibility Workspace bindings. A legacy-derived grant keeps
+  its Workspace source marker, so a configuration change cannot silently turn
+  it into a direct app role. Old cookies without membership need a new sign-in
+  for creation; ordinary identities retain access to their own existing sessions.
+- Sandbox ownership: app membership never grants another user's sandbox. GUI
+  create still derives user/space from the sealed session; list/get/delete/MCP
+  retain the per-user ACL and reserved published-MCP namespace boundary.
+- Interface OAuth: issuer, exact configured Capsule/audience/scope/Interface/
+  binding, and positive revision remain mandatory; an app role is not required.
+  Optional Workspace evidence is validated when supplied. Capsule-only machine
+  sandboxes keep empty legacy space context and ignore caller-supplied owners.
+- Coordination: only PR #10 is open. Remote main `ff1407d` (TASK-0117 file-list
+  UX, PR #11) was merged normally and its GUI changes were preserved. Existing
+  remote TASK-0117/codex heads were inventoried; no foreign worktree was edited.
+  The parent owns central coordination records.
+- Validation: 82 focused tests across app claims, sandbox routes, Interface
+  OAuth, and deploy config pass, alongside TypeScript, `git diff --check`, and
+  `tofu fmt -check main.tf`. Signed OIDC callback cases exercise the real current
+  Accounts shape both with and without a configured Capsule, malformed and
+  mismatched evidence, and binding changes. Creation tests prove ordinary
+  identity is refused before any DO access, explicit opt-in stays authenticated,
+  and member creates retain user ownership. The Workspace-only deploy-config
+  regression failed before its fix. Full repository/build/Container/OpenTofu
+  checks run in CI under the Phase 7 resource constraint.
+- Reversal: revert the change; there is no persisted schema migration. No
+  deployment, live sign-in, live database, provider, or secret mutation occurred.

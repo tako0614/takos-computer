@@ -287,13 +287,14 @@ Durable Object で管理されます。各セッションは個別のコンテ�
 | `SANDBOX_HOST_AUTH_TOKEN`    | _(none)_    | サンドボックスホストの管理 / セッションルートを保護する bearer トークン。サンドボックスコンテナには注入しない                                |
 | `MCP_AUTH_TOKEN`             | _(none)_    | ワーカー↔コンテナの `/mcp` 認証トークン。サンドボックスサービスに注入されるが、シェル子プロセスからは除去される                              |
 | `APP_AUTH_REQUIRED`          | `0`         | `1` で `/gui` を Takosumi Accounts OIDC session で保護                                                                                       |
+| `APP_ALLOW_PUBLIC_SANDBOX_CREATION` | `false` | operator が `true` を明示した場合だけ、アプリメンバー以外の認証済み GUI ユーザーにも sandbox 作成を許可。作成費用は operator 負担 |
 | `APP_SESSION_SECRET`         | _(none)_    | `/gui` session / OIDC state cookie の HMAC secret                                                                                            |
 | `OIDC_ISSUER_URL`            | _(none)_    | Takosumi Accounts OIDC issuer URL                                                                                                            |
 | `OIDC_CLIENT_ID`             | _(none)_    | Takosumi Accounts OIDC client ID                                                                                                             |
 | `OIDC_CLIENT_SECRET`         | _(none)_    | 外部confidential OIDC client用の任意secret。Takosumi Accounts public PKCE clientでは設定しない                                               |
 | `OIDC_REDIRECT_URI`          | _(derived)_ | OIDC callback URI。managed install では Cloud が確定した redirect URI を inject。standalone/dev のみ trusted configured base URL から derive |
 | `MCP_URL`                    | _(none)_    | Interface OAuth の exact resource audience (`mcp_url` Output と同じ URL)                                                                     |
-| `APP_WORKSPACE_ID`           | _(none)_    | 任意の旧 Workspace context。Interface OAuth evidence に workspace_id がある場合だけ一致を照合                                                |
+| `APP_WORKSPACE_ID`           | _(none)_    | 旧 GUI メンバー互換性と Interface OAuth evidence の照合先 Workspace                                                                         |
 | `APP_CAPSULE_ID`             | _(none)_    | GUI OIDC sign-in と Interface OAuth evidence で照合する owning Capsule                                                                         |
 | `MCP_ALLOW_UNAUTHENTICATED`  | `false`     | `true` でローカル / 開発時のみ `MCP_AUTH_TOKEN` 無しでサンドボックスサービス `/mcp` を許可                                                   |
 | `TAKOS_TOKEN`                | _(none)_    | サンドボックスサービスに渡せる Takos API bearer トークン。シェル子プロセスは `allow_takos_token` が設定された場合のみ継承                    |
@@ -301,17 +302,33 @@ Durable Object で管理されます。各セッションは個別のコンテ�
 | `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_    | Takos dispatch 経由でルーティングされた GUI / API 要求の `X-Takos-Internal-Marker: 1` 認証を有効化する場合のみ `1` を設定                    |
 | `SHUTDOWN_GRACE_MS`          | `15000`     | SIGTERM 時の強制終了までの猶予 (ms)                                                                                                          |
 
-GUI OIDC は署名済みの `takosumi.capsule_id` を `APP_CAPSULE_ID` と照合します。
-一致する `takosumi.app_role` が `owner` / `member` の場合、
-`/gui/api/auth/me` は `appRole` と `canManageApp: true` を返します。役割のない
-同じアプリのユーザーも sign-in できます。別 Capsule、不正な明示 role、照合先が
-未設定のアプリ claim は拒否し、session の読み取り時にも再照合します。
-新しい app claim がない既存 session と Workspace identity field は互換性を保ちます。
-旧 `role` は管理権限へ昇格させず、sandbox の作成・一覧・操作は従来のユーザー所有
-ルールに従います。
-`appRole` / `canManageApp` はログイン時点の表示用情報で、session の有効期限は
-最大 12 時間です。このアプリは access token を保存せず、役割の変更・削除を
-オンラインで再確認しません。これらの値を現在の管理操作の認可に使ってはいけません。
+GUI OIDC は署名済みの `takosumi.capsule_id` を、設定された `APP_CAPSULE_ID` と
+照合します。明示された `takosumi.app_role` は `owner` / `member` のみ受け入れます。
+現在の Accounts は `app_role` を出さず、`takosumi.{capsule_id,workspace_id,role}` と
+top-level `workspace_memberships: string[]` を返すため、`app_role` がないときは
+設定された `APP_WORKSPACE_ID` と一致する旧メンバー情報へフォールバックします。
+旧 `owner` は owner、`admin` / `member` / `viewer` は既存互換の member として扱います。
+Capsule claim がある構成では nested `workspace_id` の一致が必須です。
+Capsule claim のない旧 identity context、または `APP_CAPSULE_ID` 未設定の旧構成だけは、
+Workspace membership 配列に照合先が含まれる場合も member として扱います。
+別 Capsule、不一致 Workspace、不正な明示 role / membership は拒否します。
+`APP_CAPSULE_ID` が未設定の旧 OIDC 構成では Capsule claim を認可に使わず、
+`APP_WORKSPACE_ID` に一致する旧メンバー情報を利用できます。OpenTofu のこの構成は
+`enable_app_oidc = true` と direct MCP bearer が必要で、Interface OAuth は有効になりません。
+
+`/gui/api/auth/me` は `capsuleId`、`appRole`、`canManageApp` を返します。通常ユーザーも
+sign-in して既存の自分の sandbox を一覧・操作できますが、sign-in だけでは operator
+負担の sandbox を作成できません。作成 endpoint は app owner/member または上記の
+旧メンバー互換性を要求します。公開作成は operator が Worker 設定で
+`APP_ALLOW_PUBLIC_SANDBOX_CREATION=true` を明示した場合だけ、認証済みユーザーに
+開放します。匿名作成は許可しません。host-admin bearer、trusted router、machine
+Interface OAuth の既存 authority と、各 sandbox のユーザー所有 ACL は維持します。
+
+メンバー情報はログイン時点の snapshot で、session の有効期限は最大 12 時間です。
+このアプリは access token を保存せず、役割の変更・削除をオンラインで再確認しません。
+sandbox 作成にはこの期限付き snapshot を使います。各 request で Capsule と互換
+Workspace の設定を再照合します。既存 session にメンバー情報がない場合は再 sign-in
+が必要です。`canManageApp` は現在の管理者権限や live revocation の証明にはなりません。
 
 Interface OAuth は issuer、`APP_CAPSULE_ID`、`MCP_URL` があれば有効になります。
 machine capability は exact audience / `mcp.invoke` scope / Capsule / Interface /

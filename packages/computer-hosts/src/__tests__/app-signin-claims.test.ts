@@ -19,6 +19,59 @@ describe("per-app sign-in claims", () => {
     expect(resolveAppSignInClaims({ workspace_id: "ws_test", role: "owner" }, "cap_test"))
       .toEqual({});
     expect(resolveAppSignInClaims(undefined, undefined)).toEqual({});
+    expect(resolveAppSignInClaims({ capsule_id: "cap_test" }, "cap_test", "ws_test", []))
+      .toEqual({ capsuleId: "cap_test" });
+  });
+
+  test("accepts the current Accounts shape through matching legacy membership", () => {
+    for (const role of ["owner", "admin", "member", "viewer"]) {
+      expect(resolveAppSignInClaims({
+        capsule_id: "cap_test", workspace_id: "ws_test", role,
+      }, "cap_test", "ws_test", ["ws_test"]))
+        .toEqual({
+          capsuleId: "cap_test", appRole: role === "owner" ? "owner" : "member",
+          legacyWorkspaceId: "ws_test",
+        });
+    }
+  });
+
+  test("supports configured legacy Workspace sign-in without a Capsule binding", () => {
+    expect(resolveAppSignInClaims({
+      capsule_id: "cap_test", workspace_id: "ws_test", role: "member",
+    }, undefined, "ws_test", ["ws_test"]))
+      .toEqual({ appRole: "member", legacyWorkspaceId: "ws_test" });
+    expect(resolveAppSignInClaims({ capsule_id: "cap_test" }, undefined))
+      .toEqual({});
+    expect(resolveAppSignInClaims(undefined, undefined, "ws_test", ["ws_test"]))
+      .toEqual({ appRole: "member", legacyWorkspaceId: "ws_test" });
+    expect(resolveAppSignInClaims({ role: "owner" }, undefined, "ws_test", ["ws_test"]))
+      .toEqual({ appRole: "member", legacyWorkspaceId: "ws_test" });
+  });
+
+  test("matching Capsule alone cannot turn flat Workspace membership into app authority", () => {
+    for (const claims of [{ capsule_id: "cap_test" }, { capsule_id: "cap_test", role: "owner" }]) {
+      expect(resolveAppSignInClaims(claims, "cap_test", "ws_test", ["ws_test"]))
+        .toEqual({ capsuleId: "cap_test" });
+    }
+  });
+
+  test("legacy fallback rejects mismatched or malformed evidence", () => {
+    for (const [claims, memberships] of [
+      [{ capsule_id: "cap_other", workspace_id: "ws_test", role: "owner" }, ["ws_test"]],
+      [{ capsule_id: "cap_test", workspace_id: "ws_other", role: "owner" }, ["ws_test"]],
+      [{ capsule_id: "cap_test", workspace_id: "ws_test", role: "administer" }, ["ws_test"]],
+      [{ capsule_id: "cap_test", workspace_id: "ws_test", role: "member" }, ["ws_other"]],
+      [{ capsule_id: "cap_test", workspace_id: "ws_test", role: "member" }, ["ws_test", 1]],
+      [{ capsule_id: "cap_test", workspace_id: "ws_test", role: "member" }, null],
+      [{ capsule_id: "cap_test", workspace_id: "ws_test", app_role: "admin" }, ["ws_test"]],
+    ]) {
+      expect(() => resolveAppSignInClaims(claims, "cap_test", "ws_test", memberships))
+        .toThrow();
+    }
+    for (const role of [null, false, 1, ["owner"], {}]) {
+      expect(() => resolveAppSignInClaims({ workspace_id: "ws_test", role }, "cap_test", "ws_test"))
+        .toThrow("Invalid legacy Workspace role");
+    }
   });
 
   test("rejects foreign or unconfigured Capsules, even with legacy owner claims", () => {
@@ -98,6 +151,16 @@ test("session rechecks reject malformed explicit app roles", async () => {
   expect(await readGuiSession(env, request)).toBeNull();
 });
 
+test("legacy membership sessions recheck the configured Workspace", async () => {
+  const request = await signedSessionRequest({
+    capsuleId: "cap_test", appRole: "member", legacyWorkspaceId: "ws_test",
+  });
+  expect((await readGuiSession({ ...env, APP_WORKSPACE_ID: "ws_test" }, request))?.appRole)
+    .toBe("member");
+  expect(await readGuiSession({ ...env, APP_WORKSPACE_ID: "ws_other" }, request)).toBeNull();
+  expect(await readGuiSession(env, request)).toBeNull();
+});
+
 test("app management roles keep the existing sandbox ownership boundary", () => {
   for (const appRole of ["owner", "member"] as const) {
     const session = { sub: "user-1", capsuleId: "cap_test", appRole, exp: 1 };
@@ -117,6 +180,7 @@ test("verified OIDC callbacks expose app management only for the matching owner/
   const publicJwk = await crypto.subtle.exportKey("jwk", keyPair.publicKey);
   const callbackEnv = {
     ...env,
+    APP_WORKSPACE_ID: "ws_test",
     OIDC_AUTHORIZATION_URL: "https://accounts.example.test/authorize",
     OIDC_TOKEN_URL: "https://accounts.example.test/token",
     OIDC_USERINFO_URL: "https://accounts.example.test/userinfo",
@@ -125,6 +189,7 @@ test("verified OIDC callbacks expose app management only for the matching owner/
   const app = new Hono<{ Bindings: SandboxHostEnv }>();
   registerGuiAuthRoutes(app);
   let evidence: unknown = {};
+  let workspaceMemberships: unknown;
   const originalFetch = globalThis.fetch;
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,
@@ -136,6 +201,7 @@ test("verified OIDC callbacks expose app management only for the matching owner/
         const payload = Buffer.from(JSON.stringify({
           iss: env.OIDC_ISSUER_URL, sub: "user-1", aud: env.OIDC_CLIENT_ID,
           nonce: "test-nonce", iat: now, exp: now + 300, takosumi: evidence,
+          workspace_memberships: workspaceMemberships,
         })).toString("base64url");
         const input = `${header}.${payload}`;
         const signature = Buffer.from(await crypto.subtle.sign(
@@ -151,27 +217,48 @@ test("verified OIDC callbacks expose app management only for the matching owner/
     },
   });
   try {
-    for (const claims of [
-      { capsule_id: "cap_test", app_role: "owner" },
-      { capsule_id: "cap_test", app_role: "member" },
-      { capsule_id: "cap_test" },
-      { workspace_id: "ws_test", role: "owner" },
-      { capsule_id: "cap_other", app_role: "owner" },
-      { capsule_id: "cap_test", app_role: "admin" },
-      null, false, "malformed", [],
-    ]) {
-      evidence = claims;
+    const cases: Array<{
+      claims: unknown;
+      memberships?: unknown;
+      legacy?: boolean;
+      expected?: { capsuleId?: string; appRole?: string; legacyWorkspaceId?: string };
+    }> = [
+      { claims: { capsule_id: "cap_test", app_role: "owner" }, expected: { capsuleId: "cap_test", appRole: "owner" } },
+      { claims: { capsule_id: "cap_test", app_role: "member" }, expected: { capsuleId: "cap_test", appRole: "member" } },
+      { claims: { capsule_id: "cap_test" }, expected: { capsuleId: "cap_test" } },
+      { claims: { capsule_id: "cap_test" }, memberships: [], expected: { capsuleId: "cap_test" } },
+      { claims: { capsule_id: "cap_test" }, memberships: ["ws_test"], expected: { capsuleId: "cap_test" } },
+      { claims: { capsule_id: "cap_test", role: "owner" }, memberships: ["ws_test"], expected: { capsuleId: "cap_test" } },
+      { claims: { workspace_id: "ws_test", role: "owner" }, expected: { appRole: "owner", legacyWorkspaceId: "ws_test" } },
+      ...["owner", "admin", "member", "viewer"].flatMap((role) => [false, true].map((legacy) => ({
+        // Exact current Accounts wire shape: no app_role anywhere.
+        claims: { capsule_id: "cap_test", workspace_id: "ws_test", role },
+        memberships: ["ws_test"], legacy,
+        expected: {
+          ...(legacy ? {} : { capsuleId: "cap_test" }),
+          appRole: role === "owner" ? "owner" : "member", legacyWorkspaceId: "ws_test",
+        },
+      }))),
+      { claims: { capsule_id: "cap_other", app_role: "owner" } },
+      { claims: { capsule_id: "cap_test", app_role: "admin" } },
+      { claims: { capsule_id: "cap_other", workspace_id: "ws_test", role: "owner" }, memberships: ["ws_test"] },
+      { claims: { capsule_id: "cap_test", workspace_id: "ws_other", role: "owner" }, memberships: ["ws_test"] },
+      { claims: { capsule_id: "cap_test", workspace_id: "ws_test", role: "invalid" }, memberships: ["ws_test"] },
+      { claims: { capsule_id: "cap_test", workspace_id: "ws_test", role: "member" }, memberships: ["ws_other"] },
+      ...[null, false, "malformed", []].map((claims) => ({ claims })),
+    ];
+    for (const item of cases) {
+      evidence = item.claims;
+      workspaceMemberships = item.memberships;
+      const runtimeEnv = { ...callbackEnv, APP_CAPSULE_ID: item.legacy ? undefined : "cap_test" };
       const stateCookie = await signedCookie("takos_computer_oauth_state", {
         state: "test-state", nonce: "test-nonce", codeVerifier: "verifier",
         returnTo: "/gui", exp: Math.floor(Date.now() / 1000) + 300,
       });
       const callback = await app.request("https://computer.example.test/gui/api/auth/callback?code=test-code&state=test-state", {
         headers: { Cookie: stateCookie },
-      }, callbackEnv);
-      if (
-        !claims || typeof claims !== "object" || Array.isArray(claims) ||
-        claims.capsule_id === "cap_other" || claims.app_role === "admin"
-      ) {
+      }, runtimeEnv);
+      if (!item.expected) {
         expect(callback.status).toBe(502);
         expect(callback.headers.get("set-cookie")).toBeNull();
         continue;
@@ -181,12 +268,16 @@ test("verified OIDC callbacks expose app management only for the matching owner/
         .find((cookie) => cookie.startsWith("takos_computer_session="))!;
       const me = await app.request("https://computer.example.test/gui/api/auth/me", {
         headers: { Cookie: sessionCookie.split(";")[0] },
-      }, callbackEnv);
+      }, runtimeEnv);
       expect(me.status).toBe(200);
       const body = await me.json() as Record<string, unknown>;
-      expect(body.capsuleId).toBe(claims.capsule_id);
-      expect(body.appRole).toBe(claims.app_role);
-      expect(body.canManageApp).toBe(claims.app_role === "owner" || claims.app_role === "member");
+      expect(body.capsuleId).toBe(item.expected.capsuleId);
+      expect(body.appRole).toBe(item.expected.appRole);
+      expect(body.canManageApp).toBe(Boolean(item.expected.appRole));
+      const session = await readGuiSession(runtimeEnv, new Request("https://computer.example.test/gui", {
+        headers: { Cookie: sessionCookie.split(";")[0] },
+      }));
+      expect(session?.legacyWorkspaceId).toBe(item.expected.legacyWorkspaceId);
     }
   } finally {
     Object.defineProperty(globalThis, "fetch", { value: originalFetch, configurable: true });

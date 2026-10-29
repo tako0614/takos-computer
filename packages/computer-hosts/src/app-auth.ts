@@ -325,14 +325,30 @@ export async function readGuiSession(
   // Recheck the binding for every request, including sessions minted before a
   // runtime configuration change. Claim-absent legacy sessions stay valid.
   try {
+    if (session.legacyWorkspaceId !== undefined && (
+      !session.legacyWorkspaceId ||
+      session.legacyWorkspaceId !== envValue(env, "APP_WORKSPACE_ID") ||
+      (session.appRole !== "owner" && session.appRole !== "member")
+    )) return null;
     resolveAppSignInClaims({
       capsule_id: session.capsuleId,
-      app_role: session.appRole,
-    }, envValue(env, "APP_CAPSULE_ID"));
+      ...(session.legacyWorkspaceId
+        ? { workspace_id: session.legacyWorkspaceId, role: session.appRole }
+        : { app_role: session.appRole }),
+    }, envValue(env, "APP_CAPSULE_ID"), envValue(env, "APP_WORKSPACE_ID"));
   } catch {
     return null;
   }
   return session;
+}
+
+export function guiSessionCanCreateSandbox(
+  env: AppRuntimeEnv,
+  session: GuiSession,
+): boolean {
+  // The caller must first authenticate and recheck bindings with readGuiSession.
+  return flagEnabled(env, "APP_ALLOW_PUBLIC_SANDBOX_CREATION") ||
+    session.appRole === "owner" || session.appRole === "member";
 }
 
 export async function requireGuiAppAuth(
@@ -528,6 +544,8 @@ export function registerGuiAuthRoutes(
       const appClaims = resolveAppSignInClaims(
         claims.takosumi,
         envValue(c.env, "APP_CAPSULE_ID"),
+        envValue(c.env, "APP_WORKSPACE_ID"),
+        claims.workspace_memberships,
       );
       const headers = new Headers({
         "Cache-Control": "no-store",
@@ -572,7 +590,7 @@ export function registerGuiAuthRoutes(
       role: session?.role,
       capsuleId: session?.capsuleId,
       appRole: session?.appRole,
-      // Display-only login snapshot (up to 12 hours), never sandbox authority.
+      // Login snapshot (up to 12 hours), also used for sandbox creation.
       canManageApp: session?.appRole === "owner" || session?.appRole === "member",
     });
   });

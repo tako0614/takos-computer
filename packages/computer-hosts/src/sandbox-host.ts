@@ -15,7 +15,11 @@ import {
   mcpMethodNotAllowed,
   mcpOptionsPreflight,
 } from "@takos-computer/common/mcp-rpc";
-import { guiAppAuthRequired, registerGuiAuthRoutes } from "./app-auth.ts";
+import {
+  guiAppAuthRequired,
+  guiSessionCanCreateSandbox,
+  registerGuiAuthRoutes,
+} from "./app-auth.ts";
 import { appHtml } from "./gui/assets.ts";
 import { computerIconSvg } from "./gui/icon.ts";
 import {
@@ -291,6 +295,13 @@ async function createSession(c: AppContext): Promise<Response> {
   // client-supplied `userId`/`spaceId` are untrusted for the GUI scope.
   const scope = await resolveHostAdminScope(c);
   if (scope.response) return scope.response;
+
+  if (
+    scope.kind === "gui" &&
+    !guiSessionCanCreateSandbox(c.env, scope.guiSession)
+  ) {
+    return c.json({ error: "App membership is required to create a sandbox" }, 403);
+  }
 
   const payload = await c.req.json<CreateSandboxSessionPayload>();
   let { sessionId, spaceId, userId } = payload;

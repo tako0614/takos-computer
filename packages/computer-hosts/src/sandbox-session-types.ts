@@ -24,6 +24,8 @@ export interface SandboxHostEnv {
   PUBLISHED_MCP_AUTH_TOKEN?: string;
   MCP_AUTH_TOKEN?: string;
   APP_AUTH_REQUIRED?: string;
+  /** Explicit operator opt-in for authenticated ordinary GUI users. */
+  APP_ALLOW_PUBLIC_SANDBOX_CREATION?: string;
   APP_SESSION_SECRET?: string;
   OIDC_ISSUER_URL?: string;
   OIDC_AUTHORIZATION_URL?: string;

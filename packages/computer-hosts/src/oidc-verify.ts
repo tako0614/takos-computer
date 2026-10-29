@@ -64,11 +64,13 @@ export type IdTokenClaims = {
   nonce?: unknown;
   name?: unknown;
   email?: unknown;
+  workspace_memberships?: unknown;
   takosumi?: {
     account_id?: unknown;
     space_id?: unknown;
     app_id?: unknown;
     role?: unknown;
+    workspace_id?: unknown;
     capsule_id?: unknown;
     app_role?: unknown;
   };

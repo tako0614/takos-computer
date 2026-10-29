@@ -210,10 +210,10 @@ export function parseOpenTofuDeployConfig(raw: string): OpenTofuDeployConfig {
   }
   if (
     (config.workspaceId || config.capsuleId) &&
-    (!config.accountsIssuer || !config.capsuleId)
+    (!config.accountsIssuer || (!config.capsuleId && !config.appOidc))
   ) {
     throw new Error(
-      "Interface OAuth requires accountsIssuer and capsuleId; workspaceId is optional",
+      "App context requires accountsIssuer and capsuleId for Interface OAuth, or appOidc for legacy Workspace sign-in",
     );
   }
   config.oidcRedirectUri = optionalHttpsUrl(

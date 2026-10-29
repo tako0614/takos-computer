@@ -83,7 +83,7 @@ describe("OpenTofu deploy configuration", () => {
       parseOpenTofuDeployConfig(JSON.stringify({ ...valid, unexpected: true })),
     ).toThrow("closed deployment-config shape");
     expect(() =>
-      parseOpenTofuDeployConfig(JSON.stringify({ ...valid, capsuleId: "" })),
+      parseOpenTofuDeployConfig(JSON.stringify({ ...valid, capsuleId: "", appOidc: false })),
     ).toThrow("accountsIssuer and capsuleId");
     expect(() =>
       parseOpenTofuDeployConfig(
@@ -107,6 +107,18 @@ describe("OpenTofu deploy configuration", () => {
     expect(config.vars).not.toHaveProperty("APP_WORKSPACE_ID");
     expect(() => parseOpenTofuDeployConfig(JSON.stringify({ ...valid, workspaceId: "", accountsIssuer: "" })))
       .toThrow("accountsIssuer and capsuleId");
+  });
+
+  test("supports Workspace-only legacy GUI OIDC without enabling Interface OAuth", () => {
+    const parsed = parseOpenTofuDeployConfig(JSON.stringify({ ...valid, capsuleId: "" }));
+    const config = createWranglerConfig(parsed, {
+      repoRoot: "/repo", configDirectory: "/repo/.wrangler/opentofu/test",
+    });
+    expect(config.vars).toMatchObject({
+      APP_AUTH_REQUIRED: "1", APP_WORKSPACE_ID: "ws_test",
+      OIDC_ISSUER_URL: "https://accounts.example.test",
+    });
+    expect(config.vars).not.toHaveProperty("APP_CAPSULE_ID");
   });
 
   test("keeps secrets out of config and requires the two runtime-internal bearers", () => {
