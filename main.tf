@@ -181,6 +181,13 @@ variable "enable_app_oidc" {
   default     = false
 }
 
+variable "allow_public_sandbox_creation" {
+  description = "Explicit operator choice for authenticated nonmember sandbox creation. Null requires a choice for OIDC without an app or Workspace binding; true funds their sandboxes."
+  type        = bool
+  default     = null
+  nullable    = true
+}
+
 variable "oidc_client_id" {
   description = "OIDC client id used when enable_app_oidc is true."
   type        = string
@@ -305,23 +312,24 @@ locals {
     takosToken   = var.takos_token
   }))
   deploy_input = {
-    accountId         = trimspace(var.cloudflare_account_id)
-    workerName        = local.worker_name
-    publicOrigin      = local.public_origin
-    workersDev        = var.enable_workers_dev_subdomain
-    sessionIndexId    = try(cloudflare_workers_kv_namespace.session_index[0].id, "")
-    containerImage    = trimspace(var.container_image)
-    containerMax      = var.container_max_instances
-    compatibilityDate = "2026-07-19"
-    sourceDigest      = local.source_digest
-    accountsIssuer    = local.accounts_issuer
-    workspaceId       = trimspace(var.app_workspace_id)
-    capsuleId         = trimspace(var.app_capsule_id)
-    appOidc           = var.enable_app_oidc
-    oidcClientId      = trimspace(var.oidc_client_id)
-    oidcRedirectUri   = local.oidc_redirect_uri
-    takosApiUrl       = trimspace(var.takos_api_url)
-    maxUserSessions   = var.max_sandbox_sessions_per_user
+    accountId                  = trimspace(var.cloudflare_account_id)
+    workerName                 = local.worker_name
+    publicOrigin               = local.public_origin
+    workersDev                 = var.enable_workers_dev_subdomain
+    sessionIndexId             = try(cloudflare_workers_kv_namespace.session_index[0].id, "")
+    containerImage             = trimspace(var.container_image)
+    containerMax               = var.container_max_instances
+    compatibilityDate          = "2026-07-19"
+    sourceDigest               = local.source_digest
+    accountsIssuer             = local.accounts_issuer
+    workspaceId                = trimspace(var.app_workspace_id)
+    capsuleId                  = trimspace(var.app_capsule_id)
+    appOidc                    = var.enable_app_oidc
+    allowPublicSandboxCreation = coalesce(var.allow_public_sandbox_creation, false)
+    oidcClientId               = trimspace(var.oidc_client_id)
+    oidcRedirectUri            = local.oidc_redirect_uri
+    takosApiUrl                = trimspace(var.takos_api_url)
+    maxUserSessions            = var.max_sandbox_sessions_per_user
   }
 }
 
@@ -392,6 +400,16 @@ resource "terraform_data" "sandbox_host" {
         local.oidc_redirect_uri != ""
       )
       error_message = "enable_app_oidc requires the Accounts issuer, OIDC client id, and a resolvable redirect URI."
+    }
+
+    precondition {
+      condition = (
+        !var.enable_app_oidc ||
+        trimspace(var.app_capsule_id) != "" ||
+        trimspace(var.app_workspace_id) != "" ||
+        var.allow_public_sandbox_creation != null
+      )
+      error_message = "enable_app_oidc without app_capsule_id or app_workspace_id requires explicitly setting allow_public_sandbox_creation (true to fund authenticated nonmember sandboxes, false to deny creation)."
     }
 
     precondition {

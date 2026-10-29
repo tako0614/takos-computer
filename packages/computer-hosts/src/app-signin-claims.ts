@@ -36,10 +36,14 @@ export function resolveAppSignInClaims(
     if (claims.app_role !== "owner" && claims.app_role !== "member") {
       throw new Error("Invalid app role in Takosumi sign-in");
     }
-    if (!expectedCapsuleId || claims.capsule_id !== expectedCapsuleId) {
+    if (claims.capsule_id === undefined) {
       throw new Error("Takosumi sign-in Capsule mismatch");
     }
-    return { ...result, appRole: claims.app_role };
+    // An issuer claim cannot establish its own expected Capsule. Legacy
+    // Workspace-only installs ignore the app role and keep their Workspace gate.
+    if (expectedCapsuleId) {
+      return { ...result, appRole: claims.app_role };
+    }
   }
 
   // Current Accounts emits takosumi.{capsule_id,workspace_id,role} plus a
@@ -81,9 +85,9 @@ export function resolveAppSignInClaims(
   ) {
     return {
       ...result,
-      appRole: claims.workspace_id === expectedWorkspaceId && claims.role === "owner"
-        ? "owner"
-        : "member",
+      // Legacy Workspace roles prove compatibility membership, not ownership
+      // of this app. Accounts must issue a bound app_role for app ownership.
+      appRole: "member",
       legacyWorkspaceId: expectedWorkspaceId,
     };
   }

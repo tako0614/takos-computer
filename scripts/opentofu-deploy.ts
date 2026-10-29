@@ -17,6 +17,7 @@ const DEPLOY_KEYS = [
   "workspaceId",
   "capsuleId",
   "appOidc",
+  "allowPublicSandboxCreation",
   "oidcClientId",
   "oidcRedirectUri",
   "takosApiUrl",
@@ -37,6 +38,7 @@ export interface OpenTofuDeployConfig {
   workspaceId: string;
   capsuleId: string;
   appOidc: boolean;
+  allowPublicSandboxCreation: boolean;
   oidcClientId: string;
   oidcRedirectUri: string;
   takosApiUrl: string;
@@ -165,6 +167,7 @@ export function parseOpenTofuDeployConfig(raw: string): OpenTofuDeployConfig {
       : "",
     capsuleId: requiredString(decoded, "capsuleId"),
     appOidc: requiredBoolean(decoded, "appOidc"),
+    allowPublicSandboxCreation: requiredBoolean(decoded, "allowPublicSandboxCreation"),
     oidcClientId: requiredString(decoded, "oidcClientId"),
     oidcRedirectUri: requiredString(decoded, "oidcRedirectUri"),
     takosApiUrl: requiredString(decoded, "takosApiUrl"),
@@ -255,6 +258,9 @@ export function createWranglerConfig(
     vars.APP_AUTH_REQUIRED = "1";
     vars.OIDC_CLIENT_ID = config.oidcClientId;
     vars.OIDC_REDIRECT_URI = config.oidcRedirectUri;
+  }
+  if (config.allowPublicSandboxCreation) {
+    vars.APP_ALLOW_PUBLIC_SANDBOX_CREATION = "true";
   }
   if (config.takosApiUrl) vars.TAKOS_API_URL = config.takosApiUrl;
 

@@ -74,6 +74,7 @@ try {
       workspaceId: "",
       capsuleId: "cap_check",
       appOidc: false,
+      allowPublicSandboxCreation: false,
       oidcClientId: "",
       oidcRedirectUri:
         "https://takos-computer-check.example.workers.dev/gui/api/auth/callback",

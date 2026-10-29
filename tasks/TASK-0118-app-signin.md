@@ -10,15 +10,17 @@
   `takosumi.{capsule_id,workspace_id,role}` and top-level string-array
   `workspace_memberships`, without `app_role`. When `app_role` is absent, only
   the configured matching `APP_WORKSPACE_ID` grants legacy membership. Legacy
-  owner maps to owner; admin/member/viewer retain their previous ability to
-  create a sandbox as compatible members. Capsule-scoped compatibility also
-  requires the matching nested Workspace id. A matching membership array alone
+  owner/admin/member/viewer retain their previous ability to create a sandbox
+  as compatible members. Legacy Workspace role alone cannot prove app owner;
+  Accounts must compare ownerUserId with the user before issuing a bound
+  app_role=owner. Capsule-scoped compatibility also requires the matching
+  nested Workspace id. A matching membership array alone
   grants member only in legacy Capsule-claim-absent or Capsule-unconfigured
   context, never owner. Malformed or conflicting supplied legacy evidence
   fails closed. An ordinary identity with no matching membership gets no grant.
 - Legacy OIDC: when `APP_CAPSULE_ID` is unset, the issuer's valid Capsule claim
-  is ignored and cannot define the expected binding. Configured Workspace
-  membership remains supported. OpenTofu permits this with `enable_app_oidc`
+  and app_role are ignored and cannot define the expected binding. Configured
+  Workspace membership remains supported. OpenTofu permits this with `enable_app_oidc`
   and a direct MCP bearer; it does not enable machine Interface OAuth.
 - Funded creation: the shared create handler checks GUI app/legacy membership
   before parsing the payload or accessing the Container/quota/index. A normal
@@ -26,6 +28,14 @@
   `APP_ALLOW_PUBLIC_SANDBOX_CREATION=true` opens creation to other authenticated
   users. It does not allow anonymous creation. Host-admin/trusted-router and
   machine authorities keep their existing boundaries.
+- OpenTofu: `allow_public_sandbox_creation` is nullable. With GUI OIDC and no
+  configured app Capsule or Workspace, the plan requires an explicit choice:
+  false retains the authenticated-user 403, true opts into funded creation.
+  The deploy handoff emits `APP_ALLOW_PUBLIC_SANDBOX_CREATION=true` only for true.
+  Existing app and Workspace binding checks are unchanged by this flag.
+- Deploy order: update installable apps first, then open Accounts writer B #657
+  sign-in issuance last. Unupdated self-host apps still rely on Workspace
+  membership, so keep legacy claims until those apps have migrated.
 - Session readback: `/gui/api/auth/me` exposes `capsuleId`, `appRole`, and
   `canManageApp`. Membership is a login snapshot with a maximum 12-hour session
   lifetime, used for sandbox creation. No access token is retained and there
@@ -45,14 +55,17 @@
   UX, PR #11) was merged normally and its GUI changes were preserved. Existing
   remote TASK-0117/codex heads were inventoried; no foreign worktree was edited.
   The parent owns central coordination records.
-- Validation: 82 focused tests across app claims, sandbox routes, Interface
+- Validation: 84 focused tests across app claims, sandbox routes, Interface
   OAuth, and deploy config pass, alongside TypeScript, `git diff --check`, and
-  `tofu fmt -check main.tf`. Signed OIDC callback cases exercise the real current
+  `tofu fmt -check main.tf` and the Wrangler/OpenTofu static deploy check.
+  Signed OIDC callback cases exercise the real current
   Accounts shape both with and without a configured Capsule, malformed and
   mismatched evidence, and binding changes. Creation tests prove ordinary
   identity is refused before any DO access, explicit opt-in stays authenticated,
-  and member creates retain user ownership. The Workspace-only deploy-config
-  regression failed before its fix. Full repository/build/Container/OpenTofu
+  and member creates retain user ownership. Unbound OIDC creation is 403 until
+  explicit opt-in, and a removed Capsule binding invalidates prior member
+  snapshots. The Workspace-only deploy-config regression failed before its fix.
+  Full repository/build/Container/OpenTofu
   checks run in CI under the Phase 7 resource constraint.
 - Reversal: revert the change; there is no persisted schema migration. No
   deployment, live sign-in, live database, provider, or secret mutation occurred.

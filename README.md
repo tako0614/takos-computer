@@ -307,12 +307,16 @@ GUI OIDC は署名済みの `takosumi.capsule_id` を、設定された `APP_CAP
 現在の Accounts は `app_role` を出さず、`takosumi.{capsule_id,workspace_id,role}` と
 top-level `workspace_memberships: string[]` を返すため、`app_role` がないときは
 設定された `APP_WORKSPACE_ID` と一致する旧メンバー情報へフォールバックします。
-旧 `owner` は owner、`admin` / `member` / `viewer` は既存互換の member として扱います。
+旧 `owner` / `admin` / `member` / `viewer` は既存互換の member として扱います。
+旧 Workspace role だけではアプリ所有者を証明できません。Accounts が Workspace の
+`ownerUserId` とログイン user を照合して発行する、Capsule に束縛された明示
+`app_role=owner` だけをアプリ owner として扱います。
 Capsule claim がある構成では nested `workspace_id` の一致が必須です。
 Capsule claim のない旧 identity context、または `APP_CAPSULE_ID` 未設定の旧構成だけは、
 Workspace membership 配列に照合先が含まれる場合も member として扱います。
 別 Capsule、不一致 Workspace、不正な明示 role / membership は拒否します。
 `APP_CAPSULE_ID` が未設定の旧 OIDC 構成では Capsule claim を認可に使わず、
+明示 `app_role` があってもその権限を使いません。
 `APP_WORKSPACE_ID` に一致する旧メンバー情報を利用できます。OpenTofu のこの構成は
 `enable_app_oidc = true` と direct MCP bearer が必要で、Interface OAuth は有効になりません。
 
@@ -400,6 +404,11 @@ service-side `InstallConfig` を先に用意する必要があります。その
 - GUI OIDCを有効にする場合はAccountsのpublic PKCE登録からAccounts URL、issuer、
   client id、登録済みredirect URIを写像し、存在しないclient secretを要求しない。
   callbackはcanonical public URLの `/gui/api/auth/callback` と一致させる
+- `enable_app_oidc = true` で `app_capsule_id` と `app_workspace_id` がともに
+  空なら、`allow_public_sandbox_creation` を明示する。`false` は認証済みの
+  非メンバーによる作成を403にし、`true` はoperator負担の作成を許可する。
+  省略時のOpenTofu planは理由を表示して停止する。App/Workspaceが設定されて
+  いる場合も、この選択はclaimの照合や既存sandboxの所有ACLを変更しない
 - custom routeを別途作らない場合は `enable_workers_dev_subdomain = true` と
   `cloudflare_workers_subdomain` を指定し、実際に到達できるURLを作る
 - Repository manifest が要求する `launch_url` / `mcp_url` の公開、
@@ -410,6 +419,10 @@ service-side `InstallConfig` を先に用意する必要があります。その
 どちらもinstalling principalだけを対象にしたbinding requestです。compilerがservice-side
 policyで受理した後、実際のInterface / BindingはDB-owned stateから確定します。
 manifestや通常のURL Outputだけでアクセス権が付与されることはありません。
+
+公開順序はインストール型アプリの更新を先に行い、Accounts writer B（#657）の
+`app_role` 発行を最後に開きます。未更新のself-hostアプリは移行中も旧Workspace
+membershipに依存するため、その更新率を確認してから旧claimを停止します。
 
 Capsule contextの注入とGUI OIDCの有効化は引き続き正当なoperator設定が
 必要です。また、現root moduleにはWranglerを呼ぶ `local-exec` があり、one-touch

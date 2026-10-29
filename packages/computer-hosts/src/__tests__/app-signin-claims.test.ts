@@ -29,7 +29,7 @@ describe("per-app sign-in claims", () => {
         capsule_id: "cap_test", workspace_id: "ws_test", role,
       }, "cap_test", "ws_test", ["ws_test"]))
         .toEqual({
-          capsuleId: "cap_test", appRole: role === "owner" ? "owner" : "member",
+          capsuleId: "cap_test", appRole: "member",
           legacyWorkspaceId: "ws_test",
         });
     }
@@ -41,6 +41,13 @@ describe("per-app sign-in claims", () => {
     }, undefined, "ws_test", ["ws_test"]))
       .toEqual({ appRole: "member", legacyWorkspaceId: "ws_test" });
     expect(resolveAppSignInClaims({ capsule_id: "cap_test" }, undefined))
+      .toEqual({});
+    expect(resolveAppSignInClaims({
+      capsule_id: "cap_test", app_role: "owner",
+      workspace_id: "ws_test", role: "owner",
+    }, undefined, "ws_test", ["ws_test"]))
+      .toEqual({ appRole: "member", legacyWorkspaceId: "ws_test" });
+    expect(resolveAppSignInClaims({ capsule_id: "cap_test", app_role: "owner" }, undefined))
       .toEqual({});
     expect(resolveAppSignInClaims(undefined, undefined, "ws_test", ["ws_test"]))
       .toEqual({ appRole: "member", legacyWorkspaceId: "ws_test" });
@@ -74,8 +81,8 @@ describe("per-app sign-in claims", () => {
     }
   });
 
-  test("rejects foreign or unconfigured Capsules, even with legacy owner claims", () => {
-    for (const expectedCapsuleId of ["cap_other", undefined, ""]) {
+  test("rejects foreign Capsules, even with legacy owner claims", () => {
+    for (const expectedCapsuleId of ["cap_other"]) {
       expect(() => resolveAppSignInClaims({
         capsule_id: "cap_test", app_role: "owner", workspace_id: "ws_test", role: "owner",
       }, expectedCapsuleId)).toThrow("Capsule mismatch");
@@ -134,6 +141,7 @@ test("session reads recheck the current Capsule binding", async () => {
   expect((await readGuiSession(env, request))?.appRole).toBe("member");
   expect(await requireGuiAppAuth(env, request)).toBeNull();
   expect(await readGuiSession({ ...env, APP_CAPSULE_ID: "cap_changed" }, request)).toBeNull();
+  expect(await readGuiSession({ ...env, APP_CAPSULE_ID: undefined }, request)).toBeNull();
   expect((await requireGuiAppAuth({ ...env, APP_CAPSULE_ID: "cap_changed" }, request))?.status)
     .toBe(401);
 });
@@ -159,6 +167,10 @@ test("legacy membership sessions recheck the configured Workspace", async () => 
     .toBe("member");
   expect(await readGuiSession({ ...env, APP_WORKSPACE_ID: "ws_other" }, request)).toBeNull();
   expect(await readGuiSession(env, request)).toBeNull();
+  const oldOwner = await signedSessionRequest({
+    capsuleId: "cap_test", appRole: "owner", legacyWorkspaceId: "ws_test",
+  });
+  expect(await readGuiSession({ ...env, APP_WORKSPACE_ID: "ws_test" }, oldOwner)).toBeNull();
 });
 
 test("app management roles keep the existing sandbox ownership boundary", () => {
@@ -229,14 +241,16 @@ test("verified OIDC callbacks expose app management only for the matching owner/
       { claims: { capsule_id: "cap_test" }, memberships: [], expected: { capsuleId: "cap_test" } },
       { claims: { capsule_id: "cap_test" }, memberships: ["ws_test"], expected: { capsuleId: "cap_test" } },
       { claims: { capsule_id: "cap_test", role: "owner" }, memberships: ["ws_test"], expected: { capsuleId: "cap_test" } },
-      { claims: { workspace_id: "ws_test", role: "owner" }, expected: { appRole: "owner", legacyWorkspaceId: "ws_test" } },
+      { claims: { workspace_id: "ws_test", role: "owner" }, expected: { appRole: "member", legacyWorkspaceId: "ws_test" } },
+      { claims: { capsule_id: "cap_test", app_role: "owner" }, legacy: true, expected: {} },
+      { claims: { capsule_id: "cap_test", app_role: "owner", workspace_id: "ws_test", role: "owner" }, memberships: ["ws_test"], legacy: true, expected: { appRole: "member", legacyWorkspaceId: "ws_test" } },
       ...["owner", "admin", "member", "viewer"].flatMap((role) => [false, true].map((legacy) => ({
         // Exact current Accounts wire shape: no app_role anywhere.
         claims: { capsule_id: "cap_test", workspace_id: "ws_test", role },
         memberships: ["ws_test"], legacy,
         expected: {
           ...(legacy ? {} : { capsuleId: "cap_test" }),
-          appRole: role === "owner" ? "owner" : "member", legacyWorkspaceId: "ws_test",
+          appRole: "member", legacyWorkspaceId: "ws_test",
         },
       }))),
       { claims: { capsule_id: "cap_other", app_role: "owner" } },

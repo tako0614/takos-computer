@@ -330,12 +330,15 @@ export async function readGuiSession(
       session.legacyWorkspaceId !== envValue(env, "APP_WORKSPACE_ID") ||
       (session.appRole !== "owner" && session.appRole !== "member")
     )) return null;
-    resolveAppSignInClaims({
+    const currentClaims = resolveAppSignInClaims({
       capsule_id: session.capsuleId,
       ...(session.legacyWorkspaceId
         ? { workspace_id: session.legacyWorkspaceId, role: session.appRole }
         : { app_role: session.appRole }),
     }, envValue(env, "APP_CAPSULE_ID"), envValue(env, "APP_WORKSPACE_ID"));
+    // A removed Capsule binding or a legacy owner role downgrade must not
+    // leave the sealed login snapshot with more authority than current config.
+    if (session.appRole !== currentClaims.appRole) return null;
   } catch {
     return null;
   }

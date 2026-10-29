@@ -331,10 +331,12 @@ function sessionCookieFromSetCookie(setCookie: string | null): string {
 async function mintGuiSessionCookie(
   env: SandboxHostEnv,
   claims: { sub: string; spaceId?: string; appRole?: "owner" | "member"; legacyWorkspaceId?: string },
+  options?: { unbound?: boolean },
 ): Promise<string> {
-  env.APP_CAPSULE_ID ??= "cap_computer";
+  if (!options?.unbound) env.APP_CAPSULE_ID ??= "cap_computer";
   const payload = base64UrlEncodeJson({
-    capsuleId: env.APP_CAPSULE_ID, appRole: "member", ...claims,
+    ...(options?.unbound ? {} : { capsuleId: env.APP_CAPSULE_ID }),
+    appRole: options?.unbound ? undefined : "member", ...claims,
     exp: Math.floor(Date.now() / 1000) + 300,
   });
   const key = await crypto.subtle.importKey(
@@ -989,6 +991,25 @@ test("sandbox creation requires membership before touching funded resources", as
   expect((await fetchWorker(env, "/gui/api/sandbox-create", {
     ...request, headers: { "Content-Type": "application/json" },
   })).status).toBe(401);
+});
+
+test("unbound OIDC sign-in retains creation denial until the operator opts in", async () => {
+  const { env, doNames } = createEnv({ appAuthRequired: true });
+  env.APP_CAPSULE_ID = undefined;
+  env.APP_WORKSPACE_ID = undefined;
+  const cookie = await mintGuiSessionCookie(env, { sub: "unbound-user" }, { unbound: true });
+  const request = {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ sessionId: "unbound-session" }),
+  };
+  const me = await fetchWorker(env, "/gui/api/auth/me", { headers: { Cookie: cookie } });
+  expect(me.status).toBe(200);
+  expect(await me.json()).toMatchObject({ canManageApp: false });
+  expect((await fetchWorker(env, "/gui/api/sandbox-create", request)).status).toBe(403);
+  expect(doNames).toEqual([]);
+  env.APP_ALLOW_PUBLIC_SANDBOX_CREATION = "true";
+  expect((await fetchWorker(env, "/gui/api/sandbox-create", request)).status).toBe(201);
 });
 
 test("matching app owners and members can create only their own sandbox", async () => {
