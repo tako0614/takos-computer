@@ -31,14 +31,14 @@ function formatSize(bytes: number): string {
 export default function FileBrowser(
   props: { mcpUrl: string; cwd: () => string; setCwd: (v: string) => void },
 ) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [version, setVersion] = createSignal(0);
 
   const [entries] = createResource(
-    () => ({ cwd: props.cwd(), v: version() }),
-    async ({ cwd }) => {
+    () => ({ cwd: props.cwd(), v: version(), mcpUrl: props.mcpUrl }),
+    async ({ cwd, mcpUrl }) => {
       const result = await mcpCall<unknown>(
-        props.mcpUrl,
+        mcpUrl,
         "file_list",
         { path: cwd },
       );
@@ -57,17 +57,25 @@ export default function FileBrowser(
     },
   );
 
+  const parentDirectory = () => {
+    // Absolute paths do not reveal the configured jail root to this client.
+    if (props.cwd().startsWith("/")) return ".";
+    const current = props.cwd().replace(/\/+$/, "");
+    if (!current || current === "." || current.split("/").includes("..")) {
+      return ".";
+    }
+    const slash = current.lastIndexOf("/");
+    return slash < 0 ? "." : slash === 0 ? "/" : current.slice(0, slash);
+  };
+
   const navigate = (name: string) => {
-    const current = props.cwd().replace(/\/+$/, "") || ".";
     if (name === "..") {
-      props.setCwd(
-        current === "."
-          ? "."
-          : current.replace(/\/[^/]+$/, "") ||
-            (current.startsWith("/") ? "/" : "."),
-      );
+      props.setCwd(parentDirectory());
       return;
     }
+    const current = props.cwd() === "/"
+      ? "/"
+      : props.cwd().replace(/\/+$/, "") || ".";
     props.setCwd(current === "/" ? `/${name}` : `${current}/${name}`);
   };
 
@@ -75,9 +83,23 @@ export default function FileBrowser(
     <div>
       <div class="flex gap-2 items-center" style="margin-bottom:0.5rem">
         <span style="font-size:0.8125rem; font-weight:600">{t("files")}</span>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          aria-label={props.cwd().startsWith("/")
+            ? language() === "ja" ? "作業フォルダのルートへ" : "Workspace root"
+            : language() === "ja" ? "親フォルダへ" : "Parent directory"}
+          disabled={props.cwd() === "."}
+          onClick={() => navigate("..")}
+        >
+          ↑ {props.cwd().startsWith("/")
+            ? language() === "ja" ? "ルート" : "Root"
+            : language() === "ja" ? "上へ" : "Up"}
+        </button>
         <input
           class="input input-mono flex-1"
-          style="font-size:0.8125rem"
+          style="font-size:0.8125rem; min-width:0"
+          aria-label={language() === "ja" ? "フォルダのパス" : "Directory path"}
           value={props.cwd()}
           onInput={(e) => props.setCwd(e.currentTarget.value)}
           onKeyDown={(e) => {
