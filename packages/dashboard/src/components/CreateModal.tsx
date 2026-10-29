@@ -72,6 +72,15 @@ export default function CreateModal(props: {
     e.preventDefault();
     if (loading()) return;
     setLoading(true);
+    // Disabling the submitter must not leave keyboard focus behind the modal.
+    queueMicrotask(() => {
+      if (
+        props.open && dialogRef.isConnected &&
+        !dialogRef.contains(document.activeElement)
+      ) {
+        formRef.querySelector<HTMLInputElement>("input")?.focus();
+      }
+    });
     const fd = new FormData(formRef);
     const payload = {
       sessionId: fd.get("sessionId") as string,
