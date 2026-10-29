@@ -1,4 +1,4 @@
-import { createResource, createSignal, onCleanup } from "solid-js";
+import { createResource, createSignal, onCleanup, Show } from "solid-js";
 import { sandboxSessions } from "../lib/api.ts";
 import SessionTable from "../components/SessionTable.tsx";
 import CreateModal from "../components/CreateModal.tsx";
@@ -6,7 +6,7 @@ import LanguageSwitcher from "../components/LanguageSwitcher.tsx";
 import { useI18n } from "../i18n.ts";
 
 export default function Dashboard() {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const [modalOpen, setModalOpen] = createSignal(false);
   const [version, setVersion] = createSignal(0);
 
@@ -14,7 +14,7 @@ export default function Dashboard() {
 
   const [sandboxData] = createResource(
     () => version(),
-    () => sandboxSessions.list(),
+    () => sandboxSessions.list().catch(() => null),
   );
 
   const timer = setInterval(reload, 10_000);
@@ -36,7 +36,21 @@ export default function Dashboard() {
         <LanguageSwitcher />
       </div>
 
-      <div class="flex" style="justify-content:flex-end; margin-bottom:0.75rem">
+      <div
+        class="flex gap-2"
+        style="justify-content:flex-end; flex-wrap:wrap; margin-bottom:0.75rem"
+      >
+        <button
+          type="button"
+          class="btn btn-ghost"
+          aria-disabled={sandboxData.loading}
+          style={{ opacity: sandboxData.loading ? 0.5 : 1 }}
+          onClick={() => {
+            if (!sandboxData.loading) reload();
+          }}
+        >
+          {language() === "ja" ? "一覧を更新" : "Refresh sessions"}
+        </button>
         <button
           type="button"
           class="btn btn-primary"
@@ -46,11 +60,22 @@ export default function Dashboard() {
         </button>
       </div>
 
-      <SessionTable
-        sessions={sandboxData()?.sessions ?? []}
-        loading={sandboxData.loading}
-        onDestroy={destroySandbox}
-      />
+      <Show
+        when={sandboxData() !== null || sandboxData.loading}
+        fallback={
+          <div class="card" role="alert" style="padding:1rem; color:#fca5a5">
+            {language() === "ja"
+              ? "セッション一覧を取得できません。一覧を更新してください。"
+              : "Session list unavailable. Refresh sessions to try again."}
+          </div>
+        }
+      >
+        <SessionTable
+          sessions={sandboxData()?.sessions ?? []}
+          loading={sandboxData.loading}
+          onDestroy={destroySandbox}
+        />
+      </Show>
 
       <div style="margin-top:0.75rem; font-size:0.6875rem" class="muted">
         {t("autoRefresh")}
