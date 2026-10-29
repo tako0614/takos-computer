@@ -59,8 +59,8 @@ export default function SandboxViewer() {
   // Status polling
   const [statusVersion, setStatusVersion] = createSignal(0);
   const [status] = createResource(
-    () => statusVersion(),
-    () => sandboxSessions.get(sessionId()).catch(() => null),
+    () => ({ id: sessionId(), version: statusVersion() }),
+    ({ id }) => sandboxSessions.get(id).catch(() => null),
   );
   const timer = setInterval(() => setStatusVersion((v) => v + 1), 10_000);
   onCleanup(() => clearInterval(timer));
