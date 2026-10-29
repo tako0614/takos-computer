@@ -17,7 +17,8 @@ export interface InterfaceOAuthOptions {
 
 export interface InterfaceOAuthAuthorization {
   readonly subject: string;
-  readonly workspaceId: string;
+  /** Configured legacy context only; never required to prove the app grant. */
+  readonly workspaceId?: string;
   readonly capsuleId: string;
   readonly interfaceId: string;
   readonly interfaceBindingId: string;
@@ -107,7 +108,8 @@ export function hasValidInterfaceOAuthConfiguration(input: {
   return (
     userInfoEndpoint(input.issuerUrl) !== null &&
     canonicalResourceUri(input.audience ?? "") !== null &&
-    boundedId(input.workspaceId) &&
+    (input.workspaceId === undefined || input.workspaceId === "" ||
+      boundedId(input.workspaceId)) &&
     boundedId(input.capsuleId)
   );
 }
@@ -151,12 +153,14 @@ export async function authorizeInterfaceOAuthBearer(
 ): Promise<InterfaceOAuthAuthorization | null> {
   const endpoint = userInfoEndpoint(options.issuerUrl);
   const expectedAudience = canonicalResourceUri(options.expectedAudience);
-  const expectedWorkspaceId = options.expectedWorkspaceId?.trim();
-  const expectedCapsuleId = options.expectedCapsuleId?.trim();
+  const expectedWorkspaceId = options.expectedWorkspaceId === ""
+    ? undefined
+    : options.expectedWorkspaceId;
+  const expectedCapsuleId = options.expectedCapsuleId;
   if (
     !endpoint ||
     !expectedAudience ||
-    !boundedId(expectedWorkspaceId) ||
+    (expectedWorkspaceId !== undefined && !boundedId(expectedWorkspaceId)) ||
     !boundedId(expectedCapsuleId) ||
     !validPermission(expectedPermission) ||
     !requestTargetsResource(request, expectedAudience) ||
@@ -186,7 +190,11 @@ export async function authorizeInterfaceOAuthBearer(
       !boundedId(claims.sub) ||
       claims.aud !== expectedAudience ||
       claims.scope !== expectedPermission ||
-      evidence.workspace_id !== expectedWorkspaceId ||
+      (evidence.workspace_id !== undefined && (
+        !boundedId(evidence.workspace_id) ||
+        (expectedWorkspaceId !== undefined &&
+          evidence.workspace_id !== expectedWorkspaceId)
+      )) ||
       evidence.capsule_id !== expectedCapsuleId ||
       !boundedId(evidence.interface_id) ||
       !boundedId(evidence.interface_binding_id) ||

@@ -17,6 +17,7 @@ const DEPLOY_KEYS = [
   "workspaceId",
   "capsuleId",
   "appOidc",
+  "allowPublicSandboxCreation",
   "oidcClientId",
   "oidcRedirectUri",
   "takosApiUrl",
@@ -37,6 +38,7 @@ export interface OpenTofuDeployConfig {
   workspaceId: string;
   capsuleId: string;
   appOidc: boolean;
+  allowPublicSandboxCreation: boolean;
   oidcClientId: string;
   oidcRedirectUri: string;
   takosApiUrl: string;
@@ -51,7 +53,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function exactKeys(value: Record<string, unknown>): boolean {
   const actual = Object.keys(value).sort();
-  const expected = [...DEPLOY_KEYS].sort();
+  const expected = DEPLOY_KEYS.filter(
+    (key) => key !== "workspaceId" || Object.hasOwn(value, key),
+  ).sort();
   return (
     actual.length === expected.length &&
     actual.every((key, index) => key === expected[index])
@@ -158,9 +162,12 @@ export function parseOpenTofuDeployConfig(raw: string): OpenTofuDeployConfig {
     compatibilityDate: requiredString(decoded, "compatibilityDate"),
     sourceDigest: requiredString(decoded, "sourceDigest"),
     accountsIssuer: requiredString(decoded, "accountsIssuer"),
-    workspaceId: requiredString(decoded, "workspaceId"),
+    workspaceId: Object.hasOwn(decoded, "workspaceId")
+      ? requiredString(decoded, "workspaceId")
+      : "",
     capsuleId: requiredString(decoded, "capsuleId"),
     appOidc: requiredBoolean(decoded, "appOidc"),
+    allowPublicSandboxCreation: requiredBoolean(decoded, "allowPublicSandboxCreation"),
     oidcClientId: requiredString(decoded, "oidcClientId"),
     oidcRedirectUri: requiredString(decoded, "oidcRedirectUri"),
     takosApiUrl: requiredString(decoded, "takosApiUrl"),
@@ -204,9 +211,13 @@ export function parseOpenTofuDeployConfig(raw: string): OpenTofuDeployConfig {
       `${CONFIG_ENV}.accountsIssuer`,
     );
   }
-  const ownerValues = [config.workspaceId, config.capsuleId];
-  if (ownerValues.some(Boolean) && !ownerValues.every(Boolean)) {
-    throw new Error("workspaceId and capsuleId must be configured together");
+  if (
+    (config.workspaceId || config.capsuleId) &&
+    (!config.accountsIssuer || (!config.capsuleId && !config.appOidc))
+  ) {
+    throw new Error(
+      "App context requires accountsIssuer and capsuleId for Interface OAuth, or appOidc for legacy Workspace sign-in",
+    );
   }
   config.oidcRedirectUri = optionalHttpsUrl(
     config.oidcRedirectUri,
@@ -241,14 +252,15 @@ export function createWranglerConfig(
     MAX_SANDBOX_SESSIONS_PER_USER: String(config.maxUserSessions),
   };
   if (config.accountsIssuer) vars.OIDC_ISSUER_URL = config.accountsIssuer;
-  if (config.workspaceId && config.capsuleId) {
-    vars.APP_WORKSPACE_ID = config.workspaceId;
-    vars.APP_CAPSULE_ID = config.capsuleId;
-  }
+  if (config.workspaceId) vars.APP_WORKSPACE_ID = config.workspaceId;
+  if (config.capsuleId) vars.APP_CAPSULE_ID = config.capsuleId;
   if (config.appOidc) {
     vars.APP_AUTH_REQUIRED = "1";
     vars.OIDC_CLIENT_ID = config.oidcClientId;
     vars.OIDC_REDIRECT_URI = config.oidcRedirectUri;
+  }
+  if (config.allowPublicSandboxCreation) {
+    vars.APP_ALLOW_PUBLIC_SANDBOX_CREATION = "true";
   }
   if (config.takosApiUrl) vars.TAKOS_API_URL = config.takosApiUrl;
 

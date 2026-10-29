@@ -71,9 +71,10 @@ try {
       compatibilityDate: "2026-07-19",
       sourceDigest: "c".repeat(64),
       accountsIssuer: "https://accounts.example.test",
-      workspaceId: "ws_check",
+      workspaceId: "",
       capsuleId: "cap_check",
       appOidc: false,
+      allowPublicSandboxCreation: false,
       oidcClientId: "",
       oidcRedirectUri:
         "https://takos-computer-check.example.workers.dev/gui/api/auth/callback",

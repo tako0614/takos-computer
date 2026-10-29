@@ -18,6 +18,10 @@ import {
   verifyIdToken,
 } from "./oidc-verify.ts";
 import type { SandboxHostEnv } from "./sandbox-session-types.ts";
+import {
+  type AppSignInClaims,
+  resolveAppSignInClaims,
+} from "./app-signin-claims.ts";
 
 const SESSION_COOKIE = "takos_computer_session";
 const STATE_COOKIE = "takos_computer_oauth_state";
@@ -37,7 +41,7 @@ type OAuthState = {
   exp: number;
 };
 
-export type GuiSession = {
+export type GuiSession = AppSignInClaims & {
   sub: string;
   name?: string;
   accountId?: string;
@@ -318,7 +322,36 @@ export async function readGuiSession(
   if (!raw) return null;
   const session = await unseal<GuiSession>(raw, config.sessionSecret);
   if (!session || session.exp <= Math.floor(Date.now() / 1000)) return null;
+  // Recheck the binding for every request, including sessions minted before a
+  // runtime configuration change. Claim-absent legacy sessions stay valid.
+  try {
+    if (session.legacyWorkspaceId !== undefined && (
+      !session.legacyWorkspaceId ||
+      session.legacyWorkspaceId !== envValue(env, "APP_WORKSPACE_ID") ||
+      (session.appRole !== "owner" && session.appRole !== "member")
+    )) return null;
+    const currentClaims = resolveAppSignInClaims({
+      capsule_id: session.capsuleId,
+      ...(session.legacyWorkspaceId
+        ? { workspace_id: session.legacyWorkspaceId, role: session.appRole }
+        : { app_role: session.appRole }),
+    }, envValue(env, "APP_CAPSULE_ID"), envValue(env, "APP_WORKSPACE_ID"));
+    // A removed Capsule binding or a legacy owner role downgrade must not
+    // leave the sealed login snapshot with more authority than current config.
+    if (session.appRole !== currentClaims.appRole) return null;
+  } catch {
+    return null;
+  }
   return session;
+}
+
+export function guiSessionCanCreateSandbox(
+  env: AppRuntimeEnv,
+  session: GuiSession,
+): boolean {
+  // The caller must first authenticate and recheck bindings with readGuiSession.
+  return flagEnabled(env, "APP_ALLOW_PUBLIC_SANDBOX_CREATION") ||
+    session.appRole === "owner" || session.appRole === "member";
 }
 
 export async function requireGuiAppAuth(
@@ -511,6 +544,12 @@ export function registerGuiAuthRoutes(
       if (!subject || user.sub !== subject) {
         throw new Error("OAuth userinfo subject mismatch");
       }
+      const appClaims = resolveAppSignInClaims(
+        claims.takosumi,
+        envValue(c.env, "APP_CAPSULE_ID"),
+        envValue(c.env, "APP_WORKSPACE_ID"),
+        claims.workspace_memberships,
+      );
       const headers = new Headers({
         "Cache-Control": "no-store",
         "Location": state.returnTo,
@@ -529,6 +568,7 @@ export function registerGuiAuthRoutes(
           spaceId: stringClaim(claims.takosumi?.space_id),
           appId: stringClaim(claims.takosumi?.app_id),
           role: stringClaim(claims.takosumi?.role),
+          ...appClaims,
         }),
       );
       return new Response(null, { status: 302, headers });
@@ -551,6 +591,10 @@ export function registerGuiAuthRoutes(
       spaceId: session?.spaceId,
       appId: session?.appId,
       role: session?.role,
+      capsuleId: session?.capsuleId,
+      appRole: session?.appRole,
+      // Login snapshot (up to 12 hours), also used for sandbox creation.
+      canManageApp: session?.appRole === "owner" || session?.appRole === "member",
     });
   });
 

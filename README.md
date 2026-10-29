@@ -287,19 +287,60 @@ Durable Object で管理されます。各セッションは個別のコンテ�
 | `SANDBOX_HOST_AUTH_TOKEN`    | _(none)_    | サンドボックスホストの管理 / セッションルートを保護する bearer トークン。サンドボックスコンテナには注入しない                                |
 | `MCP_AUTH_TOKEN`             | _(none)_    | ワーカー↔コンテナの `/mcp` 認証トークン。サンドボックスサービスに注入されるが、シェル子プロセスからは除去される                              |
 | `APP_AUTH_REQUIRED`          | `0`         | `1` で `/gui` を Takosumi Accounts OIDC session で保護                                                                                       |
+| `APP_ALLOW_PUBLIC_SANDBOX_CREATION` | `false` | operator が `true` を明示した場合だけ、アプリメンバー以外の認証済み GUI ユーザーにも sandbox 作成を許可。作成費用は operator 負担 |
 | `APP_SESSION_SECRET`         | _(none)_    | `/gui` session / OIDC state cookie の HMAC secret                                                                                            |
 | `OIDC_ISSUER_URL`            | _(none)_    | Takosumi Accounts OIDC issuer URL                                                                                                            |
 | `OIDC_CLIENT_ID`             | _(none)_    | Takosumi Accounts OIDC client ID                                                                                                             |
 | `OIDC_CLIENT_SECRET`         | _(none)_    | 外部confidential OIDC client用の任意secret。Takosumi Accounts public PKCE clientでは設定しない                                               |
 | `OIDC_REDIRECT_URI`          | _(derived)_ | OIDC callback URI。managed install では Cloud が確定した redirect URI を inject。standalone/dev のみ trusted configured base URL から derive |
 | `MCP_URL`                    | _(none)_    | Interface OAuth の exact resource audience (`mcp_url` Output と同じ URL)                                                                     |
-| `APP_WORKSPACE_ID`           | _(none)_    | Interface OAuth evidence で照合する owning Workspace                                                                                         |
-| `APP_CAPSULE_ID`             | _(none)_    | Interface OAuth evidence で照合する owning Capsule                                                                                           |
+| `APP_WORKSPACE_ID`           | _(none)_    | 旧 GUI メンバー互換性と Interface OAuth evidence の照合先 Workspace                                                                         |
+| `APP_CAPSULE_ID`             | _(none)_    | GUI OIDC sign-in と Interface OAuth evidence で照合する owning Capsule                                                                         |
 | `MCP_ALLOW_UNAUTHENTICATED`  | `false`     | `true` でローカル / 開発時のみ `MCP_AUTH_TOKEN` 無しでサンドボックスサービス `/mcp` を許可                                                   |
 | `TAKOS_TOKEN`                | _(none)_    | サンドボックスサービスに渡せる Takos API bearer トークン。シェル子プロセスは `allow_takos_token` が設定された場合のみ継承                    |
 | `TAKOS_API_URL`              | _(none)_    | サンドボックスコンテナに `TAKOS_API_URL` として注入される Takos API エンドポイント                                                           |
 | `TAKOS_TRUST_ROUTED_GUI_API` | _(none)_    | Takos dispatch 経由でルーティングされた GUI / API 要求の `X-Takos-Internal-Marker: 1` 認証を有効化する場合のみ `1` を設定                    |
 | `SHUTDOWN_GRACE_MS`          | `15000`     | SIGTERM 時の強制終了までの猶予 (ms)                                                                                                          |
+
+GUI OIDC は署名済みの `takosumi.capsule_id` を、設定された `APP_CAPSULE_ID` と
+照合します。明示された `takosumi.app_role` は `owner` / `member` のみ受け入れます。
+現在の Accounts は `app_role` を出さず、`takosumi.{capsule_id,workspace_id,role}` と
+top-level `workspace_memberships: string[]` を返すため、`app_role` がないときは
+設定された `APP_WORKSPACE_ID` と一致する旧メンバー情報へフォールバックします。
+旧 `owner` / `admin` / `member` / `viewer` は既存互換の member として扱います。
+旧 Workspace role だけではアプリ所有者を証明できません。Accounts が Workspace の
+`ownerUserId` とログイン user を照合して発行する、Capsule に束縛された明示
+`app_role=owner` だけをアプリ owner として扱います。
+Capsule claim がある構成では nested `workspace_id` の一致が必須です。
+Capsule claim のない旧 identity context、または `APP_CAPSULE_ID` 未設定の旧構成だけは、
+Workspace membership 配列に照合先が含まれる場合も member として扱います。
+別 Capsule、不一致 Workspace、不正な明示 role / membership は拒否します。
+`APP_CAPSULE_ID` が未設定の旧 OIDC 構成では Capsule claim を認可に使わず、
+明示 `app_role` があってもその権限を使いません。
+`APP_WORKSPACE_ID` に一致する旧メンバー情報を利用できます。OpenTofu のこの構成は
+`enable_app_oidc = true` と direct MCP bearer が必要で、Interface OAuth は有効になりません。
+
+`/gui/api/auth/me` は `capsuleId`、`appRole`、`canManageApp` を返します。通常ユーザーも
+sign-in して既存の自分の sandbox を一覧・操作できますが、sign-in だけでは operator
+負担の sandbox を作成できません。作成 endpoint は app owner/member または上記の
+旧メンバー互換性を要求します。公開作成は operator が Worker 設定で
+`APP_ALLOW_PUBLIC_SANDBOX_CREATION=true` を明示した場合だけ、認証済みユーザーに
+開放します。匿名作成は許可しません。host-admin bearer、trusted router、machine
+Interface OAuth の既存 authority と、各 sandbox のユーザー所有 ACL は維持します。
+
+メンバー情報はログイン時点の snapshot で、session の有効期限は最大 12 時間です。
+このアプリは access token を保存せず、役割の変更・削除をオンラインで再確認しません。
+sandbox 作成にはこの期限付き snapshot を使います。各 request で Capsule と互換
+Workspace の設定を再照合します。既存 session にメンバー情報がない場合は再 sign-in
+が必要です。`canManageApp` は現在の管理者権限や live revocation の証明にはなりません。
+
+Interface OAuth は issuer、`APP_CAPSULE_ID`、`MCP_URL` があれば有効になります。
+machine capability は exact audience / `mcp.invoke` scope / Capsule / Interface /
+binding / 正の revision で検証し、`app_role` は要求しません。旧 `workspace_id` evidence
+は省略でき、明示される場合は形式を検証し、`APP_WORKSPACE_ID` 設定があれば一致も
+確認します。Capsule の期待値を token の claim から決めることはありません。
+Workspace 設定のない sandbox の旧 space context は空文字になり、caller が指定した
+space/user は利用しません。
 
 ## Cloudflare Worker Bindings
 
@@ -358,11 +399,16 @@ repository内のDockerfileは `linux/amd64` のBun 1.3.14 image manifestをdiges
 managed install のoperatorは、このGit sourceとmodule path `.`だけに一致する
 service-side `InstallConfig` を先に用意する必要があります。そのconfigは少なくとも:
 
-- `enable_cloudflare_resources = true` を固定し、`app_workspace_id` /
-  `app_capsule_id` をinstall contextから注入する
+- `enable_cloudflare_resources = true` を固定し、`app_capsule_id` を install
+  context から注入する。`app_workspace_id` は旧環境との互換用の任意設定
 - GUI OIDCを有効にする場合はAccountsのpublic PKCE登録からAccounts URL、issuer、
   client id、登録済みredirect URIを写像し、存在しないclient secretを要求しない。
   callbackはcanonical public URLの `/gui/api/auth/callback` と一致させる
+- `enable_app_oidc = true` で `app_capsule_id` と `app_workspace_id` がともに
+  空なら、`allow_public_sandbox_creation` を明示する。`false` は認証済みの
+  非メンバーによる作成を403にし、`true` はoperator負担の作成を許可する。
+  省略時のOpenTofu planは理由を表示して停止する。App/Workspaceが設定されて
+  いる場合も、この選択はclaimの照合や既存sandboxの所有ACLを変更しない
 - custom routeを別途作らない場合は `enable_workers_dev_subdomain = true` と
   `cloudflare_workers_subdomain` を指定し、実際に到達できるURLを作る
 - Repository manifest が要求する `launch_url` / `mcp_url` の公開、
@@ -374,7 +420,11 @@ service-side `InstallConfig` を先に用意する必要があります。その
 policyで受理した後、実際のInterface / BindingはDB-owned stateから確定します。
 manifestや通常のURL Outputだけでアクセス権が付与されることはありません。
 
-Workspace / Capsule contextの注入とGUI OIDCの有効化は引き続き正当なoperator設定が
+公開順序はインストール型アプリの更新を先に行い、Accounts writer B（#657）の
+`app_role` 発行を最後に開きます。未更新のself-hostアプリは移行中も旧Workspace
+membershipに依存するため、その更新率を確認してから旧claimを停止します。
+
+Capsule contextの注入とGUI OIDCの有効化は引き続き正当なoperator設定が
 必要です。また、現root moduleにはWranglerを呼ぶ `local-exec` があり、one-touch
 installerの現compatibility policyでは未対応です。launcherの宣言を、実行adapterや
 認証設定が整った証明、導入成功の証明として扱いません。このmoduleもcredentialを

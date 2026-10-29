@@ -164,7 +164,7 @@ variable "takosumi_accounts_issuer_url" {
 }
 
 variable "app_workspace_id" {
-  description = "Owning Takosumi Workspace id required for Interface OAuth evidence."
+  description = "Optional legacy Takosumi Workspace context for GUI membership and Interface OAuth evidence."
   type        = string
   default     = ""
 }
@@ -179,6 +179,13 @@ variable "enable_app_oidc" {
   description = "Protect /gui with Takosumi Accounts OIDC."
   type        = bool
   default     = false
+}
+
+variable "allow_public_sandbox_creation" {
+  description = "Explicit operator choice for authenticated nonmember sandbox creation. Null requires a choice for OIDC without an app or Workspace binding; true funds their sandboxes."
+  type        = bool
+  default     = null
+  nullable    = true
 }
 
 variable "oidc_client_id" {
@@ -251,7 +258,6 @@ locals {
   accounts_issuer    = trimsuffix(trimspace(var.takosumi_accounts_issuer_url), "/")
   interface_oauth_enabled = (
     local.accounts_issuer != "" &&
-    trimspace(var.app_workspace_id) != "" &&
     trimspace(var.app_capsule_id) != "" &&
     local.mcp_url != null
   )
@@ -306,23 +312,24 @@ locals {
     takosToken   = var.takos_token
   }))
   deploy_input = {
-    accountId         = trimspace(var.cloudflare_account_id)
-    workerName        = local.worker_name
-    publicOrigin      = local.public_origin
-    workersDev        = var.enable_workers_dev_subdomain
-    sessionIndexId    = try(cloudflare_workers_kv_namespace.session_index[0].id, "")
-    containerImage    = trimspace(var.container_image)
-    containerMax      = var.container_max_instances
-    compatibilityDate = "2026-07-19"
-    sourceDigest      = local.source_digest
-    accountsIssuer    = local.accounts_issuer
-    workspaceId       = trimspace(var.app_workspace_id)
-    capsuleId         = trimspace(var.app_capsule_id)
-    appOidc           = var.enable_app_oidc
-    oidcClientId      = trimspace(var.oidc_client_id)
-    oidcRedirectUri   = local.oidc_redirect_uri
-    takosApiUrl       = trimspace(var.takos_api_url)
-    maxUserSessions   = var.max_sandbox_sessions_per_user
+    accountId                  = trimspace(var.cloudflare_account_id)
+    workerName                 = local.worker_name
+    publicOrigin               = local.public_origin
+    workersDev                 = var.enable_workers_dev_subdomain
+    sessionIndexId             = try(cloudflare_workers_kv_namespace.session_index[0].id, "")
+    containerImage             = trimspace(var.container_image)
+    containerMax               = var.container_max_instances
+    compatibilityDate          = "2026-07-19"
+    sourceDigest               = local.source_digest
+    accountsIssuer             = local.accounts_issuer
+    workspaceId                = trimspace(var.app_workspace_id)
+    capsuleId                  = trimspace(var.app_capsule_id)
+    appOidc                    = var.enable_app_oidc
+    allowPublicSandboxCreation = coalesce(var.allow_public_sandbox_creation, false)
+    oidcClientId               = trimspace(var.oidc_client_id)
+    oidcRedirectUri            = local.oidc_redirect_uri
+    takosApiUrl                = trimspace(var.takos_api_url)
+    maxUserSessions            = var.max_sandbox_sessions_per_user
   }
 }
 
@@ -362,15 +369,15 @@ resource "terraform_data" "sandbox_host" {
 
     precondition {
       condition     = trimspace(var.published_mcp_auth_token) != "" || local.interface_oauth_enabled
-      error_message = "Configure either published_mcp_auth_token for direct/self-host MCP or Accounts issuer + app_workspace_id + app_capsule_id for Interface OAuth."
+      error_message = "Configure either published_mcp_auth_token for direct/self-host MCP or Accounts issuer + app_capsule_id for Interface OAuth."
     }
 
     precondition {
       condition = (
         (trimspace(var.app_workspace_id) == "" && trimspace(var.app_capsule_id) == "") ||
-        (local.accounts_issuer != "" && trimspace(var.app_workspace_id) != "" && trimspace(var.app_capsule_id) != "")
+        (local.accounts_issuer != "" && (trimspace(var.app_capsule_id) != "" || var.enable_app_oidc))
       )
-      error_message = "Interface OAuth ownership requires Accounts issuer, app_workspace_id, and app_capsule_id together."
+      error_message = "App context requires Accounts issuer and app_capsule_id for Interface OAuth, or enable_app_oidc for legacy Workspace sign-in."
     }
 
     precondition {
@@ -393,6 +400,16 @@ resource "terraform_data" "sandbox_host" {
         local.oidc_redirect_uri != ""
       )
       error_message = "enable_app_oidc requires the Accounts issuer, OIDC client id, and a resolvable redirect URI."
+    }
+
+    precondition {
+      condition = (
+        !var.enable_app_oidc ||
+        trimspace(var.app_capsule_id) != "" ||
+        trimspace(var.app_workspace_id) != "" ||
+        var.allow_public_sandbox_creation != null
+      )
+      error_message = "enable_app_oidc without app_capsule_id or app_workspace_id requires explicitly setting allow_public_sandbox_creation (true to fund authenticated nonmember sandboxes, false to deny creation)."
     }
 
     precondition {

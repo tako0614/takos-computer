@@ -325,32 +325,26 @@ function sessionCookieFromSetCookie(setCookie: string | null): string {
 }
 
 /**
- * Mint a sealed GUI session cookie for an arbitrary principal by driving the
- * launch-token flow with a stubbed `launch-token/consume` upstream.
+ * Mint a sealed member session for ownership/quota route tests. OIDC and
+ * launch-token exchange behavior have separate tests below.
  */
-function mintGuiSessionCookie(
+async function mintGuiSessionCookie(
   env: SandboxHostEnv,
-  claims: { sub: string; spaceId?: string },
+  claims: { sub: string; spaceId?: string; appRole?: "owner" | "member"; legacyWorkspaceId?: string },
+  options?: { unbound?: boolean },
 ): Promise<string> {
-  return withFetch((request) => {
-    const url = new URL(fetchRequestUrl(request));
-    if (url.pathname.endsWith("/launch-token/consume")) {
-      return Promise.resolve(Response.json({
-        consumed: true,
-        sub: claims.sub,
-        space_id: claims.spaceId,
-      }));
-    }
-    return Promise.resolve(Response.json({ error: "unexpected" }, {
-      status: 404,
-    }));
-  }, async () => {
-    const response = await fetchWorker(
-      env,
-      "/gui/api/auth/launch?return_to=%2Fgui&launch_token=tok",
-    );
-    return sessionCookieFromSetCookie(response.headers.get("set-cookie"));
+  if (!options?.unbound) env.APP_CAPSULE_ID ??= "cap_computer";
+  const payload = base64UrlEncodeJson({
+    ...(options?.unbound ? {} : { capsuleId: env.APP_CAPSULE_ID }),
+    appRole: options?.unbound ? undefined : "member", ...claims,
+    exp: Math.floor(Date.now() / 1000) + 300,
   });
+  const key = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(APP_SESSION_SECRET),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return `takos_computer_session=${payload}.${base64UrlEncodeBytes(new Uint8Array(signature))}`;
 }
 
 test("sandbox host serves published GUI app routes", async () => {
@@ -606,6 +600,7 @@ test("sandbox host OIDC callback verifies id token and creates GUI session", asy
       spaceId: "space-1",
       appId: "jp.takos.computer",
       role: "owner",
+      canManageApp: false,
     });
   });
 });
@@ -967,6 +962,91 @@ test("sandbox host forces GUI session owner on create and rejects foreign sessio
     }),
   });
   expect(clobber.status).toEqual(409);
+});
+
+test("sandbox creation requires membership before touching funded resources", async () => {
+  const { env, doNames } = createEnv({ appAuthRequired: true });
+  const cookie = await mintGuiSessionCookie(env, { sub: "ordinary-user", appRole: undefined });
+  const request = {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ sessionId: "ordinary-session", userId: "forged", spaceId: "forged" }),
+  };
+  expect((await fetchWorker(env, "/gui/api/auth/me", { headers: { Cookie: cookie } })).status)
+    .toBe(200);
+  const denied = await fetchWorker(env, "/gui/api/sandbox-create", request);
+  expect(denied.status).toBe(403);
+  expect(doNames).toEqual([]);
+  expect((await fetchWorker(env, "/create", request)).status).toBe(401);
+  expect(doNames).toEqual([]);
+
+  // Only a deliberate operator opt-in opens creation to ordinary signed-in
+  // users. It does not enable anonymous creation or caller-supplied ownership.
+  env.APP_ALLOW_PUBLIC_SANDBOX_CREATION = "true";
+  expect((await fetchWorker(env, "/gui/api/sandbox-create", request)).status).toBe(201);
+  const state = await fetchWorker(env, "/gui/api/sandbox-session/ordinary-session", {
+    headers: { Cookie: cookie },
+  });
+  expect(await state.json()).toMatchObject({ userId: "ordinary-user", spaceId: "" });
+  expect((await fetchWorker(env, "/gui/api/sandbox-create", {
+    ...request, headers: { "Content-Type": "application/json" },
+  })).status).toBe(401);
+});
+
+test("unbound OIDC sign-in retains creation denial until the operator opts in", async () => {
+  const { env, doNames } = createEnv({ appAuthRequired: true });
+  env.APP_CAPSULE_ID = undefined;
+  env.APP_WORKSPACE_ID = undefined;
+  const cookie = await mintGuiSessionCookie(env, { sub: "unbound-user" }, { unbound: true });
+  const request = {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Cookie: cookie },
+    body: JSON.stringify({ sessionId: "unbound-session" }),
+  };
+  const me = await fetchWorker(env, "/gui/api/auth/me", { headers: { Cookie: cookie } });
+  expect(me.status).toBe(200);
+  expect(await me.json()).toMatchObject({ canManageApp: false });
+  expect((await fetchWorker(env, "/gui/api/sandbox-create", request)).status).toBe(403);
+  expect(doNames).toEqual([]);
+  env.APP_ALLOW_PUBLIC_SANDBOX_CREATION = "true";
+  expect((await fetchWorker(env, "/gui/api/sandbox-create", request)).status).toBe(201);
+});
+
+test("matching app owners and members can create only their own sandbox", async () => {
+  for (const appRole of ["owner", "member"] as const) {
+    const { env } = createEnv({ appAuthRequired: true });
+    const cookie = await mintGuiSessionCookie(env, { sub: "member-user", appRole });
+    expect((await fetchWorker(env, "/gui/api/sandbox-create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ sessionId: "member-session", userId: "forged", spaceId: "forged" }),
+    })).status).toBe(201);
+    const state = await fetchWorker(env, "/gui/api/sandbox-session/member-session", {
+      headers: { Cookie: cookie },
+    });
+    expect(await state.json()).toMatchObject({ userId: "member-user", spaceId: "" });
+  }
+});
+
+test("legacy members can create only while the configured Workspace still matches", async () => {
+  for (const capsuleId of ["cap_computer", undefined]) {
+    const { env, doNames } = createEnv({ appAuthRequired: true });
+    env.APP_WORKSPACE_ID = "ws_computer";
+    const cookie = await mintGuiSessionCookie(env, {
+      sub: "legacy-member", legacyWorkspaceId: "ws_computer",
+    });
+    env.APP_CAPSULE_ID = capsuleId;
+    const request = {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ sessionId: "legacy-session" }),
+    };
+    expect((await fetchWorker(env, "/gui/api/sandbox-create", request)).status).toBe(201);
+    const accesses = doNames.length;
+    env.APP_WORKSPACE_ID = "ws_changed";
+    expect((await fetchWorker(env, "/gui/api/sandbox-create", request)).status).toBe(401);
+    expect(doNames).toHaveLength(accesses);
+  }
 });
 
 test("sandbox host does not let a space-less GUI session forge spaceId", async () => {
@@ -1538,73 +1618,76 @@ test("sandbox host published MCP lists computer tools with published auth", asyn
   }
 });
 
-test("sandbox host published MCP accepts exact Interface OAuth and uses stable owner scope", async () => {
-  const { env, doNames } = createEnv({
-    publishedMcpAuthToken: null,
-    interfaceOAuth: true,
-  });
-  const userInfo = {
-    token_use: "interface_oauth",
-    sub: "svc_agent",
-    aud: "https://sandbox-host.test/mcp",
-    scope: "mcp.invoke",
-    takosumi: {
-      workspace_id: "ws_interface",
-      capsule_id: "cap_interface",
-      interface_id: "if_computer_mcp",
-      interface_binding_id: "ifb_agent",
-      interface_resolved_revision: 2,
-    },
-  };
+for (const workspaceMode of ["legacy", "config_only", "capsule_only"] as const) {
+  test(`sandbox host published MCP accepts exact Interface OAuth with ${workspaceMode} context`, async () => {
+    const { env, doNames } = createEnv({
+      publishedMcpAuthToken: null,
+      interfaceOAuth: true,
+    });
+    if (workspaceMode === "capsule_only") delete env.APP_WORKSPACE_ID;
+    const userInfo = {
+      token_use: "interface_oauth",
+      sub: "svc_agent",
+      aud: "https://sandbox-host.test/mcp",
+      scope: "mcp.invoke",
+      takosumi: {
+        ...(workspaceMode === "legacy" ? { workspace_id: "ws_interface" } : {}),
+        capsule_id: "cap_interface",
+        interface_id: "if_computer_mcp",
+        interface_binding_id: "ifb_agent",
+        interface_resolved_revision: 2,
+      },
+    };
 
-  await withFetch(async (input, init) => {
-    expect(fetchRequestUrl(input)).toBe(
-      "https://accounts.example.test/oauth/userinfo",
-    );
-    expect(new Headers(init?.headers).get("authorization")).toMatch(
-      /^Bearer taksrv_/u,
-    );
-    return Response.json(userInfo);
-  }, async () => {
-    const ready = await fetchWorker(env, "/readyz");
-    expect(ready.status).toBe(200);
+    await withFetch(async (input, init) => {
+      expect(fetchRequestUrl(input)).toBe(
+        "https://accounts.example.test/oauth/userinfo",
+      );
+      expect(new Headers(init?.headers).get("authorization")).toMatch(
+        /^Bearer taksrv_/u,
+      );
+      return Response.json(userInfo);
+    }, async () => {
+      const ready = await fetchWorker(env, "/readyz");
+      expect(ready.status).toBe(200);
 
-    for (const token of ["taksrv_first", "taksrv_rotated"]) {
-      const response = await fetchWorker(env, "/mcp", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: token,
-          method: "tools/call",
-          params: {
-            name: "computer_session_create",
-            arguments: {
-              session_id: "shared-session",
-              space_id: "spoofed-space",
-              user_id: "spoofed-user",
-            },
+      for (const token of ["taksrv_first", "taksrv_rotated"]) {
+        const response = await fetchWorker(env, "/mcp", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
-        }),
-      });
-      expect(response.status).toBe(200);
-      const payload = await response.json() as {
-        result: { content: Array<{ text: string }> };
-      };
-      expect(JSON.parse(payload.result.content[0]!.text)).toMatchObject({
-        session_id: "shared-session",
-        space_id: "ws_interface",
-        user_id: "svc_agent",
-      });
-    }
-  });
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: token,
+            method: "tools/call",
+            params: {
+              name: "computer_session_create",
+              arguments: {
+                session_id: "shared-session",
+                space_id: "spoofed-space",
+                user_id: "spoofed-user",
+              },
+            },
+          }),
+        });
+        expect(response.status).toBe(200);
+        const payload = await response.json() as {
+          result: { content: Array<{ text: string }> };
+        };
+        expect(JSON.parse(payload.result.content[0]!.text)).toMatchObject({
+          session_id: "shared-session",
+          space_id: workspaceMode === "capsule_only" ? "" : "ws_interface",
+          user_id: "svc_agent",
+        });
+      }
+    });
 
-  expect(new Set(doNames.filter((name) => name.includes("shared-session"))).size)
-    .toBe(1);
-});
+    expect(new Set(doNames.filter((name) => name.includes("shared-session"))).size)
+      .toBe(1);
+  });
+}
 
 test("sandbox host published MCP requires published auth", async () => {
   const { env, mcpCalls } = createEnv();

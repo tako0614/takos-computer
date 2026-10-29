@@ -19,6 +19,7 @@ const valid = {
   workspaceId: "ws_test",
   capsuleId: "cap_test",
   appOidc: true,
+  allowPublicSandboxCreation: false,
   oidcClientId: "client_test",
   oidcRedirectUri: "https://computer.example.test/gui/api/auth/callback",
   takosApiUrl: "https://takos.example.test/api",
@@ -75,6 +76,7 @@ describe("OpenTofu deploy configuration", () => {
       APP_CAPSULE_ID: "cap_test",
       APP_AUTH_REQUIRED: "1",
     });
+    expect(config.vars).not.toHaveProperty("APP_ALLOW_PUBLIC_SANDBOX_CREATION");
     expect(JSON.stringify(config)).not.toContain("secret");
   });
 
@@ -83,13 +85,59 @@ describe("OpenTofu deploy configuration", () => {
       parseOpenTofuDeployConfig(JSON.stringify({ ...valid, unexpected: true })),
     ).toThrow("closed deployment-config shape");
     expect(() =>
-      parseOpenTofuDeployConfig(JSON.stringify({ ...valid, capsuleId: "" })),
-    ).toThrow("workspaceId and capsuleId");
+      parseOpenTofuDeployConfig(JSON.stringify({ ...valid, capsuleId: "", appOidc: false })),
+    ).toThrow("accountsIssuer and capsuleId");
     expect(() =>
       parseOpenTofuDeployConfig(
         JSON.stringify({ ...valid, containerImage: "oven/bun:1" }),
       ),
     ).toThrow("immutable image digest");
+  });
+
+  test("supports Capsule-only Interface OAuth installation context", () => {
+    const { workspaceId: _legacyWorkspace, ...capsuleOnly } = valid;
+    const parsed = parseOpenTofuDeployConfig(JSON.stringify(capsuleOnly));
+    expect(parsed.workspaceId).toBe("");
+    expect(parseOpenTofuDeployConfig(JSON.stringify({ ...capsuleOnly, workspaceId: "" })).workspaceId)
+      .toBe("");
+    const config = createWranglerConfig(parsed, {
+      repoRoot: "/repo", configDirectory: "/repo/.wrangler/opentofu/test",
+    });
+    expect(config.vars).toMatchObject({
+      APP_CAPSULE_ID: "cap_test", OIDC_ISSUER_URL: "https://accounts.example.test",
+    });
+    expect(config.vars).not.toHaveProperty("APP_WORKSPACE_ID");
+    expect(() => parseOpenTofuDeployConfig(JSON.stringify({ ...valid, workspaceId: "", accountsIssuer: "" })))
+      .toThrow("accountsIssuer and capsuleId");
+  });
+
+  test("supports Workspace-only legacy GUI OIDC without enabling Interface OAuth", () => {
+    const parsed = parseOpenTofuDeployConfig(JSON.stringify({ ...valid, capsuleId: "" }));
+    const config = createWranglerConfig(parsed, {
+      repoRoot: "/repo", configDirectory: "/repo/.wrangler/opentofu/test",
+    });
+    expect(config.vars).toMatchObject({
+      APP_AUTH_REQUIRED: "1", APP_WORKSPACE_ID: "ws_test",
+      OIDC_ISSUER_URL: "https://accounts.example.test",
+    });
+    expect(config.vars).not.toHaveProperty("APP_CAPSULE_ID");
+  });
+
+  test("explicit public creation is passed to the Worker without changing app or Workspace bindings", () => {
+    const parsed = parseOpenTofuDeployConfig(JSON.stringify({
+      ...valid, capsuleId: "", workspaceId: "", allowPublicSandboxCreation: true,
+    }));
+    const config = createWranglerConfig(parsed, {
+      repoRoot: "/repo", configDirectory: "/repo/.wrangler/opentofu/test",
+    });
+    expect(config.vars).toMatchObject({
+      APP_AUTH_REQUIRED: "1", APP_ALLOW_PUBLIC_SANDBOX_CREATION: "true",
+    });
+    expect(config.vars).not.toHaveProperty("APP_CAPSULE_ID");
+    expect(config.vars).not.toHaveProperty("APP_WORKSPACE_ID");
+    expect(() => parseOpenTofuDeployConfig(JSON.stringify({
+      ...valid, allowPublicSandboxCreation: "true",
+    }))).toThrow("allowPublicSandboxCreation must be a boolean");
   });
 
   test("keeps secrets out of config and requires the two runtime-internal bearers", () => {

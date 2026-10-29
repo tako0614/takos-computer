@@ -62,7 +62,7 @@ export type PublishedMcpPrincipal =
       kind: "interface_oauth";
       namespaceSeed: string;
       subject: string;
-      workspaceId: string;
+      workspaceId?: string;
       capsuleId: string;
       interfaceBindingId: string;
     };
@@ -323,7 +323,8 @@ export async function requirePublishedMcpAuth(
       namespaceSeed: [
         "interface",
         c.env.OIDC_ISSUER_URL,
-        authorization.workspaceId,
+        // Keep configured legacy context stable when token evidence omits it.
+        authorization.workspaceId ?? "",
         authorization.capsuleId,
         authorization.interfaceBindingId,
         authorization.subject,

@@ -16,7 +16,8 @@
  * `MCP_URL`; direct/self-host installs may retain the static bearer.
  *
  * Session scoping: Interface OAuth calls derive identity from the stable
- * issuer/Workspace/Capsule/InterfaceBinding/subject evidence, while direct
+ * issuer/Capsule/InterfaceBinding/subject evidence (plus optional configured
+ * legacy Workspace context), while direct
  * calls derive it from the configured shared bearer. The worker hashes that
  * identity before constructing the internal Durable Object name, so rotated
  * short-lived OAuth tokens retain the same scope and caller-supplied
@@ -391,7 +392,7 @@ async function resolvePublishedMcpSessionArgs(
     scopedId: `${namespace}:${sessionId}`,
     spaceId:
       principal.kind === "interface_oauth"
-        ? principal.workspaceId
+        ? principal.workspaceId ?? ""
         : nonEmptyStringArg(
             args,
             ["space_id", "spaceId"],
