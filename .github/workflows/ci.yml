@@ -70,7 +70,7 @@ jobs:
             echo "Expected unbound OIDC plan to require a sandbox creation choice"
             exit 1
           fi
-          rg 'requires explicitly setting allow_public_sandbox_creation' /tmp/takos-computer-unbound-oidc.log
+          grep -F 'requires explicitly setting allow_public_sandbox_creation' /tmp/takos-computer-unbound-oidc.log
           tofu plan -input=false -refresh=false -lock=false \
             -var enable_cloudflare_resources=true \
             -var cloudflare_account_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
