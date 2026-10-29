@@ -58,9 +58,11 @@ export default function FileBrowser(
   );
 
   const parentDirectory = () => {
+    // Absolute paths do not reveal the configured jail root to this client.
+    if (props.cwd().startsWith("/")) return ".";
     const current = props.cwd().replace(/\/+$/, "");
     if (!current || current === "." || current.split("/").includes("..")) {
-      return current.startsWith("/") ? "/" : ".";
+      return ".";
     }
     const slash = current.lastIndexOf("/");
     return slash < 0 ? "." : slash === 0 ? "/" : current.slice(0, slash);
@@ -84,11 +86,15 @@ export default function FileBrowser(
         <button
           type="button"
           class="btn btn-ghost btn-sm"
-          aria-label={language() === "ja" ? "親フォルダへ" : "Parent directory"}
-          disabled={props.cwd() === "." || props.cwd() === "/"}
+          aria-label={props.cwd().startsWith("/")
+            ? language() === "ja" ? "作業フォルダのルートへ" : "Workspace root"
+            : language() === "ja" ? "親フォルダへ" : "Parent directory"}
+          disabled={props.cwd() === "."}
           onClick={() => navigate("..")}
         >
-          ↑ {language() === "ja" ? "上へ" : "Up"}
+          ↑ {props.cwd().startsWith("/")
+            ? language() === "ja" ? "ルート" : "Root"
+            : language() === "ja" ? "上へ" : "Up"}
         </button>
         <input
           class="input input-mono flex-1"

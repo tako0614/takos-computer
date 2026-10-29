@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { readFile, writeFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { resolve, join } from "node:path";
+import { resolve, join, posix } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
@@ -13,7 +13,7 @@ const html = await readFile(join(repo, "packages/computer-hosts/src/gui/app.html
 const requests = [], actions = [], assertions = [], errors = [], intercepted = [], interceptorErrors = [], snapshots = {};
 const pending = /* @__PURE__ */ new Map(), tasks = /* @__PURE__ */ new Set();
 let nextId = 1, ws, chrome, chromeExit, profile, fixturePort, debugPort, fatal = null, mode = "rows", releaseList = null;
-let creates = 0, cleanup = {}, browserVersion;
+let creates = 0, cleanup = {}, browserVersion, workspaceRoot = "/home/sandbox/workspace";
 const entry = (name, type = "file") => ({ name, type, size: 24, modified: "2026-01-01T00:00:00.000Z" });
 const longName = "long-directory-name-".repeat(9);
 const otherSessionId = "synthetic-session-with-a-long-identifier-1234567890";
@@ -68,14 +68,17 @@ const server = createServer(async (req, res) => {
         if (selectedMode === "tool-error") result2 = { isError: true, content: [{ type: "text", text: "Synthetic directory listing refused" }] };
         else {
           let body;
+          const relativePath = typeof path === "string" ? posix.relative(workspaceRoot, posix.resolve(workspaceRoot, path)) : "..";
+          if (relativePath === ".." || relativePath.startsWith("../")) return send(res, 200, { jsonrpc: "2.0", id: call.id, result: { isError: true, content: [{ type: "text", text: "Synthetic outside workspace refusal" }] } });
+          const listedPath = relativePath ? "./" + relativePath : ".";
           if (selectedMode === "malformed") body = {};
           else if (selectedMode === "invalid-row") body = { entries: [null] };
           else if (selectedMode === "bad-type") body = { entries: [{ ...entry("bad"), type: ["file"] }] };
           else if (selectedMode === "valid-kinds") body = { entries: [entry("linked", "symlink"), { ...entry("unknown-kind", "unknown"), modified: null }] };
           else if (selectedMode === "empty") body = { entries: [] };
-          else if ([".", "/"].includes(path)) body = { entries: [entry("documents", "directory"), entry(longName, "directory"), entry(calledSession === otherSessionId ? "other-notes.txt" : "notes.txt")] };
-          else if (["./documents", "documents"].includes(path)) body = { entries: [entry("draft.md"), entry("archive", "directory")] };
-          else if (path === "./documents/archive") body = { entries: [entry("retained.txt")] };
+          else if (listedPath === ".") body = { entries: [entry("documents", "directory"), entry(longName, "directory"), entry(calledSession === otherSessionId ? "other-notes.txt" : "notes.txt")] };
+          else if (listedPath === "./documents") body = { entries: [entry("draft.md"), entry("archive", "directory")] };
+          else if (listedPath === "./documents/archive") body = { entries: [entry("retained.txt")] };
           else return send(res, 200, { jsonrpc: "2.0", id: call.id, result: { isError: true, content: [{ type: "text", text: "Synthetic outside workspace refusal" }] } });
           result2 = { content: [{ type: "text", text: JSON.stringify(body) }] };
         }
@@ -239,7 +242,7 @@ try {
   await cdp("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
   s = await snap("02-mobile-root");
   check("whole 390px page has no horizontal overflow", s.viewport.bodyScroll <= s.viewport.bodyClient + 1, s.viewport);
-  const up = `document.querySelector('button[aria-label="Parent directory"]')`;
+  const up = `document.querySelector('button[aria-label="Parent directory"],button[aria-label="Workspace root"]')`;
   const hasUp = await ev(`!!(${up})`);
   check("named Up control exists", hasUp, hasUp);
   if (hasUp) {
@@ -359,9 +362,21 @@ try {
     await wait(`(${cwd})&&!(${filesRoot})?.innerText.includes('Loading')`, "invalid scope reload");
     check("invalid or foreign history scope restores root " + JSON.stringify(bad), await ev(`(${cwd}).value==='.'`), await ev(`(${cwd}).value`));
   }
+  for (const configuredRoot of ["/home/sandbox/workspace", "/synthetic/custom-workspace"]) {
+    workspaceRoot = configuredRoot;
+    await setPath(configuredRoot);
+    await wait(`(${filesRoot})?.innerText.includes('notes.txt')`, "configured absolute workspace root");
+    const countBeforeRoot = requests.filter((x) => x.tool === "file_list").length;
+    await click(up, "absolute path root control");
+    await wait(`(${cwd}).value !== '${configuredRoot}' && !(${filesRoot})?.innerText.includes('Loading')`, "absolute control settled");
+    check("absolute root control returns to relative workspace root " + configuredRoot, await ev(`(${cwd}).value === '.' && (${filesRoot})?.innerText.includes('notes.txt')`), await snap("absolute-root-" + (configuredRoot.includes("custom") ? "custom" : "default")));
+    check("absolute root control never requests outside parent " + configuredRoot, requests.filter((x) => x.tool === "file_list").slice(countBeforeRoot).every((x) => x.path === "."), requests.filter((x) => x.tool === "file_list").slice(countBeforeRoot));
+  }
   await setPath("/");
-  await wait(`(${filesRoot})?.innerText.includes('notes.txt')`, "absolute root");
-  check("Up is disabled at absolute root", await ev(`(${up}).disabled`), await ev(`(${cwd}).value`));
+  await wait(`document.querySelector('[role=alert]')`, "absolute outside-root refused");
+  check("filesystem slash remains outside-workspace failure", true, await snap("11-slash-refused"));
+  await click(up, "workspace root recovery from slash");
+  await wait(`(${cwd}).value === '.' && (${filesRoot})?.innerText.includes('notes.txt')`, "slash recovery");
   await setPath("../outside");
   await wait(`document.querySelector('[role=alert]')`, "synthetic jail refusal");
   check("outside path refusal remains an error", true, await snap("11-outside-refusal"));
