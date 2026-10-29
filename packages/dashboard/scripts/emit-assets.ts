@@ -1,10 +1,15 @@
 /**
  * Post-build script: reads dist/index.html and writes it to
  * packages/computer-hosts/src/gui/app.html for the Worker to serve.
+ *
+ * It also embeds the home-screen install files Vite copied from public/
+ * (the web app manifest, every icon it declares, and the apple-touch-icon
+ * index.html links) so the single Worker bundle serves them.
  */
 import { readFile, writeFile } from "node:fs/promises";
 
-const src = new URL("../dist/index.html", import.meta.url);
+const distUrl = new URL("../dist/", import.meta.url);
+const src = new URL("index.html", distUrl);
 const htmlDest = new URL(
   "../../computer-hosts/src/gui/app.html",
   import.meta.url,
@@ -14,7 +19,45 @@ const moduleDest = new URL(
   import.meta.url,
 );
 
+const GUI_BASE = "/gui/";
+const MANIFEST_PATH = `${GUI_BASE}manifest.webmanifest`;
+
+function distFileFor(path: string): URL {
+  if (!path.startsWith(GUI_BASE) || path.includes("..")) {
+    throw new Error(`web app asset must live under ${GUI_BASE}: ${path}`);
+  }
+  return new URL(path.slice(GUI_BASE.length), distUrl);
+}
+
 const html = await readFile(src, "utf8");
+if (!html.includes(`<link rel="manifest" href="${MANIFEST_PATH}">`)) {
+  throw new Error(`dist/index.html does not link ${MANIFEST_PATH}`);
+}
+const webAppManifest = await readFile(distFileFor(MANIFEST_PATH), "utf8");
+const manifest = JSON.parse(webAppManifest) as {
+  icons?: Array<{ src?: unknown }>;
+};
+const iconPaths = new Set<string>();
+for (const icon of manifest.icons ?? []) {
+  if (typeof icon.src !== "string") {
+    throw new Error("web app manifest icon is missing src");
+  }
+  iconPaths.add(icon.src);
+}
+for (const match of html.matchAll(
+  /<link rel="apple-touch-icon"[^>]*href="([^"]+)"/gu,
+)) {
+  iconPaths.add(match[1]!);
+}
+const webAppIcons: Record<string, string> = {};
+for (const path of [...iconPaths].sort()) {
+  if (!path.endsWith(".png")) {
+    throw new Error(`web app icon must be a PNG: ${path}`);
+  }
+  const bytes = await readFile(distFileFor(path));
+  webAppIcons[path] = bytes.toString("base64");
+}
+
 await writeFile(htmlDest, html);
 await writeFile(
   moduleDest,
@@ -23,7 +66,19 @@ await writeFile(
     "export const appHtml =",
     `  ${JSON.stringify(html)};`,
     "",
+    "export const webAppManifest =",
+    `  ${JSON.stringify(webAppManifest)};`,
+    "",
+    "/** Base64 PNG bytes keyed by the absolute path the Worker serves. */",
+    "export const webAppIcons: Record<string, string> = {",
+    ...Object.entries(webAppIcons).map(
+      ([path, base64]) => `  ${JSON.stringify(path)}:\n    ${JSON.stringify(base64)},`,
+    ),
+    "};",
+    "",
   ].join("\n"),
 );
 console.log(`Wrote ${htmlDest.pathname} (${html.length} bytes)`);
-console.log(`Wrote ${moduleDest.pathname}`);
+console.log(
+  `Wrote ${moduleDest.pathname} (manifest + ${Object.keys(webAppIcons).length} icons)`,
+);
