@@ -13,6 +13,8 @@ const harnessSha256 = createHash("sha256").update(await readFile(new URL(import.
 const html = await readFile(join(repo, "packages/computer-hosts/src/gui/app.html"));
 const requests = [], actions = [], assertions = [], errors = [], intercepted = [], interceptorErrors = [], snapshots = {};
 const pending = /* @__PURE__ */ new Map(), tasks = /* @__PURE__ */ new Set();
+const networkByRpc = /* @__PURE__ */ new Map(), networkFinished = /* @__PURE__ */ new Set(), deliveredHolds = [];
+let heldRpcId = null;
 let nextId = 1, ws, chrome, chromeExit, profile, fixturePort, debugPort, fatal = null, mode = "rows", releaseList = null;
 let nextHeldOutcome = "rows";
 let chromeStderr = "";
@@ -72,9 +74,12 @@ const server = createServer(async (req, res) => {
       } else {
         const initialMode = mode;
         const selectedMode = initialMode === "held" ? nextHeldOutcome : initialMode;
-        if (initialMode === "held") await new Promise((resolve2) => {
-          releaseList = resolve2;
-        });
+        if (initialMode === "held") {
+          heldRpcId = call.id;
+          await new Promise((resolve2) => {
+            releaseList = resolve2;
+          });
+        }
         if (selectedMode === "http-error") {
           requests.push({ kind: "synthetic-completed", tool, sessionId: calledSession, path });
           return send(res, 503, { error: "Synthetic directory service unavailable" });
@@ -229,7 +234,14 @@ try {
       const p = pending.get(m.id);
       pending.delete(m.id);
       m.error ? p.no(Error(m.error.message)) : p.yes(m.result ?? {});
-    } else if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
+    } else if (m.method === "Network.requestWillBeSent") {
+      const request = m.params.request;
+      if (request.method === "POST" && new URL(request.url).pathname.endsWith("/mcp")) {
+        const call = JSON.parse(request.postData);
+        if (call.params?.name === "file_list") networkByRpc.set(call.id, m.params.requestId);
+      }
+    } else if (m.method === "Network.loadingFinished") networkFinished.add(m.params.requestId);
+    else if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
     else if (m.method === "Fetch.requestPaused") {
       const u = new URL(m.params.request.url);
       const allowed = u.origin === `http://127.0.0.1:${fixturePort}`;
@@ -264,13 +276,19 @@ try {
   }
   async function releaseHeld() {
     const release = releaseList;
-    if (!release) throw Error("missing held response");
+    const rpcId = heldRpcId;
+    if (!release || !Number.isInteger(rpcId)) throw Error("missing held response");
     releaseList = null;
+    heldRpcId = null;
     const before = completeCount();
     release();
     const end2 = Date.now() + 3e3;
     while (completeCount() <= before && Date.now() < end2) await delay(20);
     if (completeCount() <= before) throw Error("held response did not complete");
+    const clientEnd = Date.now() + 3e3;
+    while (!networkFinished.has(networkByRpc.get(rpcId)) && Date.now() < clientEnd) await delay(20);
+    if (!networkFinished.has(networkByRpc.get(rpcId))) throw Error("held response not delivered to browser");
+    deliveredHolds.push({ rpcId, requestId: networkByRpc.get(rpcId), browserLoadingFinished: true });
     await cdp("Runtime.evaluate", { expression: "new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))", awaitPromise: true });
   }
   const filesAlert = `(${filesRoot})?.querySelector('[role=alert]')`;
@@ -355,6 +373,7 @@ try {
   await cdp("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: false });
   v = await snap("08-small-screen");
   check("390px path and retry controls stay within viewport", v.viewport.bodyScroll <= v.viewport.bodyClient && v.viewport.fileScroll <= v.viewport.fileClient, v.viewport);
+  check("all four held responses reached browser loadingFinished before assertions", deliveredHolds.length === 4 && deliveredHolds.every((x) => x.browserLoadingFinished), deliveredHolds);
   check("no accidental session creation", creates === 0, creates);
   check("no uncaught page errors", errors.length === 0, errors);
   check("only synthetic allowed endpoints reached", requests.every((x) => !x.kind.startsWith("forbidden")), requests.filter((x) => x.kind.startsWith("forbidden")));
@@ -398,7 +417,7 @@ check("owned Chrome exited", cleanup.chrome?.code === 0, cleanup.chrome);
 check("private profile removed", cleanup.profile === "removed", cleanup.profile);
 check("request interceptors completed without error", interceptorErrors.length === 0, interceptorErrors);
 const failed = assertions.filter((x) => !x.passed);
-const result = { status: fatal ? "HARNESS_ERROR" : failed.length ? "RED" : "PASS", harnessSha256, scope: "Actual candidate dashboard build and real UI handlers, synthetic loopback endpoint only; no simulator host calls/account/provider/live", dashboardSha256: createHash("sha256").update(html).digest("hex"), browserVersion, chromeStderr, fatal, assertions, failed: failed.map((x) => x.name), actions, actionCount: actions.length, actionCountDefinition: "semantic pointer/key/path/browser actions; bulk text entry is not a physical-keystroke count", creates, requests, intercepted, interceptorErrors, errors, snapshots, cleanup };
+const result = { status: fatal ? "HARNESS_ERROR" : failed.length ? "RED" : "PASS", harnessSha256, scope: "Actual candidate dashboard build and real UI handlers, synthetic loopback endpoint only; no simulator host calls/account/provider/live", dashboardSha256: createHash("sha256").update(html).digest("hex"), browserVersion, chromeStderr, fatal, assertions, failed: failed.map((x) => x.name), actions, actionCount: actions.length, actionCountDefinition: "semantic pointer/key/path/browser actions; bulk text entry is not a physical-keystroke count", creates, deliveredHolds, requests, intercepted, interceptorErrors, errors, snapshots, cleanup };
 await writeFile(join(out, "REPORT.json"), JSON.stringify(result, null, 2) + "\n", { mode: 384 });
 console.log(JSON.stringify({ status: result.status, failed: result.failed, fatal: result.fatal, actions: actions.length, creates, cleanup, report: join(out, "REPORT.json") }, null, 2));
 if (result.status !== "PASS") process.exitCode = 1;
