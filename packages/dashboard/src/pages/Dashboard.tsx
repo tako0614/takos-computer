@@ -1,4 +1,4 @@
-import { createEffect, createResource, createSignal, onCleanup, Show } from "solid-js";
+import { createEffect, createResource, createSignal, For, onCleanup, Show } from "solid-js";
 import { sandboxSessions } from "../lib/api.ts";
 import SessionTable from "../components/SessionTable.tsx";
 import CreateModal from "../components/CreateModal.tsx";
@@ -9,6 +9,8 @@ export default function Dashboard() {
   const { t, language } = useI18n();
   const [modalOpen, setModalOpen] = createSignal(false);
   const [version, setVersion] = createSignal(0);
+  const [destroyRequests, setDestroyRequests] = createSignal(new Map<string, object>());
+  const [unconfirmedDestroys, setUnconfirmedDestroys] = createSignal(new Set<string>());
 
   const reload = () => setVersion((v) => v + 1);
   let refreshButton!: HTMLButtonElement;
@@ -61,9 +63,29 @@ export default function Dashboard() {
   });
 
   const destroySandbox = async (id: string) => {
-    if (!confirm(t("destroySessionConfirm", { id }))) return;
-    await sandboxSessions.destroy(id);
-    reload();
+    if (destroyRequests().has(id) || !confirm(t("destroySessionConfirm", { id }))) return;
+    const request = {};
+    setDestroyRequests((previous) => new Map(previous).set(id, request));
+    setUnconfirmedDestroys((previous) => {
+      const next = new Set(previous);
+      next.delete(id);
+      return next;
+    });
+    const current = () => active && destroyRequests().get(id) === request;
+    try {
+      await sandboxSessions.destroy(id);
+      if (current()) reload();
+    } catch {
+      if (current()) setUnconfirmedDestroys((previous) => new Set(previous).add(id));
+    } finally {
+      if (current()) {
+        setDestroyRequests((previous) => {
+          const next = new Map(previous);
+          next.delete(id);
+          return next;
+        });
+      }
+    }
   };
 
   return (
@@ -101,6 +123,16 @@ export default function Dashboard() {
         </button>
       </div>
 
+      <For each={[...unconfirmedDestroys()]}>
+        {(id) => (
+          <div role="alert" style="margin-bottom:0.75rem; color:#fca5a5; overflow-wrap:anywhere">
+            {language() === "ja"
+              ? `セッション ${id} の削除結果を確認できません。一覧を更新して確認してください。`
+              : `Could not confirm deletion of session ${id}. Refresh sessions to check.`}
+          </div>
+        )}
+      </For>
+
       <Show
         when={sandboxData() !== null || sandboxData.loading}
         fallback={
@@ -121,6 +153,7 @@ export default function Dashboard() {
             sessions={sandboxData()?.sessions ?? []}
             loading={sandboxData.loading && !sandboxData.latest}
             onDestroy={destroySandbox}
+            destroyPending={(id) => destroyRequests().has(id)}
           />
         </div>
       </Show>
