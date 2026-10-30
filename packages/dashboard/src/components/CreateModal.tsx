@@ -21,6 +21,8 @@ export default function CreateModal(props: {
   const [loading, setLoading] = createSignal(false);
   let formRef!: HTMLFormElement;
   let dialogRef!: HTMLDivElement;
+  let active = true;
+  onCleanup(() => active = false);
   const close = () => {
     if (!loading()) props.onClose();
   };
@@ -89,16 +91,19 @@ export default function CreateModal(props: {
     };
     try {
       await props.onCreate(payload);
+      if (!active) return;
       formRef.reset();
       props.onClose();
     } catch (err) {
-      alert(
-        t("createFailed", {
-          message: err instanceof Error ? err.message : String(err),
-        }),
-      );
+      if (active) {
+        alert(
+          t("createFailed", {
+            message: err instanceof Error ? err.message : String(err),
+          }),
+        );
+      }
     } finally {
-      setLoading(false);
+      if (active) setLoading(false);
     }
   };
 
