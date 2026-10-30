@@ -62,8 +62,12 @@ export default function SandboxViewer() {
     () => ({ id: sessionId(), version: statusVersion() }),
     ({ id }) => sandboxSessions.get(id).catch(() => null),
   );
+  let viewerActive = true;
   const timer = setInterval(() => setStatusVersion((v) => v + 1), 10_000);
-  onCleanup(() => clearInterval(timer));
+  onCleanup(() => {
+    viewerActive = false;
+    clearInterval(timer);
+  });
 
   const badgeClass = () => {
     if (status.loading || !status()) return "badge";
@@ -84,10 +88,29 @@ export default function SandboxViewer() {
     return language() === "ja" ? "状態を取得できません" : "Status unavailable";
   };
 
+  const [destroyRequest, setDestroyRequest] = createSignal<{
+    id: string;
+  } | null>(null);
+  const [unconfirmedDestroy, setUnconfirmedDestroy] = createSignal<string | null>(
+    null,
+  );
+  const destroyPending = () => destroyRequest()?.id === sessionId();
   const destroySession = async () => {
-    if (!confirm(t("destroyCurrentConfirm"))) return;
-    await sandboxSessions.destroy(sessionId());
-    window.location.href = "/gui";
+    const id = sessionId();
+    if (destroyPending() || !confirm(t("destroyCurrentConfirm"))) return;
+    const request = { id };
+    setDestroyRequest(request);
+    setUnconfirmedDestroy(null);
+    const current = () =>
+      viewerActive && sessionId() === id && destroyRequest() === request;
+    try {
+      await sandboxSessions.destroy(id);
+      if (current()) window.location.href = "/gui";
+    } catch {
+      if (current()) setUnconfirmedDestroy(id);
+    } finally {
+      if (viewerActive && destroyRequest() === request) setDestroyRequest(null);
+    }
   };
 
   return (
@@ -126,11 +149,27 @@ export default function SandboxViewer() {
         <button
           type="button"
           class="btn btn-danger btn-sm"
+          aria-disabled={destroyPending()}
+          aria-busy={destroyPending()}
+          style={{ opacity: destroyPending() ? 0.5 : 1 }}
           onClick={destroySession}
         >
-          {t("destroy")}
+          {destroyPending()
+            ? language() === "ja" ? "破棄中…" : "Destroying…"
+            : t("destroy")}
         </button>
       </div>
+
+      {unconfirmedDestroy() === sessionId() && (
+        <div
+          role="alert"
+          style="margin-bottom:0.75rem; color:#fca5a5; overflow-wrap:anywhere"
+        >
+          {language() === "ja"
+            ? "破棄結果を確認できません。状態を更新して確認してください。"
+            : "Could not confirm destruction. Refresh status to check."}
+        </div>
+      )}
 
       {/* Shell */}
       <Shell mcpUrl={mcpUrl()} cwd={cwd} />
