@@ -33,6 +33,7 @@ export default function FileBrowser(
 ) {
   const { t, language } = useI18n();
   const [version, setVersion] = createSignal(0);
+  let pathInput!: HTMLInputElement;
 
   const [entries] = createResource(
     () => ({ cwd: props.cwd(), v: version(), mcpUrl: props.mcpUrl }),
@@ -68,15 +69,30 @@ export default function FileBrowser(
     return slash < 0 ? "." : slash === 0 ? "/" : current.slice(0, slash);
   };
 
+  const navigateTo = (next: string) => {
+    const previousFocus = document.activeElement;
+    const mcpUrl = props.mcpUrl;
+    props.setCwd(next);
+    // Replacing the directory rows can remove the keyboard's focused button.
+    queueMicrotask(() => {
+      if (
+        pathInput.isConnected && props.mcpUrl === mcpUrl && props.cwd() === next &&
+        document.activeElement === document.body &&
+        (!previousFocus?.isConnected ||
+          previousFocus instanceof HTMLButtonElement && previousFocus.disabled)
+      ) pathInput.focus();
+    });
+  };
+
   const navigate = (name: string) => {
     if (name === "..") {
-      props.setCwd(parentDirectory());
+      navigateTo(parentDirectory());
       return;
     }
     const current = props.cwd() === "/"
       ? "/"
       : props.cwd().replace(/\/+$/, "") || ".";
-    props.setCwd(current === "/" ? `/${name}` : `${current}/${name}`);
+    navigateTo(current === "/" ? `/${name}` : `${current}/${name}`);
   };
 
   return (
@@ -97,6 +113,7 @@ export default function FileBrowser(
             : language() === "ja" ? "上へ" : "Up"}
         </button>
         <input
+          ref={pathInput}
           class="input input-mono flex-1"
           style="font-size:0.8125rem; min-width:0"
           aria-label={language() === "ja" ? "フォルダのパス" : "Directory path"}
