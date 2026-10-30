@@ -1,4 +1,4 @@
-import { createEffect, createResource, createSignal, on, onCleanup } from "solid-js";
+import { createEffect, createResource, createSignal, on, onCleanup, Show } from "solid-js";
 import { A, useLocation, useNavigate, useParams } from "@solidjs/router";
 import { sandboxSessions } from "../lib/api.ts";
 import Shell from "../components/Shell.tsx";
@@ -172,7 +172,9 @@ export default function SandboxViewer() {
       )}
 
       {/* Shell */}
-      <Shell mcpUrl={mcpUrl()} cwd={cwd} />
+      <Show when={mcpUrl()} keyed>
+        {(url) => <Shell mcpUrl={url} cwd={cwd} />}
+      </Show>
 
       {/* File browser */}
       <div style="margin-top:0.75rem">
