@@ -60,13 +60,21 @@ export default function FileBrowser(
 
   const parentDirectory = () => {
     // Absolute paths do not reveal the configured jail root to this client.
-    if (props.cwd().startsWith("/")) return ".";
-    const current = props.cwd().replace(/\/+$/, "");
-    if (!current || current === "." || current.split("/").includes("..")) {
-      return ".";
+    const current = props.cwd();
+    if (current.startsWith("/")) return ".";
+    const segments: string[] = [];
+    for (const segment of current.split("/")) {
+      if (!segment || segment === ".") continue;
+      if (segment === "..") {
+        // An unknown path above root cannot establish its relative parent.
+        if (!segments.length) return ".";
+        segments.pop();
+      } else segments.push(segment);
     }
-    const slash = current.lastIndexOf("/");
-    return slash < 0 ? "." : slash === 0 ? "/" : current.slice(0, slash);
+    segments.pop();
+    return segments.length
+      ? `${current.startsWith("./") ? "./" : ""}${segments.join("/")}`
+      : ".";
   };
 
   const navigateTo = (next: string) => {
