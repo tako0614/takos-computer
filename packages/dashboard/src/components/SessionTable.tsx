@@ -17,6 +17,7 @@ export default function SessionTable(props: {
   sessions: SessionState[];
   loading: boolean;
   onDestroy: (id: string) => void;
+  destroyPending?: (id: string) => boolean;
 }) {
   const { t } = useI18n();
 
@@ -79,9 +80,13 @@ export default function SessionTable(props: {
                         <button
                           type="button"
                           class="btn btn-danger btn-sm"
+                          aria-label={t("delete")}
+                          aria-disabled={props.destroyPending?.(s.sessionId) ?? false}
+                          aria-busy={props.destroyPending?.(s.sessionId) ?? false}
+                          style={{ opacity: props.destroyPending?.(s.sessionId) ? 0.5 : 1 }}
                           onClick={() => props.onDestroy(s.sessionId)}
                         >
-                          {t("delete")}
+                          {props.destroyPending?.(s.sessionId) ? t("loading") : t("delete")}
                         </button>
                       </div>
                     </td>
