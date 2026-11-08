@@ -5,11 +5,11 @@
  * limits.
  */
 
-import { env as processEnv, kill as sendSignal } from "node:process";
+import { env as processEnv } from "node:process";
+import { spawnSupervisedCommand, type SupervisedCommand } from "./supervised-command.ts";
 import { stat } from "node:fs/promises";
 import { WorkspaceJail } from "./workspace-jail.ts";
 
-const MAX_OUTPUT_BYTES = 256 * 1024; // 256 KB per stream
 const PROCESS_KILL_GRACE_MS = 1_000;
 const WORKSPACE_CWD_GUARD_SCRIPT = [
   'workspace_root="$1"',
@@ -144,20 +144,15 @@ export class ShellManager {
 
     let timedOut = false;
     let aborted = false;
-    let process: ManagedProcess | null = null;
-    let groupKill = false;
-    let forceKillPromise: Promise<void> | undefined;
+    let process: SupervisedCommand | null = null;
+    const began = performance.now();
 
     const terminate = (reason: "timeout" | "abort") => {
       if (reason === "timeout") timedOut = true;
       if (reason === "abort") aborted = true;
       if (!process) return;
 
-      // SECURITY (S2): signal the whole process group (negative pid) when the
-      // command was spawned via setsid, so backgrounded grandchildren do not
-      // outlive the timeout/abort. Falls back to the direct pid otherwise.
-      killManagedProcess(process, "SIGTERM", groupKill);
-      forceKillPromise ??= forceKillAfterGrace(process, groupKill);
+      process.signal("SIGTERM");
     };
 
     const timer = setTimeout(() => terminate("timeout"), timeoutMs);
@@ -179,36 +174,36 @@ export class ShellManager {
         workspaceRoot,
         options.command,
       ];
-      // `setsid -w` makes the command its own session/process-group leader (so
-      // child.pid == the new pgid) and waits for it, propagating the exit
-      // status. The sandbox fails closed without it: direct-pid fallback lets
-      // background descendants escape cleanup.
-      if (!setsidAvailable()) {
+      // The dedicated supervisor reserves the command PID until its family is
+      // collected. `setsid -w` preserves the public command PID/process group;
+      // the supervisor also collects descendants which create other sessions.
+      const setsid = setsidPath();
+      if (!setsid) {
         throw new Error("setsid is required for sandbox process isolation");
       }
-      groupKill = true;
-      const argv = ["setsid", "-w", ...commandArgv];
-      const child = bunLike().spawn(argv, {
+      if (timedOut || aborted) {
+        return {
+          stdout: "", stderr: appendTerminationMessage("", timeoutMs, timedOut, aborted),
+          exit_code: timedOut ? 124 : 1, timed_out: timedOut,
+        };
+      }
+      const child = spawnSupervisedCommand({
+        argv: [setsid, "-w", ...commandArgv],
         cwd,
         env: buildCommandEnv(options.env, {
           allowTakosToken: options.allow_takos_token === true,
           takosToken: options.takos_token,
         }),
-        stdout: "pipe",
-        stderr: "pipe",
+        graceMs: PROCESS_KILL_GRACE_MS,
+        completionDeadlineMs: Math.max(1, timeoutMs - (performance.now() - began) + PROCESS_KILL_GRACE_MS + 250),
       });
-
       process = child;
-      this.trackProcess(child, groupKill);
+      const pid = await child.started;
+      this.trackProcess(pid, child);
       if (options.signal?.aborted) externalAbort();
-
-      const [exitCode, stdout, stderr] = await Promise.all([
-        child.exited,
-        collectOutput(child.stdout),
-        collectOutput(child.stderr),
-      ]);
-      await forceKillPromise;
-      await cleanSurvivingProcessGroup(child, groupKill);
+      else if (timedOut) child.signal("SIGTERM");
+      child.launch();
+      const { exitCode, stdout, stderr } = await child.result;
 
       return {
         stdout,
@@ -218,9 +213,7 @@ export class ShellManager {
       };
     } catch (err) {
       if (process) {
-        killManagedProcess(process, "SIGTERM", groupKill);
-        await forceKillAfterGrace(process, groupKill);
-        await cleanSurvivingProcessGroup(process, groupKill);
+        process.signal("SIGKILL");
       }
       return {
         stdout: "",
@@ -264,26 +257,14 @@ export class ShellManager {
     signal: ProcessSignal,
   ): Promise<ProcessKillResult> {
     try {
-      killManagedProcess(tracked.process, signal, tracked.groupKill);
-      if (signal !== "SIGKILL") {
-        await forceKillAfterGrace(tracked.process, tracked.groupKill);
-      }
+      tracked.process.signal(signal);
       const exited = await Promise.race([
-        tracked.process.exited.then(() => true),
+        tracked.process.cleaned.then(() => true),
         delay(PROCESS_KILL_GRACE_MS + 250).then(() => false),
       ]);
       if (!exited) {
-        return {
-          killed: false,
-          pid,
-          signal,
-          error: "Managed process did not exit after forced termination",
-        };
+        return { killed: false, pid, signal, error: "Managed descendants did not finish cleanup" };
       }
-      await cleanSurvivingProcessGroup(
-        tracked.process,
-        tracked.groupKill,
-      );
       return { killed: true, pid, signal };
     } catch (err) {
       return {
@@ -295,11 +276,12 @@ export class ShellManager {
     }
   }
 
-  private trackProcess(process: ManagedProcess, groupKill: boolean): void {
-    this.managedProcesses.set(process.pid, { process, groupKill });
-    void process.exited.finally(() => {
-      if (this.managedProcesses.get(process.pid)?.process === process) {
-        this.managedProcesses.delete(process.pid);
+  private trackProcess(pid: number, process: SupervisedCommand): void {
+    if (this.managedProcesses.has(pid)) throw new Error("Managed process PID is still reserved");
+    this.managedProcesses.set(pid, { process });
+    void process.closed.then(() => {
+      if (this.managedProcesses.get(pid)?.process === process) {
+        this.managedProcesses.delete(pid);
       }
     });
   }
@@ -347,79 +329,13 @@ function buildCommandEnv(
   return env;
 }
 
-async function forceKillAfterGrace(
-  process: ManagedProcess,
-  groupKill: boolean,
-): Promise<void> {
-  const exited = await Promise.race([
-    process.exited.then(() => true),
-    delay(PROCESS_KILL_GRACE_MS).then(() => false),
-  ]);
-  if (!exited || (groupKill && processGroupExists(process.pid))) {
-    killManagedProcess(process, "SIGKILL", groupKill);
-  }
-}
-
-async function cleanSurvivingProcessGroup(
-  process: ManagedProcess,
-  groupKill: boolean,
-): Promise<void> {
-  if (!groupKill || !processGroupExists(process.pid)) return;
-  killManagedProcess(process, "SIGTERM", true);
-  await Promise.race([
-    waitForProcessGroupExit(process.pid),
-    delay(PROCESS_KILL_GRACE_MS),
-  ]);
-  if (processGroupExists(process.pid)) {
-    killManagedProcess(process, "SIGKILL", true);
-    await Promise.race([
-      waitForProcessGroupExit(process.pid),
-      delay(250),
-    ]);
-  }
-}
-
-async function waitForProcessGroupExit(pid: number): Promise<void> {
-  while (processGroupExists(pid)) await delay(20);
-}
-
-function processGroupExists(pid: number): boolean {
-  try {
-    sendSignal(-pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-type ManagedProcess = {
-  readonly pid: number;
-  readonly stdout: ReadableStream<Uint8Array>;
-  readonly stderr: ReadableStream<Uint8Array>;
-  readonly exited: Promise<number>;
-  kill(signal?: ProcessSignal): void;
-};
-
-type TrackedProcess = {
-  readonly process: ManagedProcess;
-  /** When true the process leads its own group; kill the negative pid. */
-  readonly groupKill: boolean;
-};
+type TrackedProcess = { readonly process: SupervisedCommand };
 
 type BunLike = {
-  spawn(
-    command: readonly string[],
-    options: {
-      cwd: string;
-      env: Record<string, string>;
-      stdout: "pipe";
-      stderr: "pipe";
-    },
-  ): ManagedProcess;
   which(command: string): string | null;
 };
 
@@ -429,36 +345,19 @@ function bunLike(): BunLike {
   return bun;
 }
 
-let cachedSetsidAvailable: boolean | undefined;
+let cachedSetsidPath: string | null | undefined;
 
 /**
- * Whether `setsid` is on PATH. When present, commands run as their own
+ * Resolve `setsid` on the server PATH before applying caller overrides.
+ * When present, commands run as their own
  * session/process-group leader so the whole group can be killed on
  * timeout/abort. Shell execution fails closed when it is unavailable.
  */
-function setsidAvailable(): boolean {
-  if (cachedSetsidAvailable === undefined) {
-    cachedSetsidAvailable = bunLike().which("setsid") !== null;
+function setsidPath(): string | null {
+  if (cachedSetsidPath === undefined) {
+    cachedSetsidPath = bunLike().which("setsid");
   }
-  return cachedSetsidAvailable;
-}
-
-/** Best-effort kill of a managed process, swallowing already-gone errors. */
-function killManagedProcess(
-  process: ManagedProcess,
-  signal: ProcessSignal,
-  groupKill: boolean,
-): void {
-  try {
-    if (groupKill) {
-      // Negative pid signals the whole process group created via setsid.
-      sendSignal(-process.pid, signal);
-    } else {
-      process.kill(signal);
-    }
-  } catch {
-    // Process / group may already be gone.
-  }
+  return cachedSetsidPath;
 }
 
 function assertSafeEnvShape(
@@ -515,41 +414,6 @@ function normalizeTimeoutMs(timeoutMs: number | undefined): number {
     return 30_000;
   }
   return Math.floor(timeoutMs);
-}
-
-async function collectOutput(
-  stream: ReadableStream<Uint8Array>,
-): Promise<string> {
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let storedBytes = 0;
-  let totalBytes = 0;
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    totalBytes += value.length;
-    if (storedBytes >= MAX_OUTPUT_BYTES) continue;
-
-    const remaining = MAX_OUTPUT_BYTES - storedBytes;
-    const chunk = value.length > remaining ? value.slice(0, remaining) : value;
-    chunks.push(chunk);
-    storedBytes += chunk.length;
-  }
-
-  const bytes = new Uint8Array(storedBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  const text = new TextDecoder().decode(bytes);
-  if (totalBytes > MAX_OUTPUT_BYTES) {
-    return text + `\n... (truncated, ${totalBytes} bytes total)`;
-  }
-  return text;
 }
 
 function appendTerminationMessage(
