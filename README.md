@@ -126,6 +126,11 @@ evidence が完全一致する短命の Takosumi Interface OAuth bearer を使�
 | `GET`    | `/session/:id/mcp` | `405` を返す                                                         |
 | `GET`    | `/health`          | ヘルスチェック                                                       |
 
+`/create` と `/gui/api/sandbox-create` の JSON body は UTF-8 で 16 KiB までです。
+認証・アプリ membership の確認後、宣言された長さと実際に読み取った byte 数を検査し、
+上限超過はセッション・quota・index を変更せず `413` で拒否します。
+不正な UTF-8、JSON、または object 以外の body は `400` を返します。
+
 ### ダッシュボードルート
 
 | Method   | Path                               | 説明                                   |

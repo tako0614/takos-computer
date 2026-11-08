@@ -72,6 +72,8 @@ type AppContext = Context<{ Bindings: Env }>;
 
 const app: Hono<{ Bindings: Env }> = new Hono<{ Bindings: Env }>();
 
+const MAX_CREATE_SESSION_BODY_BYTES = 16 * 1024;
+
 function errorResponse(
   c: { json: (data: unknown, status: number) => Response },
   err: unknown,
@@ -98,6 +100,7 @@ function sessionIdParam(c: AppContext): string | Response {
 async function readRequestTextWithLimit(
   request: Request,
   maxBytes: number,
+  tooLargeMessage = "MCP request body too large",
 ): Promise<{ ok: true; body: string } | { ok: false; response: Response }> {
   const contentLength = request.headers.get("Content-Length");
   if (contentLength) {
@@ -117,7 +120,7 @@ async function readRequestTextWithLimit(
       return {
         ok: false,
         response: Response.json(
-          { error: "MCP request body too large" },
+          { error: tooLargeMessage },
           {
             status: 413,
           },
@@ -141,7 +144,7 @@ async function readRequestTextWithLimit(
       return {
         ok: false,
         response: Response.json(
-          { error: "MCP request body too large" },
+          { error: tooLargeMessage },
           {
             status: 413,
           },
@@ -323,7 +326,22 @@ async function createSession(c: AppContext): Promise<Response> {
     return c.json({ error: "App membership is required to create a sandbox" }, 403);
   }
 
-  const payload = await c.req.json<CreateSandboxSessionPayload>();
+  const body = await readRequestTextWithLimit(
+    c.req.raw,
+    MAX_CREATE_SESSION_BODY_BYTES,
+    "Session creation request body too large",
+  );
+  if (!body.ok) return body.response;
+
+  let payload: CreateSandboxSessionPayload;
+  try {
+    payload = JSON.parse(body.body);
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return c.json({ error: "Session creation body must be an object" }, 400);
+  }
   let { sessionId, spaceId, userId } = payload;
 
   if (scope.kind === "gui") {
