@@ -31,11 +31,11 @@ export default function ProcessList(props: { mcpUrl: string }) {
   const [version, setVersion] = createSignal(0);
 
   const [procs] = createResource(
-    () => version(),
-    async (): Promise<ProcessListResult> => {
+    () => ({ version: version(), mcpUrl: props.mcpUrl }),
+    async ({ mcpUrl }): Promise<ProcessListResult> => {
       try {
         const result = await mcpCall<unknown>(
-          props.mcpUrl,
+          mcpUrl,
           "process_list",
         );
         const processes =
