@@ -16,6 +16,7 @@ type WorkerFetch = (
 class MemoryKv implements NonNullable<SandboxHostEnv["SESSION_INDEX"]> {
   private values = new Map<string, string>();
   failNextDelete = false;
+  putCalls = 0;
 
   get(key: string, options?: { type?: "text" }): Promise<string | null>;
   get(key: string, options: { type: "json" }): Promise<unknown>;
@@ -31,6 +32,7 @@ class MemoryKv implements NonNullable<SandboxHostEnv["SESSION_INDEX"]> {
   }
 
   put(key: string, value: string): Promise<void> {
+    this.putCalls++;
     this.values.set(key, value);
     return Promise.resolve();
   }
@@ -57,6 +59,7 @@ class MemoryKv implements NonNullable<SandboxHostEnv["SESSION_INDEX"]> {
 }
 
 class MemoryQuotaNamespace {
+  reserveCalls = 0;
   private readonly reservations = new Map<string, Set<string>>();
 
   idFromName(name: string): { toString(): string } {
@@ -67,6 +70,7 @@ class MemoryQuotaNamespace {
     const principal = id.toString();
     return {
       reserve: (sessionId: string, limit: number) => {
+        this.reserveCalls++;
         const sessions = this.reservations.get(principal) ?? new Set<string>();
         if (sessions.has(sessionId)) {
           return Promise.resolve({
@@ -197,6 +201,8 @@ function createEnv(
 
   let currentSessionId = "";
   const doNames: string[] = [];
+  const quota = new MemoryQuotaNamespace();
+  const kv = new MemoryKv();
   const env = {
     SANDBOX_CONTAINER: {
       idFromName(name: string) {
@@ -208,8 +214,8 @@ function createEnv(
         return stub;
       },
     },
-    SANDBOX_QUOTA: new MemoryQuotaNamespace(),
-    SESSION_INDEX: new MemoryKv(),
+    SANDBOX_QUOTA: quota,
+    SESSION_INDEX: kv,
   } as unknown as SandboxHostEnv;
   const hostAuthToken = options.hostAuthToken === undefined
     ? HOST_AUTH_TOKEN
@@ -245,7 +251,7 @@ function createEnv(
     env.INSTALL_LAUNCH_CONSUME_PATH = "/gui/api/auth/launch";
   }
 
-  return { env, mcpCalls, doNames };
+  return { env, mcpCalls, doNames, quota, kv };
 }
 
 function fetchWorker(
@@ -1960,5 +1966,115 @@ test("sandbox host published MCP isolates sessions across distinct tokens with t
   }
   if (!nameA.endsWith(":shared-id") || !nameB.endsWith(":shared-id")) {
     throw new Error("Both names should carry the logical session id suffix");
+  }
+});
+
+function createBodyAtBytes(bytes: number): Uint8Array<ArrayBuffer> {
+  const fields = { sessionId: "body-limit-session", spaceId: "space-1", userId: "user-1", padding: "" };
+  const empty = JSON.stringify(fields);
+  return new TextEncoder().encode(JSON.stringify({ ...fields, padding: "x".repeat(bytes - new TextEncoder().encode(empty).byteLength) }));
+}
+
+function measuredBody(chunks: Uint8Array[]) {
+  let pulls = 0, cancelled = 0, next = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) { pulls++; if (next < chunks.length) controller.enqueue(chunks[next++]); else controller.close(); },
+    cancel() { cancelled++; },
+  }, { highWaterMark: 0 });
+  return { body, reads: () => pulls, cancellations: () => cancelled };
+}
+
+test("session create body admission rejects declared overflow before reading or contacting bindings", async () => {
+  const { env, doNames, quota, kv } = createEnv(), source = measuredBody([createBodyAtBytes(16385)]);
+  const response = await fetchWorker(env, "/gui/api/sandbox-create", {
+    method: "POST", headers: { Authorization: `Bearer ${HOST_AUTH_TOKEN}`, "Content-Type": "application/json", "Content-Length": "16385" }, body: source.body,
+  });
+  expect({ status: response.status, reads: source.reads(), selected: doNames, reserves: quota.reserveCalls, writes: kv.putCalls })
+    .toEqual({ status: 413, reads: 0, selected: [], reserves: 0, writes: 0 });
+});
+
+test("session create body admission cancels headerless overflow before bindings", async () => {
+  const { env, doNames, quota, kv } = createEnv();
+  const bytes = createBodyAtBytes(16385);
+  const source = measuredBody([bytes.slice(0, 8192), bytes.slice(8192)]);
+  const response = await fetchWorker(env, "/gui/api/sandbox-create", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${HOST_AUTH_TOKEN}`, "Content-Type": "application/json" },
+    body: source.body,
+  });
+  expect({ status: response.status, reads: source.reads(), cancelled: source.cancellations(), selected: doNames, reserves: quota.reserveCalls, writes: kv.putCalls })
+    .toEqual({ status: 413, reads: 2, cancelled: 1, selected: [], reserves: 0, writes: 0 });
+  expect(await response.json()).toEqual({ error: "Session creation request body too large" });
+});
+
+test("session create body admission counts UTF-8 bytes and distrusts an understated length", async () => {
+  const { env, doNames, quota, kv } = createEnv();
+  const text = JSON.stringify({ sessionId: "unicode-session", spaceId: "space-1", userId: "user-1", padding: "あ".repeat(6000) });
+  expect(text.length).toBeLessThan(16384);
+  const source = measuredBody([new TextEncoder().encode(text)]);
+  const response = await fetchWorker(env, "/create", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${HOST_AUTH_TOKEN}`, "Content-Type": "application/json", "Content-Length": "1" },
+    body: source.body,
+  });
+  expect({ status: response.status, cancelled: source.cancellations(), selected: doNames, reserves: quota.reserveCalls, writes: kv.putCalls })
+    .toEqual({ status: 413, cancelled: 1, selected: [], reserves: 0, writes: 0 });
+});
+
+test("session create body admission accepts the exact limit through both aliases", async () => {
+  for (const path of ["/create", "/gui/api/sandbox-create"]) {
+    const { env } = createEnv();
+    const bytes = createBodyAtBytes(16384);
+    expect(bytes.byteLength).toBe(16384);
+    const source = measuredBody([bytes.slice(0, 8192), bytes.slice(8192)]);
+    const response = await fetchWorker(env, path, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${HOST_AUTH_TOKEN}`, "Content-Type": "application/json" },
+      body: source.body,
+    });
+    expect(response.status).toBe(201);
+    expect(source.cancellations()).toBe(0);
+    const readback = await fetchWorker(env, "/session/body-limit-session", {
+      headers: { Authorization: `Bearer ${HOST_AUTH_TOKEN}` },
+    });
+    expect(readback.status).toBe(200);
+    expect(await readback.json()).toMatchObject({ sessionId: "body-limit-session", spaceId: "space-1", userId: "user-1", status: "active" });
+  }
+});
+
+test("session create body admission retains GUI ownership at the limit", async () => {
+  const { env } = createEnv({ appAuthRequired: true });
+  const cookie = await mintGuiSessionCookie(env, { sub: "member-user", spaceId: "member-space", appRole: "member" });
+  const response = await fetchWorker(env, "/gui/api/sandbox-create", {
+    method: "POST", headers: { Cookie: cookie, "Content-Type": "application/json" }, body: createBodyAtBytes(16384),
+  });
+  expect(response.status).toBe(201);
+  const readback = await fetchWorker(env, "/gui/api/sandbox-session/body-limit-session", { headers: { Cookie: cookie } });
+  expect(await readback.json()).toMatchObject({ userId: "member-user", spaceId: "member-space" });
+});
+
+test("session create body admission preserves authentication and membership before read", async () => {
+  const { env, doNames, quota, kv } = createEnv({ appAuthRequired: true });
+  const cookie = await mintGuiSessionCookie(env, { sub: "ordinary-user", appRole: undefined });
+  const requests: { headers: Record<string, string>; status: number }[] = [
+    { headers: { "Content-Length": "16385", "Content-Type": "application/json" }, status: 401 },
+    { headers: { "Content-Length": "16385", "Content-Type": "application/json", Cookie: cookie }, status: 403 },
+  ];
+  for (const { headers, status } of requests) {
+    const source = measuredBody([createBodyAtBytes(16385)]);
+    const response = await fetchWorker(env, "/gui/api/sandbox-create", { method: "POST", headers, body: source.body });
+    expect({ status: response.status, reads: source.reads(), selected: doNames, reserves: quota.reserveCalls, writes: kv.putCalls })
+      .toEqual({ status, reads: 0, selected: [], reserves: 0, writes: 0 });
+  }
+});
+
+test("session create body admission refuses malformed objects and UTF-8 before bindings", async () => {
+  for (const body of ["", "{", "null", "[]", '"text"', new Uint8Array([123, 34, 97, 34, 58, 34, 255, 34, 125])]) {
+    const { env, doNames, quota, kv } = createEnv();
+    const response = await fetchWorker(env, "/create", {
+      method: "POST", headers: { Authorization: `Bearer ${HOST_AUTH_TOKEN}`, "Content-Type": "application/json" }, body,
+    });
+    expect({ status: response.status, selected: doNames, reserves: quota.reserveCalls, writes: kv.putCalls })
+      .toEqual({ status: 400, selected: [], reserves: 0, writes: 0 });
   }
 });
