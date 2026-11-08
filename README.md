@@ -111,6 +111,14 @@ evidence が完全一致する短命の Takosumi Interface OAuth bearer を使�
 このディレクトリ下に解決され、絶対パスはシンボリックリンク解決後もこの中に
 収まる必要があります。
 
+`shell_exec` はコマンドごとの Linux child subreaper で子孫を管理します。
+正常終了・timeout・abort・`process_kill` では、別 session や double-fork した
+子孫も回収してから終了を確認します。TERM などで停止しない子孫は 1 秒後に
+KILL へ進みます。監視プロセスの喪失や回収未確認はエラーを返し、停止成功とは
+扱いません。同じ UID の任意コマンドは監視プロセス自体へ signal を送れるため、
+この機構だけで悪意あるコマンドの隔離や監視喪失後の回収は保証しません。
+セッションの隔離にはコンテナ境界が必要です。
+
 ## HTTP エンドポイント
 
 ### セッションライフサイクル
@@ -171,6 +179,9 @@ build 済み Worker の入力処理を local workerd で検証します。実 Co
 ### 前提条件
 
 - [Bun](https://bun.sh/) >= 1.3
+- Linux、`bash`、`setsid` (util-linux)、Python 3 — ローカルの shell 実行用。
+  Python は `fork` / `waitid(WNOWAIT)`、カーネルは child subreaper と `/proc`
+  を提供する必要があります。公式 sandbox image には必要なツールを含みます。
 - [Docker](https://www.docker.com/) —コンテナイメージビルド用
 - [Wrangler](https://developers.cloudflare.com/workers/wrangler/) — Cloudflare
   デプロイ用
