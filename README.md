@@ -165,6 +165,9 @@ public clientなのでclient secretを作りません。外部のconfidential OI
 
 ## 開発
 
+`bun test scripts/sandbox-host-runtime.test.ts` は、root module の互換日をそのまま使い、
+build 済み Worker の入力処理を local workerd で検証します。実 Container や外部サービスは起動しません。
+
 ### 前提条件
 
 - [Bun](https://bun.sh/) >= 1.3
