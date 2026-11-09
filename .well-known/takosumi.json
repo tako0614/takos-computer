@@ -1,5 +1,5 @@
 {
-  "apiVersion": "takosumi.com/v2.1",
+  "apiVersion": "takosumi.com/v2.5",
   "kind": "Repository",
   "install": {
     "modules": {
@@ -31,10 +31,21 @@
               "en": "Public URL"
             },
             "helper": {
-              "ja": "空欄の場合は利用可能なWorker URLを使います。",
-              "en": "Uses an available Worker URL when omitted."
+              "ja": "サインイン登録に使うHTTPS公開URLをPlan前に指定します。Worker URLまたは設定済みの独自ドメインを指定してください。",
+              "en": "Set the HTTPS public URL before Plan for sign-in registration. Use the Worker URL or an already configured custom domain."
             },
             "placeholder": "https://computer.example.com"
+          },
+          {
+            "name": "app_capsule_id",
+            "source": {
+              "kind": "capsule_id"
+            },
+            "type": "string",
+            "label": {
+              "ja": "アプリID",
+              "en": "App ID"
+            }
           },
           {
             "name": "takosumi_accounts_url",

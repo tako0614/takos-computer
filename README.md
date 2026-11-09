@@ -400,7 +400,7 @@ module "computer" {
 module は Cloudflare provider で `SESSION_INDEX` KV namespace を管理します。Cloudflare
 provider 5.19.1 は Container image / instance type / max instances を resource schema に
 持たないため、Worker + Durable Object + Container の作成・更新・削除は
-`terraform_data` lifecycle が pinned Wrangler 4.111.0 を実行します。これは一回の
+`terraform_data` lifecycle が pinned Wrangler 4.112.0 を実行します。これは一回の
 `tofu apply` / `tofu destroy` に収まり、架空 provider/resource や Takosumi 固有
 manifest は使いません。Docker が利用できない runner は、事前にレビュー済みの
 `container_image` を明示してください。
@@ -421,14 +421,20 @@ repository内のDockerfileは `linux/amd64` のBun 1.3.14 image manifestをdiges
 しています。`container_image` を上書きする場合もtagではなくレビュー済みdigestを
 指定してください。
 
-managed install のoperatorは、このGit sourceとmodule path `.`だけに一致する
-service-side `InstallConfig` を先に用意する必要があります。そのconfigは少なくとも:
+Takosumi installはGit sourceの固定snapshotとscan済みroot module `.`を選び、
+repository manifestをservice-side policyの範囲でInstallConfigへ採用します。
+manifest v2.5は`app_capsule_id`をcurrent Capsuleから配送するよう要求し、利用者にIDを入力させません。
+operatorのpolicyと実行環境は少なくとも:
 
-- `enable_cloudflare_resources = true` を固定し、`app_capsule_id` を install
-  context から注入する。`app_workspace_id` は旧環境との互換用の任意設定
+- `enable_cloudflare_resources = true` のrootを実行でき、既存の`local-exec`
+  deploy/cleanup adapterを明示許可している。未許可の既定policyではcompatibilityが拒否する
+- `app_capsule_id`のcurrent Capsule配送を維持する。`app_workspace_id`は旧環境との互換用で、新しいinstallの入力にはしない
+- サインイン登録に使う公開URLをPlan前に確定する。`public_url`のHCL defaultは直接self-host向けに保持するが、未確定のpost-apply URLからclient登録を作らない
 - GUI OIDCを有効にする場合はAccountsのpublic PKCE登録からAccounts URL、issuer、
   client id、登録済みredirect URIを写像し、存在しないclient secretを要求しない。
   callbackはcanonical public URLの `/gui/api/auth/callback` と一致させる
+- `enable_app_oidc`未指定（`null`）では、配送されたOIDC client idがあるとGUI認証を有効化する。
+  明示した`true`/`false`はそのまま維持し、client idのないstandalone/MCP-only構成は自動有効化しない
 - `enable_app_oidc = true` で `app_capsule_id` と `app_workspace_id` がともに
   空なら、`allow_public_sandbox_creation` を明示する。`false` は認証済みの
   非メンバーによる作成を403にし、`true` はoperator負担の作成を許可する。
@@ -444,6 +450,10 @@ service-side `InstallConfig` を先に用意する必要があります。その
 どちらもinstalling principalだけを対象にしたbinding requestです。compilerがservice-side
 policyで受理した後、実際のInterface / BindingはDB-owned stateから確定します。
 manifestや通常のURL Outputだけでアクセス権が付与されることはありません。
+
+既存CIのnative validation phaseは`bun scripts/check-installer-auth.ts`で、実rootの
+deployment inputを`tofu console`から確認します。登録値による自動有効化、明示true/false、
+MCP-onlyとstandaloneを、別の空stateで評価します。Plan/Applyやprovider APIは実行しません。
 
 公開順序はインストール型アプリの更新を先に行い、Accounts writer B（#657）の
 `app_role` 発行を最後に開きます。未更新のself-hostアプリは移行中も旧Workspace

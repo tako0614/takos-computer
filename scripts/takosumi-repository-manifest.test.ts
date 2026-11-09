@@ -19,7 +19,7 @@ test("Takos Computer publishes the closed Repository manifest for its selectable
     "install",
     "kind",
   ]);
-  expect(manifest.apiVersion).toBe("takosumi.com/v2.1");
+  expect(manifest.apiVersion).toBe("takosumi.com/v2.5");
   expect(manifest.kind).toBe("Repository");
   expect(Object.keys(manifest.install)).toEqual(["modules"]);
   expect(Object.keys(manifest.install.modules)).toEqual(["."]);
@@ -55,7 +55,6 @@ test("manifest references real variables and no secret or host authority", () =>
     "app_session_secret",
     "takos_token",
     "app_workspace_id",
-    "app_capsule_id",
     "credential",
   ]) {
     expect(text).not.toContain(forbidden);
@@ -67,6 +66,22 @@ test("manifest references real variables and no secret or host authority", () =>
   ]) {
     expect(text).not.toContain(`"${authorityField}"`);
   }
+});
+
+test("repository install declares its current Capsule and exposes the endpoint used by OIDC registration", () => {
+  const module = manifest.install.modules["."];
+  const inputs = module.inputs;
+  const context = inputs.filter((input) => input.source.kind === "capsule_id");
+  expect(context).toHaveLength(1);
+  expect(context[0]).toMatchObject({
+    name: "app_capsule_id", source: { kind: "capsule_id" }, type: "string",
+  });
+  expect(inputs.some((input) => input.source.kind === "workspace_id")).toBe(false);
+  expect(inputs.filter((input) => input.source.kind === "user").some((input) => input.name === "app_capsule_id")).toBe(false);
+  expect(inputs.find((input) => input.name === "public_url")).toMatchObject({
+    source: { kind: "user" }, required: false,
+  });
+  expect(module.requires?.find((entry) => entry.kind === "http.endpoint")?.deliver.variables.url).toBe("public_url");
 });
 
 test("the GUI launcher and MCP request only the installer's existing public endpoints", () => {

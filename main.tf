@@ -176,9 +176,10 @@ variable "app_capsule_id" {
 }
 
 variable "enable_app_oidc" {
-  description = "Protect /gui with Takosumi Accounts OIDC."
+  description = "Protect /gui with Takosumi Accounts OIDC. Null enables it when an OIDC client id is supplied; explicit true/false overrides that default."
   type        = bool
-  default     = false
+  default     = null
+  nullable    = true
 }
 
 variable "allow_public_sandbox_creation" {
@@ -256,6 +257,7 @@ locals {
   launch_url         = local.public_origin != "" ? "${local.public_origin}/gui" : null
   mcp_url            = local.public_origin != "" ? "${local.public_origin}/mcp" : null
   accounts_issuer    = trimsuffix(trimspace(var.takosumi_accounts_issuer_url), "/")
+  app_oidc_enabled   = var.enable_app_oidc != null ? var.enable_app_oidc : trimspace(var.oidc_client_id) != ""
   interface_oauth_enabled = (
     local.accounts_issuer != "" &&
     trimspace(var.app_capsule_id) != "" &&
@@ -294,7 +296,7 @@ resource "random_password" "container_mcp_auth" {
 }
 
 resource "random_password" "app_session" {
-  count   = var.enable_cloudflare_resources && var.enable_app_oidc && trimspace(var.app_session_secret) == "" ? 1 : 0
+  count   = var.enable_cloudflare_resources && local.app_oidc_enabled && trimspace(var.app_session_secret) == "" ? 1 : 0
   length  = 48
   special = false
 }
@@ -307,8 +309,8 @@ locals {
     sandboxHost  = local.sandbox_host_auth_token
     containerMcp = local.container_mcp_auth_token
     publishedMcp = var.published_mcp_auth_token
-    appSession   = var.enable_app_oidc ? local.app_session_secret : ""
-    oidcClient   = var.enable_app_oidc ? var.oidc_client_secret : ""
+    appSession   = local.app_oidc_enabled ? local.app_session_secret : ""
+    oidcClient   = local.app_oidc_enabled ? var.oidc_client_secret : ""
     takosToken   = var.takos_token
   }))
   deploy_input = {
@@ -324,7 +326,7 @@ locals {
     accountsIssuer             = local.accounts_issuer
     workspaceId                = trimspace(var.app_workspace_id)
     capsuleId                  = trimspace(var.app_capsule_id)
-    appOidc                    = var.enable_app_oidc
+    appOidc                    = local.app_oidc_enabled
     allowPublicSandboxCreation = coalesce(var.allow_public_sandbox_creation, false)
     oidcClientId               = trimspace(var.oidc_client_id)
     oidcRedirectUri            = local.oidc_redirect_uri
@@ -350,8 +352,8 @@ resource "terraform_data" "sandbox_host" {
       SANDBOX_HOST_AUTH_TOKEN      = local.sandbox_host_auth_token
       MCP_AUTH_TOKEN               = local.container_mcp_auth_token
       PUBLISHED_MCP_AUTH_TOKEN     = var.published_mcp_auth_token
-      APP_SESSION_SECRET           = var.enable_app_oidc ? local.app_session_secret : ""
-      OIDC_CLIENT_SECRET           = var.enable_app_oidc ? var.oidc_client_secret : ""
+      APP_SESSION_SECRET           = local.app_oidc_enabled ? local.app_session_secret : ""
+      OIDC_CLIENT_SECRET           = local.app_oidc_enabled ? var.oidc_client_secret : ""
       TAKOS_TOKEN                  = var.takos_token
     }
   }
@@ -375,7 +377,7 @@ resource "terraform_data" "sandbox_host" {
     precondition {
       condition = (
         (trimspace(var.app_workspace_id) == "" && trimspace(var.app_capsule_id) == "") ||
-        (local.accounts_issuer != "" && (trimspace(var.app_capsule_id) != "" || var.enable_app_oidc))
+        (local.accounts_issuer != "" && (trimspace(var.app_capsule_id) != "" || local.app_oidc_enabled))
       )
       error_message = "App context requires Accounts issuer and app_capsule_id for Interface OAuth, or enable_app_oidc for legacy Workspace sign-in."
     }
@@ -394,7 +396,7 @@ resource "terraform_data" "sandbox_host" {
     }
 
     precondition {
-      condition = !var.enable_app_oidc || (
+      condition = !local.app_oidc_enabled || (
         local.accounts_issuer != "" &&
         trimspace(var.oidc_client_id) != "" &&
         local.oidc_redirect_uri != ""
@@ -404,7 +406,7 @@ resource "terraform_data" "sandbox_host" {
 
     precondition {
       condition = (
-        !var.enable_app_oidc ||
+        !local.app_oidc_enabled ||
         trimspace(var.app_capsule_id) != "" ||
         trimspace(var.app_workspace_id) != "" ||
         var.allow_public_sandbox_creation != null
@@ -413,7 +415,7 @@ resource "terraform_data" "sandbox_host" {
     }
 
     precondition {
-      condition     = !var.enable_app_oidc || local.oidc_redirect_uri == "${local.public_origin}/gui/api/auth/callback"
+      condition     = !local.app_oidc_enabled || local.oidc_redirect_uri == "${local.public_origin}/gui/api/auth/callback"
       error_message = "The registered Accounts callback must match the canonical Computer public URL."
     }
   }
