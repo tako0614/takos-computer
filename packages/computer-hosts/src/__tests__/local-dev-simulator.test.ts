@@ -83,6 +83,75 @@ test("local dev simulator exposes a ready sandbox host env", async () => {
   }
 });
 
+test("local dev simulator live reconnect preserves the original connection and state", async () => {
+  const workspaceRoot = await makeTempDir({ prefix: "computer-live-reconnect-" });
+  try {
+    const host = createLocalDevSandboxHost({ workspaceRoot, hostAuthToken: HOST_AUTH_TOKEN });
+    const create = () => host.fetch(new Request("http://local/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${HOST_AUTH_TOKEN}` },
+      body: JSON.stringify({ sessionId: "session-1", spaceId: "space-1", userId: "user-1" }),
+    }));
+    const initial = await create();
+    expect(initial.status).toBe(201);
+    const { proxyToken } = await initial.json() as { proxyToken: string };
+    await callSessionMcp(host.fetch, proxyToken, "file_write", {
+      path: "retained.txt", content: "retained content",
+    });
+    const session = host.sandboxContainer.get(host.sandboxContainer.idFromName("session-1"));
+    const before = await session.getSessionState();
+
+    const reconnected = await create();
+    expect(reconnected.status).toBe(201);
+    expect(await reconnected.json()).toMatchObject({ proxyToken, reused: true });
+    expect(await session.getSessionState()).toEqual(before);
+    expect(await session.verifyProxyToken(proxyToken)).toMatchObject({ userId: "user-1", spaceId: "space-1" });
+    const read = await callSessionMcp(host.fetch, proxyToken, "file_read", { path: "retained.txt" });
+    expect(read.content).toBe("retained content");
+  } finally {
+    await remove(workspaceRoot, { recursive: true });
+  }
+});
+
+test("local dev simulator live reconnect keeps the running command under its original manager", async () => {
+  const workspaceRoot = await makeTempDir({ prefix: "computer-live-manager-" });
+  let running: Promise<Record<string, unknown>> | undefined;
+  try {
+    const host = createLocalDevSandboxHost({ workspaceRoot, hostAuthToken: HOST_AUTH_TOKEN });
+    const create = () => host.fetch(new Request("http://local/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${HOST_AUTH_TOKEN}` },
+      body: JSON.stringify({ sessionId: "session-1", spaceId: "space-1", userId: "user-1" }),
+    }));
+    const initial = await create();
+    expect(initial.status).toBe(201);
+    const { proxyToken } = await initial.json() as { proxyToken: string };
+    running = callSessionMcp(host.fetch, proxyToken, "shell_exec", {
+      command: 'printf "%s" "$$" > managed.pid; sleep 2', timeout_ms: 4_000,
+    });
+    const pidPath = `${workspaceRoot}/${sessionWorkspaceSegment("session-1")}/managed.pid`;
+    let ready = false;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (await Bun.file(pidPath).exists()) { ready = true; break; }
+      await Bun.sleep(5);
+    }
+    expect(ready).toBe(true);
+    const pid = Number(await Bun.file(pidPath).text());
+    expect(Number.isSafeInteger(pid) && pid > 1).toBe(true);
+
+    const reconnected = await create();
+    expect(reconnected.status).toBe(201);
+    const current = await reconnected.json() as { proxyToken: string };
+    const killed = await callSessionMcp(host.fetch, current.proxyToken, "process_kill", { pid });
+    expect(killed).toMatchObject({ killed: true, pid, signal: "SIGTERM" });
+    expect(await running).toMatchObject({ exit_code: 143, timed_out: false });
+  } finally {
+    // The fixture owns this finite command; let it finish even on the RED path.
+    await running?.catch(() => {});
+    await remove(workspaceRoot, { recursive: true });
+  }
+});
+
 test("local dev simulator creates sessions and proxies MCP to sandbox service", async () => {
   const workspaceRoot = await makeTempDir({
     prefix: "takos-computer-local-",
