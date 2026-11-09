@@ -152,6 +152,8 @@ export class SandboxSessionContainer
       // instead of tearing it down and rotating the proxy token.
       const reusedToken = this.firstProxyToken();
       if (reusedToken) {
+        // A reconstructed DO has fresh envVars even when its session persists.
+        this.applyContainerEnv();
         await this.ensureContainerStarted();
         return { ok: true, proxyToken: reusedToken, reused: true };
       }

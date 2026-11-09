@@ -194,6 +194,54 @@ test("createSession reuses a live session and keeps the proxy token (idempotent)
   expect(await container.verifyProxyToken(first.proxyToken)).toBeTruthy();
 });
 
+for (const hasMcpToken of [true, false]) {
+  test(`createSession restores container env before restarting a persisted session (MCP token: ${hasMcpToken})`, async () => {
+    const ctx: HostContainerContext = { storage: new MemoryStorage() };
+    const env = createEnv();
+    env.SANDBOX_HOST_AUTH_TOKEN = "host-admin-token";
+    if (!hasMcpToken) delete env.MCP_AUTH_TOKEN;
+    const first = new TestSandboxSessionContainer(ctx, env);
+    const created = await first.createSession(createPayload());
+    const state = await first.getSessionState();
+
+    class ReconstructedContainer extends TestSandboxSessionContainer {
+      startEnvs: Record<string, string>[] = [];
+
+      override startAndWaitForPorts(ports?: number | number[]): Promise<void> {
+        this.startEnvs.push({ ...this.envVars });
+        return super.startAndWaitForPorts(ports);
+      }
+    }
+    const restored = new ReconstructedContainer(ctx, env);
+    expect(restored.envVars).toEqual({});
+
+    // A different caller must be rejected before starting or configuring the
+    // previous owner's stopped container, even after the DO is reconstructed.
+    await expect(restored.createSession(createPayload({ userId: "other-owner" })))
+      .rejects.toThrow("different owner");
+    expect(restored.startEnvs).toEqual([]);
+    expect(restored.envVars).toEqual({});
+
+    const reused = await restored.createSession(createPayload());
+    expect(reused).toEqual({ ok: true, proxyToken: created.proxyToken, reused: true });
+    expect(restored.startEnvs).toEqual([{
+      ...(hasMcpToken ? { MCP_AUTH_TOKEN } : {}),
+      TAKOS_API_URL,
+      TAKOS_SPACE_ID: "space-1",
+    }]);
+    expect(restored.envVars.TAKOS_TOKEN).toBeUndefined();
+    expect(restored.envVars.SANDBOX_HOST_AUTH_TOKEN).toBeUndefined();
+    expect(await restored.getSessionState()).toEqual(state);
+    expect(await restored.verifyProxyToken(created.proxyToken)).toEqual({
+      sessionId: "session-1", spaceId: "space-1", userId: "user-1",
+    });
+    expect(restored.destroyCalls).toEqual(0);
+
+    await restored.createSession(createPayload());
+    expect(restored.startEnvs).toHaveLength(1);
+  });
+}
+
 test("createSession refuses to re-home a live session onto a different owner", async () => {
   const ctx: HostContainerContext = { storage: new MemoryStorage() };
   const container = new TestSandboxSessionContainer(ctx, createEnv());
