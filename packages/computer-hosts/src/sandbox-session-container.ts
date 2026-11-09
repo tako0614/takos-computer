@@ -140,20 +140,24 @@ export class SandboxSessionContainer
     // and the single create-or-reuse contract shared by the GUI route and the
     // published-MCP path (which previously diverged: hard-recreate vs reuse).
     const existing = this.sessionState;
-    if (existing && existing.status !== "stopped" && !options.force) {
+    if (existing && !options.force) {
       const ownerChanged = existing.userId !== payload.userId ||
         existing.spaceId !== payload.spaceId;
       if (ownerChanged) {
-        // Never silently re-home a live session (its workspace + running
-        // processes) onto a different principal.
+        // A stopped tombstone also belongs to its original owner, who may
+        // still need to retry index/quota cleanup or recreate this session.
         throw new Error("Session id already exists for a different owner");
       }
-      // Same owner, still live: reuse the running container + existing token
-      // instead of tearing it down and rotating the proxy token.
-      const reusedToken = this.firstProxyToken();
-      if (reusedToken) {
-        await this.ensureContainerStarted();
-        return { ok: true, proxyToken: reusedToken, reused: true };
+      if (existing.status !== "stopped") {
+        // Same owner, still live: reuse the running container + existing token
+        // instead of tearing it down and rotating the proxy token.
+        const reusedToken = this.firstProxyToken();
+        if (reusedToken) {
+          // A reconstructed DO has fresh envVars even when its session persists.
+          this.applyContainerEnv();
+          await this.ensureContainerStarted();
+          return { ok: true, proxyToken: reusedToken, reused: true };
+        }
       }
     }
 

@@ -11,17 +11,21 @@ type HostContainerStorage = HostContainerContext["storage"];
 
 class MemoryStorage implements HostContainerStorage {
   private values = new Map<string, unknown>();
+  putCalls = 0;
+  deleteCalls = 0;
 
   get<T = unknown>(key: string): Promise<T | undefined> {
     return Promise.resolve(this.values.get(key) as T | undefined);
   }
 
   put(key: string, value: unknown): Promise<void> {
+    this.putCalls++;
     this.values.set(key, structuredClone(value));
     return Promise.resolve();
   }
 
   delete(key: string): Promise<boolean> {
+    this.deleteCalls++;
     return Promise.resolve(this.values.delete(key));
   }
 }
@@ -194,6 +198,54 @@ test("createSession reuses a live session and keeps the proxy token (idempotent)
   expect(await container.verifyProxyToken(first.proxyToken)).toBeTruthy();
 });
 
+for (const hasMcpToken of [true, false]) {
+  test(`createSession restores container env before restarting a persisted session (MCP token: ${hasMcpToken})`, async () => {
+    const ctx: HostContainerContext = { storage: new MemoryStorage() };
+    const env = createEnv();
+    env.SANDBOX_HOST_AUTH_TOKEN = "host-admin-token";
+    if (!hasMcpToken) delete env.MCP_AUTH_TOKEN;
+    const first = new TestSandboxSessionContainer(ctx, env);
+    const created = await first.createSession(createPayload());
+    const state = await first.getSessionState();
+
+    class ReconstructedContainer extends TestSandboxSessionContainer {
+      startEnvs: Record<string, string>[] = [];
+
+      override startAndWaitForPorts(ports?: number | number[]): Promise<void> {
+        this.startEnvs.push({ ...this.envVars });
+        return super.startAndWaitForPorts(ports);
+      }
+    }
+    const restored = new ReconstructedContainer(ctx, env);
+    expect(restored.envVars).toEqual({});
+
+    // A different caller must be rejected before starting or configuring the
+    // previous owner's stopped container, even after the DO is reconstructed.
+    await expect(restored.createSession(createPayload({ userId: "other-owner" })))
+      .rejects.toThrow("different owner");
+    expect(restored.startEnvs).toEqual([]);
+    expect(restored.envVars).toEqual({});
+
+    const reused = await restored.createSession(createPayload());
+    expect(reused).toEqual({ ok: true, proxyToken: created.proxyToken, reused: true });
+    expect(restored.startEnvs).toEqual([{
+      ...(hasMcpToken ? { MCP_AUTH_TOKEN } : {}),
+      TAKOS_API_URL,
+      TAKOS_SPACE_ID: "space-1",
+    }]);
+    expect(restored.envVars.TAKOS_TOKEN).toBeUndefined();
+    expect(restored.envVars.SANDBOX_HOST_AUTH_TOKEN).toBeUndefined();
+    expect(await restored.getSessionState()).toEqual(state);
+    expect(await restored.verifyProxyToken(created.proxyToken)).toEqual({
+      sessionId: "session-1", spaceId: "space-1", userId: "user-1",
+    });
+    expect(restored.destroyCalls).toEqual(0);
+
+    await restored.createSession(createPayload());
+    expect(restored.startEnvs).toHaveLength(1);
+  });
+}
+
 test("createSession refuses to re-home a live session onto a different owner", async () => {
   const ctx: HostContainerContext = { storage: new MemoryStorage() };
   const container = new TestSandboxSessionContainer(ctx, createEnv());
@@ -211,6 +263,38 @@ test("createSession refuses to re-home a live session onto a different owner", a
   // The original owner's session is untouched.
   expect((await container.getSessionState())?.userId).toEqual("owner-a");
 });
+
+for (const changedOwner of [{ userId: "other-user" }, { spaceId: "other-space" }]) {
+  test(`createSession preserves a stopped tombstone against ${Object.keys(changedOwner)[0]} replacement`, async () => {
+    const storage = new MemoryStorage();
+    const ctx: HostContainerContext = { storage };
+    const first = new TestSandboxSessionContainer(ctx, createEnv());
+    const payload = createPayload();
+    const created = await first.createSession(payload);
+    await first.destroySession();
+    const stopped = await first.getSessionState();
+    const restored = new TestSandboxSessionContainer(ctx, createEnv());
+    const writes = [storage.putCalls, storage.deleteCalls];
+
+    await expect(restored.createSession(createPayload(changedOwner)))
+      .rejects.toThrow("different owner");
+    expect(await restored.getSessionState()).toEqual(stopped);
+    expect(await restored.verifyProxyToken(created.proxyToken)).toEqual({
+      sessionId: payload.sessionId, spaceId: payload.spaceId, userId: payload.userId,
+    });
+    expect([storage.putCalls, storage.deleteCalls]).toEqual(writes);
+    expect(restored.startPorts).toEqual([]);
+    expect(restored.destroyCalls).toBe(0);
+    expect(restored.envVars).toEqual({});
+
+    const recreated = await restored.createSession(payload);
+    expect(recreated.reused).toBeUndefined();
+    expect(recreated.proxyToken).not.toEqual(created.proxyToken);
+    expect(await restored.verifyProxyToken(created.proxyToken)).toBeNull();
+    expect(await restored.getSessionState()).toMatchObject({ ...payload, status: "active" });
+    expect(restored.startPorts).toEqual([[8080]]);
+  });
+}
 
 test("createSession with force gets a fresh container for an owner change", async () => {
   const ctx: HostContainerContext = { storage: new MemoryStorage() };

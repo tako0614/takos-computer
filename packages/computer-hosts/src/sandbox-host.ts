@@ -396,7 +396,7 @@ async function createSession(c: AppContext): Promise<Response> {
     // already owned by a different principal.
     if (scope.kind === "gui") {
       if (
-        existing && existing.status !== "stopped" &&
+        existing &&
         !guiSessionOwnsSandbox(scope.guiSession, existing)
       ) {
         return c.json(
@@ -404,9 +404,12 @@ async function createSession(c: AppContext): Promise<Response> {
           409,
         );
       }
+      // Space-less same-user GUI access is already allowed by the existing
+      // ACL. Keep the authorized stored scope instead of re-homing it to "".
+      if (existing) spaceId = existing.spaceId;
     } else if (
-      existing && existing.status !== "stopped" &&
-      existing.userId !== userId
+      existing &&
+      (existing.userId !== userId || existing.spaceId !== spaceId)
     ) {
       return c.json({ error: "Session id is owned by another principal" }, 409);
     }
