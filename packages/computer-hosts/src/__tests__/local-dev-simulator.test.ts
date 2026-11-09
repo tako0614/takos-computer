@@ -25,6 +25,39 @@ test("local dev simulator is loopback-only and maps ids injectively", () => {
   );
 });
 
+test("local dev simulator preserves a stopped session for its original owner's recovery", async () => {
+  const workspaceRoot = await makeTempDir({ prefix: "computer-owner-recovery-" });
+  try {
+    const host = createLocalDevSandboxHost({ workspaceRoot, hostAuthToken: HOST_AUTH_TOKEN });
+    const sessionId = "retained-owner";
+    const create = (userId: string) => host.fetch(new Request("http://local/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${HOST_AUTH_TOKEN}` },
+      body: JSON.stringify({ sessionId, spaceId: "space-1", userId }),
+    }));
+    const first = await create("user-a");
+    expect(first.status).toBe(201);
+    const originalToken = (await first.json() as { proxyToken: string }).proxyToken;
+    expect((await host.fetch(new Request("http://local/session/" + sessionId, {
+      method: "DELETE", headers: { Authorization: `Bearer ${HOST_AUTH_TOKEN}` },
+    }))).status).toBe(200);
+    const session = host.sandboxContainer.get(host.sandboxContainer.idFromName(sessionId));
+    const stopped = await session.getSessionState();
+    expect(stopped?.status).toBe("stopped");
+
+    expect((await create("user-b")).status).toBe(409);
+    expect(await session.getSessionState()).toEqual(stopped);
+    const restored = await create("user-a");
+    expect(restored.status).toBe(201);
+    const restoredToken = (await restored.json() as { proxyToken: string }).proxyToken;
+    expect(restoredToken).not.toEqual(originalToken);
+    expect(await session.verifyProxyToken(originalToken)).toBeNull();
+    expect(await session.getSessionState()).toMatchObject({ userId: "user-a", spaceId: "space-1", status: "active" });
+  } finally {
+    await remove(workspaceRoot, { recursive: true });
+  }
+});
+
 test("local dev simulator exposes a ready sandbox host env", async () => {
   const workspaceRoot = await makeTempDir({
     prefix: "takos-computer-local-",

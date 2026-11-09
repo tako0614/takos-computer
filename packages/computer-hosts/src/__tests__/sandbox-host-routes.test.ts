@@ -140,10 +140,12 @@ function createEnv(
     body: unknown;
   }> = [];
 
+  const sessionCalls = { create: 0, destroy: 0 };
   const stub = {
     createSession(
       payload: CreateSandboxSessionPayload,
     ): Promise<{ ok: true; proxyToken: string }> {
+      sessionCalls.create++;
       states.set(currentSessionId, {
         ...payload,
         status: "active",
@@ -163,6 +165,7 @@ function createEnv(
       return states.get(currentSessionId) ?? null;
     },
     destroySession(): Promise<void> {
+      sessionCalls.destroy++;
       const state = states.get(currentSessionId);
       if (state) states.set(currentSessionId, { ...state, status: "stopped" });
       return Promise.resolve();
@@ -251,7 +254,7 @@ function createEnv(
     env.INSTALL_LAUNCH_CONSUME_PATH = "/gui/api/auth/launch";
   }
 
-  return { env, mcpCalls, doNames, quota, kv };
+  return { env, mcpCalls, doNames, quota, kv, states, sessionCalls };
 }
 
 function fetchWorker(
@@ -1272,6 +1275,73 @@ test("sandbox host retries index and quota cleanup from a stopped tombstone", as
   });
   expect(replacement.status).toEqual(201);
 });
+
+for (const caller of ["GUI", "admin"] as const) {
+  test(`sandbox host preserves stopped ownership and cleanup retry for ${caller} creates`, async () => {
+    const { env, kv, quota, states, sessionCalls } = createEnv({ appAuthRequired: true });
+    env.MAX_SANDBOX_SESSIONS_PER_PRINCIPAL = "1";
+    const sessionId = "retained-owner";
+    const owner = { sub: "user-a", spaceId: "space-a", appRole: "owner" as const };
+    const ownerCookie = await mintGuiSessionCookie(env, owner);
+    const create = async (sub: string, spaceId: string) => {
+      const headers = caller === "GUI"
+        ? { Cookie: await mintGuiSessionCookie(env, { sub, spaceId, appRole: "owner" }) }
+        : hostAuthHeaders();
+      return fetchWorker(env, caller === "GUI" ? "/gui/api/sandbox-create" : "/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ sessionId, userId: sub, spaceId }),
+      });
+    };
+    expect((await create(owner.sub, owner.spaceId)).status).toBe(201);
+
+    kv.failNextDelete = true;
+    const destroy = () => fetchWorker(env, "/gui/api/sandbox-session/" + sessionId, {
+      method: "DELETE", headers: { Cookie: ownerCookie },
+    });
+    expect((await destroy()).status).toBe(500);
+    const stopped = structuredClone(states.get(sessionId));
+    expect(stopped?.status).toBe("stopped");
+    const effects = { ...sessionCalls, reserve: quota.reserveCalls, index: kv.putCalls };
+
+    for (const foreign of [{ sub: "user-b", spaceId: owner.spaceId }, { sub: owner.sub, spaceId: "space-b" }]) {
+      expect((await create(foreign.sub, foreign.spaceId)).status).toBe(409);
+      expect(states.get(sessionId)).toEqual(stopped);
+      expect({ ...sessionCalls, reserve: quota.reserveCalls, index: kv.putCalls }).toEqual(effects);
+    }
+
+    expect((await destroy()).status).toBe(200);
+    expect((await create(owner.sub, owner.spaceId)).status).toBe(201);
+    expect(states.get(sessionId)).toMatchObject({ userId: owner.sub, spaceId: owner.spaceId, status: "active" });
+    const ownNewId = await fetchWorker(env, "/gui/api/sandbox-create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: await mintGuiSessionCookie(env, { sub: "user-b", spaceId: owner.spaceId, appRole: "owner" }) },
+      body: JSON.stringify({ sessionId: "different-owner-new-id" }),
+    });
+    expect(ownNewId.status).toBe(201);
+  });
+}
+
+for (const stopped of [false, true]) {
+  test(`space-less GUI keeps its existing owner space when recreating a stopped=${stopped} session`, async () => {
+    const { env, states } = createEnv({ appAuthRequired: true });
+    const payload = { sessionId: "legacy-owner", userId: "user-a", spaceId: "space-a" };
+    expect((await fetchWorker(env, "/create", {
+      method: "POST", headers: { "Content-Type": "application/json", ...hostAuthHeaders() }, body: JSON.stringify(payload),
+    })).status).toBe(201);
+    if (stopped) expect((await fetchWorker(env, "/session/legacy-owner", {
+      method: "DELETE", headers: hostAuthHeaders(),
+    })).status).toBe(200);
+    const cookie = await mintGuiSessionCookie(env, { sub: payload.userId, appRole: "owner" });
+    const recreated = await fetchWorker(env, "/gui/api/sandbox-create", {
+      method: "POST", headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ sessionId: payload.sessionId, userId: "forged", spaceId: "forged" }),
+    });
+    expect(recreated.status).toBe(201);
+    expect(states.get(payload.sessionId)).toMatchObject({ ...payload, status: "active" });
+    expect((await fetchWorker(env, "/gui/api/sandbox-session/legacy-owner", { headers: { Cookie: cookie } })).status).toBe(200);
+  });
+}
 
 test("sandbox host rejects unauthenticated session create", async () => {
   const { env } = createEnv();
