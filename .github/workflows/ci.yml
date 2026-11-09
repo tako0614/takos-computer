@@ -83,6 +83,7 @@ jobs:
           tofu init -backend=false -input=false -lockfile=readonly \
             -plugin-dir="$RUNNER_TEMP/takos-computer-provider-mirror"
           tofu validate
+          bun scripts/check-installer-auth.ts
           tofu plan -input=false -refresh=false -lock=false \
             -var enable_cloudflare_resources=true \
             -var cloudflare_account_id=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
