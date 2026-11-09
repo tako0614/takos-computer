@@ -165,7 +165,17 @@ class LocalSandboxSession {
 
   async createSession(
     payload: CreateSandboxSessionPayload,
-  ): Promise<{ ok: true; proxyToken: string }> {
+  ): Promise<{ ok: true; proxyToken: string; reused?: boolean }> {
+    // Keep the same live connection and ShellManager, as the real DO does.
+    // Rebuilding the app would forget running commands and revoke its token.
+    if (
+      this.state && this.state.status !== "stopped" &&
+      this.state.userId === payload.userId &&
+      this.state.spaceId === payload.spaceId &&
+      this.proxyToken && this.sandboxApp
+    ) {
+      return { ok: true, proxyToken: this.proxyToken, reused: true };
+    }
     const sessionWorkspace = `${this.workspaceRoot}/${
       sessionWorkspaceSegment(this.id.name ?? this.id.toString())
     }`;
