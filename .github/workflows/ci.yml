@@ -39,11 +39,38 @@ jobs:
       - run: bun run check:opentofu
       - name: Build the sandbox Container image
         run: docker build --file apps/sandbox/Dockerfile --tag takos-computer-sandbox:ci .
+      - name: Cache locked OpenTofu provider packages
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # pinned: v5.0.5 (2026)
+        with:
+          path: ${{ runner.temp }}/takos-computer-provider-mirror
+          key: takos-computer-providers-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.terraform.lock.hcl') }}
+      - name: Prepare the locked provider mirror
+        shell: bash
+        run: |
+          set -euo pipefail
+          mirror="$RUNNER_TEMP/takos-computer-provider-mirror/registry.opentofu.org"
+          download_provider() {
+            local namespace="$1" name="$2" version="$3" repository="$4"
+            local directory="$mirror/$namespace/$name"
+            local archive="terraform-provider-${name}_${version}_linux_amd64.zip"
+            mkdir -p "$directory"
+            if [[ ! -f "$directory/$archive" ]]; then
+              curl --fail --location \
+                "https://github.com/$repository/releases/download/v$version/$archive" \
+                --output "$directory/$archive.partial"
+              mv "$directory/$archive.partial" "$directory/$archive"
+            fi
+          }
+          download_provider cloudflare cloudflare 5.19.1 cloudflare/terraform-provider-cloudflare
+          download_provider hashicorp random 3.9.0 opentofu/terraform-provider-random
       - name: Validate and plan the OpenTofu Capsule
         shell: bash
         run: |
           set -euo pipefail
-          tofu init -backend=false -input=false
+          # The native installer verifies even cache hits against the committed
+          # lockfile. A corrupt/unlisted package must fail before validation.
+          tofu init -backend=false -input=false -lockfile=readonly \
+            -plugin-dir="$RUNNER_TEMP/takos-computer-provider-mirror"
           tofu validate
           tofu plan -input=false -refresh=false -lock=false \
             -var enable_cloudflare_resources=true \
