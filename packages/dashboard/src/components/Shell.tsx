@@ -71,6 +71,7 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
   };
 
   const onKeyDown = (e: KeyboardEvent) => {
+    if (e.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter") {
       run();
       return;

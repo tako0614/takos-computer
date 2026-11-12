@@ -41,6 +41,7 @@ export default function CreateModal(props: {
       if (open) focusable()[0]?.focus();
     });
     const handleKey = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
