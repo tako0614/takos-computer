@@ -11,7 +11,9 @@ import { sandboxSessions } from "../lib/api.ts";
 import Shell from "../components/Shell.tsx";
 import FileBrowser from "../components/FileBrowser.tsx";
 import ProcessList from "../components/ProcessList.tsx";
+import ConfirmDialog from "../components/ConfirmDialog.tsx";
 import LanguageSwitcher from "../components/LanguageSwitcher.tsx";
+import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
 import { useI18n } from "../i18n.ts";
 
 const directoryStateKey = "takosComputerDirectory";
@@ -105,16 +107,30 @@ export default function SandboxViewer() {
     return t("statusUnavailable");
   };
 
+  const [destroyDialogOpen, setDestroyDialogOpen] = createSignal(false);
   const [destroyRequest, setDestroyRequest] = createSignal<{
     id: string;
   } | null>(null);
   const [unconfirmedDestroy, setUnconfirmedDestroy] = createSignal<
     string | null
   >(null);
+
+  createEffect(
+    on(sessionId, () => {
+      setDestroyDialogOpen(false);
+    }),
+  );
+
   const destroyPending = () => destroyRequest()?.id === sessionId();
-  const destroySession = async () => {
+
+  const requestDestroySession = () => {
+    if (destroyPending()) return;
+    setDestroyDialogOpen(true);
+  };
+
+  const confirmDestroySession = async () => {
     const id = sessionId();
-    if (destroyPending() || !confirm(t("destroyCurrentConfirm"))) return;
+    if (destroyPending()) return;
     const request = { id };
     setDestroyRequest(request);
     setUnconfirmedDestroy(null);
@@ -122,11 +138,17 @@ export default function SandboxViewer() {
       viewerActive && sessionId() === id && destroyRequest() === request;
     try {
       await sandboxSessions.destroy(id);
-      if (current()) window.location.href = "/gui";
+      if (current()) {
+        setDestroyDialogOpen(false);
+        window.location.href = "/gui";
+      }
     } catch {
       if (current()) setUnconfirmedDestroy(id);
     } finally {
-      if (viewerActive && destroyRequest() === request) setDestroyRequest(null);
+      if (viewerActive && destroyRequest() === request) {
+        setDestroyRequest(null);
+        setDestroyDialogOpen(false);
+      }
     }
   };
 
@@ -145,6 +167,7 @@ export default function SandboxViewer() {
           </h1>
         </div>
         <div class="viewer-controls">
+          <ThemeSwitcher />
           <LanguageSwitcher />
           <span class={badgeClass()} role="status" aria-live="polite">
             {statusLabel()}
@@ -164,7 +187,7 @@ export default function SandboxViewer() {
             class="btn btn-danger btn-sm"
             aria-disabled={destroyPending()}
             aria-busy={destroyPending()}
-            onClick={destroySession}
+            onClick={requestDestroySession}
           >
             {destroyPending() ? t("destroying") : t("destroy")}
           </button>
@@ -193,6 +216,19 @@ export default function SandboxViewer() {
           <ProcessList mcpUrl={mcpUrl()} />
         </section>
       </main>
+
+      <ConfirmDialog
+        open={destroyDialogOpen()}
+        title={t("destroySessionTitle")}
+        description={t("destroyCurrentConfirm")}
+        detail={sessionId()}
+        confirmLabel={t("destroy")}
+        confirmBusyLabel={t("destroying")}
+        tone="danger"
+        busy={destroyPending()}
+        onCancel={() => setDestroyDialogOpen(false)}
+        onConfirm={confirmDestroySession}
+      />
     </div>
   );
 }

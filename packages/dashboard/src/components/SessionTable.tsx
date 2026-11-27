@@ -16,6 +16,8 @@ const statusKey = (status: string): "active" | "starting" | "stopped" =>
 export default function SessionTable(props: {
   sessions: SessionState[];
   loading: boolean;
+  filtered?: boolean;
+  onClearFilter?: () => void;
   onDestroy: (id: string) => void;
   destroyPending?: (id: string) => boolean;
 }) {
@@ -54,10 +56,21 @@ export default function SessionTable(props: {
               <Show
                 when={props.sessions.length > 0}
                 fallback={
-                  <Placeholder
-                    text={t("noSessions")}
-                    hint={t("noSessionsHint")}
-                  />
+                  props.filtered
+                    ? (
+                      <Placeholder
+                        text={t("noMatchingSessions")}
+                        hint={t("noMatchingSessionsHint")}
+                        actionLabel={t("clearFilter")}
+                        onAction={props.onClearFilter}
+                      />
+                    )
+                    : (
+                      <Placeholder
+                        text={t("noSessions")}
+                        hint={t("noSessionsHint")}
+                      />
+                    )
                 }
               >
                 <For each={props.sessions}>
@@ -115,13 +128,29 @@ export default function SessionTable(props: {
   );
 }
 
-function Placeholder(props: { text: string; hint?: string }) {
+function Placeholder(props: {
+  text: string;
+  hint?: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
   return (
     <tr>
       <td colspan="5" class="session-empty">
         <div class="session-empty-title">{props.text}</div>
         <Show when={props.hint}>
           <div class="session-empty-hint">{props.hint}</div>
+        </Show>
+        <Show when={props.actionLabel && props.onAction}>
+          <div class="session-empty-action">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              onClick={props.onAction}
+            >
+              {props.actionLabel}
+            </button>
+          </div>
         </Show>
       </td>
     </tr>
