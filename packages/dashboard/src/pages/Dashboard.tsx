@@ -1,4 +1,11 @@
-import { createEffect, createResource, createSignal, For, onCleanup, Show } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  For,
+  onCleanup,
+  Show,
+} from "solid-js";
 import { sandboxSessions } from "../lib/api.ts";
 import SessionTable from "../components/SessionTable.tsx";
 import CreateModal from "../components/CreateModal.tsx";
@@ -6,11 +13,15 @@ import LanguageSwitcher from "../components/LanguageSwitcher.tsx";
 import { useI18n } from "../i18n.ts";
 
 export default function Dashboard() {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const [modalOpen, setModalOpen] = createSignal(false);
   const [version, setVersion] = createSignal(0);
-  const [destroyRequests, setDestroyRequests] = createSignal(new Map<string, object>());
-  const [unconfirmedDestroys, setUnconfirmedDestroys] = createSignal(new Set<string>());
+  const [destroyRequests, setDestroyRequests] = createSignal(
+    new Map<string, object>(),
+  );
+  const [unconfirmedDestroys, setUnconfirmedDestroys] = createSignal(
+    new Set<string>(),
+  );
 
   const reload = () => setVersion((v) => v + 1);
   let refreshButton!: HTMLButtonElement;
@@ -21,6 +32,10 @@ export default function Dashboard() {
     original: HTMLAnchorElement;
     href: string;
   } | null = null;
+
+  createEffect(() => {
+    document.title = t("appTitle");
+  });
 
   const [sandboxData] = createResource(
     () => version(),
@@ -49,9 +64,9 @@ export default function Dashboard() {
         !active || focus.request !== listRequest || focus.original.isConnected ||
         document.activeElement !== document.body
       ) return;
-      const link = Array.from(document.querySelectorAll<HTMLAnchorElement>(
-        "tbody a",
-      )).find((link) => link.getAttribute("href") === focus.href);
+      const link = Array.from(
+        document.querySelectorAll<HTMLAnchorElement>("tbody a"),
+      ).find((link) => link.getAttribute("href") === focus.href);
       (link ?? refreshButton).focus();
     });
   });
@@ -63,7 +78,10 @@ export default function Dashboard() {
   });
 
   const destroySandbox = async (id: string) => {
-    if (destroyRequests().has(id) || !confirm(t("destroySessionConfirm", { id }))) return;
+    if (
+      destroyRequests().has(id) ||
+      !confirm(t("destroySessionConfirm", { id }))
+    ) return;
     const request = {};
     setDestroyRequests((previous) => new Map(previous).set(id, request));
     setUnconfirmedDestroys((previous) => {
@@ -76,7 +94,9 @@ export default function Dashboard() {
       await sandboxSessions.destroy(id);
       if (current()) reload();
     } catch {
-      if (current()) setUnconfirmedDestroys((previous) => new Set(previous).add(id));
+      if (current()) {
+        setUnconfirmedDestroys((previous) => new Set(previous).add(id));
+      }
     } finally {
       if (current()) {
         setDestroyRequests((previous) => {
@@ -90,77 +110,75 @@ export default function Dashboard() {
 
   return (
     <div class="container">
-      <div
-        class="flex items-center justify-between"
-        style="margin-bottom:1.5rem"
-      >
-        <h1 style="font-size:1.25rem; font-weight:600">takos computer</h1>
+      <header class="page-header">
+        <h1 class="page-title">takos computer</h1>
         <LanguageSwitcher />
-      </div>
+      </header>
 
-      <div
-        class="flex gap-2"
-        style="justify-content:flex-end; flex-wrap:wrap; margin-bottom:0.75rem"
-      >
-        <button
-          ref={refreshButton}
-          type="button"
-          class="btn btn-ghost"
-          aria-disabled={sandboxData.loading}
-          style={{ opacity: sandboxData.loading ? 0.5 : 1 }}
-          onClick={() => {
-            if (!sandboxData.loading) reload();
-          }}
-        >
-          {language() === "ja" ? "一覧を更新" : "Refresh sessions"}
-        </button>
-        <button
-          type="button"
-          class="btn btn-primary"
-          onClick={() => setModalOpen(true)}
-        >
-          {t("sandboxSession")}
-        </button>
-      </div>
-
-      <For each={[...unconfirmedDestroys()]}>
-        {(id) => (
-          <div role="alert" style="margin-bottom:0.75rem; color:#fca5a5; overflow-wrap:anywhere">
-            {language() === "ja"
-              ? `セッション ${id} の削除結果を確認できません。一覧を更新して確認してください。`
-              : `Could not confirm deletion of session ${id}. Refresh sessions to check.`}
-          </div>
-        )}
-      </For>
-
-      <Show
-        when={sandboxData() !== null || sandboxData.loading}
-        fallback={
-          <div class="card" role="alert" style="padding:1rem; color:#fca5a5">
-            {language() === "ja"
-              ? "セッション一覧を取得できません。一覧を更新してください。"
-              : "Session list unavailable. Refresh sessions to try again."}
-          </div>
-        }
-      >
-        <div aria-busy={sandboxData.loading}>
-          <Show when={sandboxData.loading && sandboxData.latest}>
-            <div role="status" class="muted" style="margin-bottom:0.5rem">
-              {language() === "ja" ? "一覧を更新中…" : "Refreshing sessions…"}
-            </div>
-          </Show>
-          <SessionTable
-            sessions={sandboxData()?.sessions ?? []}
-            loading={sandboxData.loading && !sandboxData.latest}
-            onDestroy={destroySandbox}
-            destroyPending={(id) => destroyRequests().has(id)}
-          />
+      <main id="main" tabIndex={-1}>
+        <div class="page-actions">
+          <button
+            ref={refreshButton}
+            type="button"
+            class="btn btn-ghost"
+            aria-disabled={sandboxData.loading}
+            onClick={() => {
+              if (!sandboxData.loading) reload();
+            }}
+          >
+            {t("refreshSessions")}
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            onClick={() => setModalOpen(true)}
+          >
+            {t("sandboxSession")}
+          </button>
         </div>
-      </Show>
 
-      <div style="margin-top:0.75rem; font-size:0.6875rem" class="muted">
-        {t("autoRefresh")}
-      </div>
+        <For each={[...unconfirmedDestroys()]}>
+          {(id) => (
+            <div role="alert" class="alert-banner">
+              {t("unconfirmedDestroySession", { id })}
+            </div>
+          )}
+        </For>
+
+        <Show
+          when={sandboxData() !== null || sandboxData.loading}
+          fallback={
+            <div class="card panel-error" role="alert">
+              <span>{t("sessionListUnavailable")}</span>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                onClick={reload}
+              >
+                {t("retry")}
+              </button>
+            </div>
+          }
+        >
+          <div aria-busy={sandboxData.loading}>
+            <Show when={sandboxData.loading && sandboxData.latest}>
+              <div role="status" class="muted status-note">
+                {t("refreshingSessions")}
+              </div>
+            </Show>
+            <SessionTable
+              sessions={sandboxData()?.sessions ?? []}
+              loading={sandboxData.loading && !sandboxData.latest}
+              onDestroy={destroySandbox}
+              destroyPending={(id) => destroyRequests().has(id)}
+            />
+          </div>
+        </Show>
+
+        <div class="muted footer-note">
+          {t("autoRefresh")}
+        </div>
+      </main>
 
       <CreateModal
         open={modalOpen()}

@@ -22,7 +22,9 @@ export default function SessionTable(props: {
   const { t } = useI18n();
 
   const timeAgo = (iso: string): string => {
-    const diff = Date.now() - new Date(iso).getTime();
+    const ms = new Date(iso).getTime();
+    if (Number.isNaN(ms)) return "";
+    const diff = Math.max(0, Date.now() - ms);
     const m = Math.floor(diff / 60000);
     if (m < 1) return t("justNow");
     if (m < 60) return t("timeAgoMinutes", { count: m });
@@ -33,79 +35,94 @@ export default function SessionTable(props: {
 
   return (
     <div class="card">
-      <table class="session-table">
-        <thead>
-          <tr>
-            <th>{t("sessionId")}</th>
-            <th>{t("status")}</th>
-            <th>{t("space")}</th>
-            <th>{t("created")}</th>
-            <th>{t("actions")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <Show
-            when={!props.loading}
-            fallback={<Placeholder text={t("loadingEllipsis")} />}
-          >
+      <div class="table-wrap">
+        <table class="session-table">
+          <thead>
+            <tr>
+              <th>{t("sessionId")}</th>
+              <th>{t("status")}</th>
+              <th>{t("space")}</th>
+              <th>{t("created")}</th>
+              <th>{t("actions")}</th>
+            </tr>
+          </thead>
+          <tbody>
             <Show
-              when={props.sessions.length > 0}
-              fallback={<Placeholder text={t("noSessions")} />}
+              when={!props.loading}
+              fallback={<Placeholder text={t("loadingEllipsis")} />}
             >
-              <For each={props.sessions}>
-                {(s) => (
-                  <tr>
-                    <td class="mono" style="font-size:0.8125rem">
-                      {s.sessionId}
-                    </td>
-                    <td>
-                      <span class={badgeClass(s.status)}>
-                        {t(statusKey(s.status))}
-                      </span>
-                    </td>
-                    <td style="font-size:0.8125rem; color:#94a3b8">
-                      {s.spaceId}
-                    </td>
-                    <td style="font-size:0.8125rem; color:#94a3b8">
-                      {timeAgo(s.createdAt)}
-                    </td>
-                    <td>
-                      <div class="flex gap-1">
-                        <A
-                          href={`/sandbox/${encodeURIComponent(s.sessionId)}`}
-                          class="btn btn-primary btn-sm"
-                        >
-                          {t("open")}
-                        </A>
-                        <button
-                          type="button"
-                          class="btn btn-danger btn-sm"
-                          aria-label={t("delete")}
-                          aria-disabled={props.destroyPending?.(s.sessionId) ?? false}
-                          aria-busy={props.destroyPending?.(s.sessionId) ?? false}
-                          style={{ opacity: props.destroyPending?.(s.sessionId) ? 0.5 : 1 }}
-                          onClick={() => props.onDestroy(s.sessionId)}
-                        >
-                          {props.destroyPending?.(s.sessionId) ? t("loading") : t("delete")}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </For>
+              <Show
+                when={props.sessions.length > 0}
+                fallback={
+                  <Placeholder
+                    text={t("noSessions")}
+                    hint={t("noSessionsHint")}
+                  />
+                }
+              >
+                <For each={props.sessions}>
+                  {(s) => (
+                    <tr>
+                      <td class="mono session-id-cell">
+                        {s.sessionId}
+                      </td>
+                      <td data-label={t("status")}>
+                        <span class={badgeClass(s.status)}>
+                          {t(statusKey(s.status))}
+                        </span>
+                      </td>
+                      <td class="session-meta-cell" data-label={t("space")}>
+                        {s.spaceId}
+                      </td>
+                      <td class="session-meta-cell" data-label={t("created")}>
+                        {timeAgo(s.createdAt)}
+                      </td>
+                      <td class="session-actions-cell">
+                        <div class="session-actions">
+                          <A
+                            href={`/sandbox/${encodeURIComponent(s.sessionId)}`}
+                            class="btn btn-primary btn-sm"
+                          >
+                            {t("open")}
+                          </A>
+                          <button
+                            type="button"
+                            class="btn btn-danger btn-sm"
+                            aria-label={t("deleteSessionAria", {
+                              id: s.sessionId,
+                            })}
+                            aria-disabled={props.destroyPending?.(s.sessionId) ??
+                              false}
+                            aria-busy={props.destroyPending?.(s.sessionId) ??
+                              false}
+                            onClick={() => props.onDestroy(s.sessionId)}
+                          >
+                            {props.destroyPending?.(s.sessionId)
+                              ? t("loading")
+                              : t("delete")}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </For>
+              </Show>
             </Show>
-          </Show>
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-function Placeholder(props: { text: string }) {
+function Placeholder(props: { text: string; hint?: string }) {
   return (
     <tr>
-      <td colspan="5" style="text-align:center; color:#64748b; padding:2rem">
-        {props.text}
+      <td colspan="5" class="session-empty">
+        <div class="session-empty-title">{props.text}</div>
+        <Show when={props.hint}>
+          <div class="session-empty-hint">{props.hint}</div>
+        </Show>
       </td>
     </tr>
   );

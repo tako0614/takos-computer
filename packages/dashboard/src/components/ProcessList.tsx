@@ -38,10 +38,9 @@ export default function ProcessList(props: { mcpUrl: string }) {
           mcpUrl,
           "process_list",
         );
-        const processes =
-          result && typeof result === "object"
-            ? (result as { processes?: unknown }).processes
-            : undefined;
+        const processes = result && typeof result === "object"
+          ? (result as { processes?: unknown }).processes
+          : undefined;
         if (
           !Array.isArray(processes) ||
           !processes.every(isProcessInfo)
@@ -68,30 +67,28 @@ export default function ProcessList(props: { mcpUrl: string }) {
       ? result.message.trim() || "Unknown process list error"
       : undefined;
   };
+  const refresh = () => setVersion((v) => v + 1);
 
   return (
     <div>
-      <div class="flex gap-2 items-center" style="margin-bottom:0.5rem">
-        <span style="font-size:0.8125rem; font-weight:600">
+      <div class="section-header">
+        <span role="heading" aria-level={2} class="section-title">
           {t("processes")}
         </span>
         <div class="flex-1" />
         <button
           type="button"
           class="btn btn-ghost btn-sm"
-          onClick={() => setVersion((v) => v + 1)}
+          onClick={refresh}
         >
           {t("refresh")}
         </button>
       </div>
-      <div
-        class="card"
-        style="max-height:180px; overflow-y:auto; font-size:0.8125rem"
-      >
+      <div class="card panel-scroll panel-scroll-sm" aria-busy={procs.loading}>
         <Show
           when={!procs.loading}
           fallback={
-            <div style="padding:1rem; text-align:center" class="muted">
+            <div class="panel-placeholder muted">
               {t("loadingEllipsis")}
             </div>
           }
@@ -102,27 +99,21 @@ export default function ProcessList(props: { mcpUrl: string }) {
               <Show
                 when={processes().length > 0}
                 fallback={
-                  <div style="padding:0.75rem" class="muted">
+                  <div class="panel-empty muted">
                     {t("noProcesses")}
                   </div>
                 }
               >
                 <For each={processes()}>
                   {(p) => (
-                    <div
-                      class="flex gap-2 items-center"
-                      style="padding:0.375rem 0.75rem; border-bottom:1px solid #0f172a"
-                    >
-                      <span class="mono muted" style="min-width:3rem">
+                    <div class="proc-row">
+                      <span class="mono muted proc-pid">
                         {p.pid}
                       </span>
-                      <span
-                        class="mono flex-1"
-                        style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap"
-                      >
+                      <span class="mono flex-1 proc-cmd" title={p.command}>
                         {p.command}
                       </span>
-                      <span class="muted" style="font-size:0.75rem">
+                      <span class="muted proc-stats">
                         {p.cpu}% / {p.mem}%
                       </span>
                     </div>
@@ -132,8 +123,15 @@ export default function ProcessList(props: { mcpUrl: string }) {
             }
           >
             {(message) => (
-              <div role="alert" style="padding:0.75rem; color:#fca5a5">
-                {t("error", { message: message() })}
+              <div role="alert" class="panel-error">
+                <span>{t("error", { message: message() })}</span>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  onClick={refresh}
+                >
+                  {t("retry")}
+                </button>
               </div>
             )}
           </Show>

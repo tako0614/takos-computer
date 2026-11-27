@@ -1,4 +1,11 @@
-import { createEffect, createResource, createSignal, on, onCleanup, Show } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  on,
+  onCleanup,
+  Show,
+} from "solid-js";
 import { A, useLocation, useNavigate, useParams } from "@solidjs/router";
 import { sandboxSessions } from "../lib/api.ts";
 import Shell from "../components/Shell.tsx";
@@ -22,7 +29,7 @@ function restoredDirectory(state: unknown, sessionId: string): string {
 }
 
 export default function SandboxViewer() {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const params = useParams<{ id: string }>();
   const sessionId = () => params.id;
   const location = useLocation();
@@ -30,14 +37,24 @@ export default function SandboxViewer() {
   const mcpUrl = () =>
     `/gui/api/sandbox-session/${encodeURIComponent(sessionId())}/mcp`;
 
+  createEffect(() => {
+    const id = sessionId();
+    document.title = id ? `${id} — ${t("appTitle")}` : t("appTitle");
+  });
+  onCleanup(() => {
+    document.title = t("appTitle");
+  });
+
   const [cwd, setDirectory] = createSignal(
     restoredDirectory(location.state, sessionId()),
   );
   // Restoring an entry never writes it back or creates a new history entry.
-  createEffect(on(
-    [sessionId, () => location.state],
-    ([id, state]) => setDirectory(restoredDirectory(state, id)),
-  ));
+  createEffect(
+    on(
+      [sessionId, () => location.state],
+      ([id, state]) => setDirectory(restoredDirectory(state, id)),
+    ),
+  );
   const setCwd = (next: string) => {
     setDirectory(next);
     // Incomplete input stays editable without replacing the last restoration hint.
@@ -85,15 +102,15 @@ export default function SandboxViewer() {
     if (value === "active" || value === "starting" || value === "stopped") {
       return t(value);
     }
-    return language() === "ja" ? "状態を取得できません" : "Status unavailable";
+    return t("statusUnavailable");
   };
 
   const [destroyRequest, setDestroyRequest] = createSignal<{
     id: string;
   } | null>(null);
-  const [unconfirmedDestroy, setUnconfirmedDestroy] = createSignal<string | null>(
-    null,
-  );
+  const [unconfirmedDestroy, setUnconfirmedDestroy] = createSignal<
+    string | null
+  >(null);
   const destroyPending = () => destroyRequest()?.id === sessionId();
   const destroySession = async () => {
     const id = sessionId();
@@ -116,75 +133,66 @@ export default function SandboxViewer() {
   return (
     <div class="container">
       {/* Toolbar */}
-      <div
-        class="flex gap-2 items-center"
-        style="margin-bottom:0.75rem; flex-wrap:wrap"
-      >
-        <A href="/" class="btn btn-ghost btn-sm">
-          &larr; {t("backToDashboard")}
-        </A>
-        <div style="width:1px; height:1.5rem; background:#334155" />
-        <span
-          class="mono muted"
-          style="font-size:0.8125rem; min-width:0; overflow-wrap:anywhere"
-        >
-          {t("sandbox")} {sessionId()}
-        </span>
-        <div class="flex-1" />
-        <LanguageSwitcher />
-        <span class={badgeClass()} role="status" aria-live="polite">
-          {statusLabel()}
-        </span>
-        <button
-          type="button"
-          class="btn btn-ghost btn-sm"
-          aria-disabled={status.loading}
-          style={{ opacity: status.loading ? 0.5 : 1 }}
-          onClick={() => {
-            if (!status.loading) setStatusVersion((v) => v + 1);
-          }}
-        >
-          {language() === "ja" ? "状態を更新" : "Refresh status"}
-        </button>
-        <button
-          type="button"
-          class="btn btn-danger btn-sm"
-          aria-disabled={destroyPending()}
-          aria-busy={destroyPending()}
-          style={{ opacity: destroyPending() ? 0.5 : 1 }}
-          onClick={destroySession}
-        >
-          {destroyPending()
-            ? language() === "ja" ? "破棄中…" : "Destroying…"
-            : t("destroy")}
-        </button>
-      </div>
-
-      {unconfirmedDestroy() === sessionId() && (
-        <div
-          role="alert"
-          style="margin-bottom:0.75rem; color:#fca5a5; overflow-wrap:anywhere"
-        >
-          {language() === "ja"
-            ? "破棄結果を確認できません。状態を更新して確認してください。"
-            : "Could not confirm destruction. Refresh status to check."}
+      <header class="viewer-header">
+        <div class="viewer-identity">
+          <A href="/" class="btn btn-ghost btn-sm">
+            &larr; {t("backToDashboard")}
+          </A>
+          <div class="viewer-divider" aria-hidden="true" />
+          <h1 class="viewer-title mono">
+            <span class="viewer-title-prefix">{t("sandbox")}</span>{" "}
+            {sessionId()}
+          </h1>
         </div>
-      )}
+        <div class="viewer-controls">
+          <LanguageSwitcher />
+          <span class={badgeClass()} role="status" aria-live="polite">
+            {statusLabel()}
+          </span>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            aria-disabled={status.loading}
+            onClick={() => {
+              if (!status.loading) setStatusVersion((v) => v + 1);
+            }}
+          >
+            {t("refreshStatus")}
+          </button>
+          <button
+            type="button"
+            class="btn btn-danger btn-sm"
+            aria-disabled={destroyPending()}
+            aria-busy={destroyPending()}
+            onClick={destroySession}
+          >
+            {destroyPending() ? t("destroying") : t("destroy")}
+          </button>
+        </div>
+      </header>
 
-      {/* Shell */}
-      <Show when={mcpUrl()} keyed>
-        {(url) => <Shell mcpUrl={url} cwd={cwd} />}
-      </Show>
+      <main id="main" tabIndex={-1}>
+        <Show when={unconfirmedDestroy() === sessionId()}>
+          <div role="alert" class="alert-banner">
+            {t("unconfirmedDestroyCurrent")}
+          </div>
+        </Show>
 
-      {/* File browser */}
-      <div style="margin-top:0.75rem">
-        <FileBrowser mcpUrl={mcpUrl()} cwd={cwd} setCwd={setCwd} />
-      </div>
+        {/* Shell */}
+        <Show when={mcpUrl()} keyed>
+          {(url) => <Shell mcpUrl={url} cwd={cwd} />}
+        </Show>
 
-      {/* Process list */}
-      <div style="margin-top:0.75rem">
-        <ProcessList mcpUrl={mcpUrl()} />
-      </div>
+        {/* File browser */}
+        <section class="viewer-section" aria-label={t("files")}>
+          <FileBrowser mcpUrl={mcpUrl()} cwd={cwd} setCwd={setCwd} />
+        </section>
+
+        {/* Process list */}
+        <section class="viewer-section" aria-label={t("processes")}>
+          <ProcessList mcpUrl={mcpUrl()} />
+        </section>
+      </main>
     </div>
   );
 }
