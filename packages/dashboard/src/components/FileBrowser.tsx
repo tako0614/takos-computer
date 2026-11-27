@@ -1,5 +1,6 @@
 import {
   createEffect,
+  createMemo,
   createResource,
   createSignal,
   For,
@@ -7,6 +8,13 @@ import {
 } from "solid-js";
 import { mcpCall } from "../lib/mcp.ts";
 import { useI18n } from "../i18n.ts";
+import {
+  buildBreadcrumbs,
+  formatFileSize,
+  joinWorkspacePath,
+  parentWorkspaceDirectory,
+} from "../lib/file-paths.ts";
+import FileDrawer, { type OpenFileTarget } from "./FileDrawer.tsx";
 
 interface FileEntry {
   name: string;
@@ -28,17 +36,14 @@ function isFileEntry(value: unknown): value is FileEntry {
   );
 }
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " K";
-  return (bytes / (1024 * 1024)).toFixed(1) + " M";
-}
-
 export default function FileBrowser(
   props: { mcpUrl: string; cwd: () => string; setCwd: (v: string) => void },
 ) {
   const { t } = useI18n();
   const [version, setVersion] = createSignal(0);
+  const [selectedFile, setSelectedFile] = createSignal<OpenFileTarget | null>(
+    null,
+  );
   let pathInput!: HTMLInputElement;
   let composing = false;
 
@@ -48,6 +53,14 @@ export default function FileBrowser(
       pathInput.value = next;
     }
   });
+
+  // Close drawer when switching sandbox sessions.
+  createEffect(() => {
+    const _url = props.mcpUrl;
+    setSelectedFile(null);
+  });
+
+  const breadcrumbs = createMemo(() => buildBreadcrumbs(props.cwd()));
 
   const [entries] = createResource(
     () => ({ cwd: props.cwd(), v: version(), mcpUrl: props.mcpUrl }),
@@ -72,25 +85,6 @@ export default function FileBrowser(
     },
   );
 
-  const parentDirectory = () => {
-    // Absolute paths do not reveal the configured jail root to this client.
-    const current = props.cwd();
-    if (current.startsWith("/")) return ".";
-    const segments: string[] = [];
-    for (const segment of current.split("/")) {
-      if (!segment || segment === ".") continue;
-      if (segment === "..") {
-        // An unknown path above root cannot establish its relative parent.
-        if (!segments.length) return ".";
-        segments.pop();
-      } else segments.push(segment);
-    }
-    segments.pop();
-    return segments.length
-      ? `${current.startsWith("./") ? "./" : ""}${segments.join("/")}`
-      : ".";
-  };
-
   const navigateTo = (next: string) => {
     const previousFocus = document.activeElement;
     const mcpUrl = props.mcpUrl;
@@ -109,13 +103,18 @@ export default function FileBrowser(
 
   const navigate = (name: string) => {
     if (name === "..") {
-      navigateTo(parentDirectory());
+      navigateTo(parentWorkspaceDirectory(props.cwd()));
       return;
     }
-    const current = props.cwd() === "/"
-      ? "/"
-      : props.cwd().replace(/\/+$/, "") || ".";
-    navigateTo(current === "/" ? `/${name}` : `${current}/${name}`);
+    navigateTo(joinWorkspacePath(props.cwd(), name));
+  };
+
+  const openFile = (entry: FileEntry) => {
+    setSelectedFile({
+      path: joinWorkspacePath(props.cwd(), entry.name),
+      name: entry.name,
+      size: entry.size,
+    });
   };
 
   const refresh = () => setVersion((v) => v + 1);
@@ -169,6 +168,40 @@ export default function FileBrowser(
           {t("refresh")}
         </button>
       </div>
+
+      <nav
+        class="file-breadcrumbs mono"
+        aria-label={t("directoryBreadcrumbs")}
+      >
+        <ol class="breadcrumb-list">
+          <For each={breadcrumbs()}>
+            {(crumb, index) => (
+              <li class="breadcrumb-item">
+                <Show when={index() > 0}>
+                  <span class="breadcrumb-sep" aria-hidden="true">/</span>
+                </Show>
+                <Show
+                  when={!crumb.current}
+                  fallback={
+                    <span class="breadcrumb-current" aria-current="page">
+                      {crumb.label}
+                    </span>
+                  }
+                >
+                  <button
+                    type="button"
+                    class="breadcrumb-btn"
+                    onClick={() => navigateTo(crumb.path)}
+                  >
+                    {crumb.label}
+                  </button>
+                </Show>
+              </li>
+            )}
+          </For>
+        </ol>
+      </nav>
+
       <div class="card panel-scroll" aria-busy={entries.loading}>
         <Show
           when={!entries.loading}
@@ -222,13 +255,13 @@ export default function FileBrowser(
                       </span>
                       <Show when={e.type === "file"}>
                         <span class="mono muted file-size">
-                          {formatSize(e.size)}
+                          {formatFileSize(e.size)}
                         </span>
                       </Show>
                     </>
                   );
-                  return e.type === "directory"
-                    ? (
+                  if (e.type === "directory") {
+                    return (
                       <button
                         type="button"
                         class="file-row file-row-btn"
@@ -236,18 +269,38 @@ export default function FileBrowser(
                       >
                         {content()}
                       </button>
-                    )
-                    : (
-                      <div class="file-row">
-                        {content()}
-                      </div>
                     );
+                  }
+                  if (e.type === "file") {
+                    return (
+                      <button
+                        type="button"
+                        class="file-row file-row-btn"
+                        aria-label={t("openFileAria", { name: e.name })}
+                        onClick={() => openFile(e)}
+                      >
+                        {content()}
+                      </button>
+                    );
+                  }
+                  return (
+                    <div class="file-row">
+                      {content()}
+                    </div>
+                  );
                 }}
               </For>
             </Show>
           </Show>
         </Show>
       </div>
+
+      <FileDrawer
+        mcpUrl={props.mcpUrl}
+        file={selectedFile()}
+        onClose={() => setSelectedFile(null)}
+        onSaved={refresh}
+      />
     </div>
   );
 }

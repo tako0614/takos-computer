@@ -17,9 +17,8 @@
     <link rel="icon" type="image/png" href="/gui/icons/icon-192.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/gui/icons/apple-touch-icon.png">
     <script>
-      /* Pre-hydration language init: mirrors i18n.ts detectInitialLanguage
-         (takos-lang storage, ja* browser => ja, else en) so <html lang> is
-         correct before the bundle runs. */
+      /* Pre-hydration language & theme init: mirrors i18n.ts and lib/theme.ts
+         so <html lang> and data-theme are correct before the bundle runs. */
       (function () {
         try {
           var lang = localStorage.getItem("takos-lang");
@@ -29,8 +28,12 @@
               : "en";
           }
           document.documentElement.lang = lang;
+          var theme = localStorage.getItem("takos-theme");
+          if (theme === "light" || theme === "dark") {
+            document.documentElement.dataset.theme = theme;
+          }
         } catch {
-          /* localStorage may be unavailable; the app will apply the language. */
+          /* localStorage may be unavailable; the app will apply defaults. */
         }
       })();
     </script>
@@ -44,11 +47,21 @@
         color: #e2e8f0;
       }
       @media (prefers-color-scheme: light) {
-        html,
-        body {
+        html:not([data-theme="dark"]),
+        html:not([data-theme="dark"]) body {
           background: #f8fafc;
           color: #0f172a;
         }
+      }
+      html[data-theme="light"],
+      html[data-theme="light"] body {
+        background: #f8fafc;
+        color: #0f172a;
+      }
+      html[data-theme="dark"],
+      html[data-theme="dark"] body {
+        background: #0f172a;
+        color: #e2e8f0;
       }
     </style>
   </head>

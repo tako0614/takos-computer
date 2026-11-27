@@ -1,5 +1,6 @@
 import {
   createEffect,
+  createMemo,
   createResource,
   createSignal,
   For,
@@ -7,15 +8,22 @@ import {
   Show,
 } from "solid-js";
 import { sandboxSessions } from "../lib/api.ts";
+import { filterSessions } from "../lib/session-filter.ts";
 import SessionTable from "../components/SessionTable.tsx";
 import CreateModal from "../components/CreateModal.tsx";
+import ConfirmDialog from "../components/ConfirmDialog.tsx";
 import LanguageSwitcher from "../components/LanguageSwitcher.tsx";
+import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
 import { useI18n } from "../i18n.ts";
 
 export default function Dashboard() {
   const { t } = useI18n();
   const [modalOpen, setModalOpen] = createSignal(false);
   const [version, setVersion] = createSignal(0);
+  const [searchQuery, setSearchQuery] = createSignal("");
+  const [pendingDestroyId, setPendingDestroyId] = createSignal<string | null>(
+    null,
+  );
   const [destroyRequests, setDestroyRequests] = createSignal(
     new Map<string, object>(),
   );
@@ -25,6 +33,7 @@ export default function Dashboard() {
 
   const reload = () => setVersion((v) => v + 1);
   let refreshButton!: HTMLButtonElement;
+  let searchInput: HTMLInputElement | undefined;
   let active = true;
   let listRequest = 0;
   let focusAfterRefresh: {
@@ -54,6 +63,22 @@ export default function Dashboard() {
     },
   );
 
+  const allSessions = createMemo(() => sandboxData()?.sessions ?? []);
+  const filteredSessions = createMemo(() =>
+    filterSessions(allSessions(), searchQuery())
+  );
+  const isFiltering = createMemo(() => searchQuery().trim().length > 0);
+  const countLabel = createMemo(() => {
+    const total = allSessions().length;
+    const shown = filteredSessions().length;
+    if (isFiltering()) {
+      return t("sessionMatchCount", { shown, total });
+    }
+    return total === 1
+      ? t("sessionCountOne")
+      : t("sessionCount", { count: total });
+  });
+
   createEffect(() => {
     if (sandboxData.loading) return;
     const focus = focusAfterRefresh;
@@ -77,11 +102,14 @@ export default function Dashboard() {
     clearInterval(timer);
   });
 
-  const destroySandbox = async (id: string) => {
-    if (
-      destroyRequests().has(id) ||
-      !confirm(t("destroySessionConfirm", { id }))
-    ) return;
+  const requestDestroySandbox = (id: string) => {
+    if (destroyRequests().has(id)) return;
+    setPendingDestroyId(id);
+  };
+
+  const confirmDestroySandbox = async () => {
+    const id = pendingDestroyId();
+    if (!id || destroyRequests().has(id)) return;
     const request = {};
     setDestroyRequests((previous) => new Map(previous).set(id, request));
     setUnconfirmedDestroys((previous) => {
@@ -105,14 +133,30 @@ export default function Dashboard() {
           return next;
         });
       }
+      if (active && pendingDestroyId() === id) {
+        setPendingDestroyId(null);
+      }
     }
+  };
+
+  const clearSearch = () => {
+    setSearchQuery("");
+    searchInput?.focus();
+  };
+
+  const pendingDestroyBusy = () => {
+    const id = pendingDestroyId();
+    return id !== null && destroyRequests().has(id);
   };
 
   return (
     <div class="container">
       <header class="page-header">
         <h1 class="page-title">takos computer</h1>
-        <LanguageSwitcher />
+        <div class="header-controls">
+          <ThemeSwitcher />
+          <LanguageSwitcher />
+        </div>
       </header>
 
       <main id="main" tabIndex={-1}>
@@ -160,6 +204,48 @@ export default function Dashboard() {
             </div>
           }
         >
+          <Show when={sandboxData() !== null}>
+            <div class="session-toolbar">
+              <div class="session-search-wrap">
+                <input
+                  ref={(el) => {
+                    searchInput = el;
+                  }}
+                  type="search"
+                  class="input session-search-input"
+                  aria-label={t("searchSessions")}
+                  placeholder={t("searchSessionsPlaceholder")}
+                  value={searchQuery()}
+                  onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.isComposing || e.keyCode === 229) return;
+                    if (e.key === "Escape" && searchQuery()) {
+                      e.preventDefault();
+                      setSearchQuery("");
+                    }
+                  }}
+                />
+                <Show when={searchQuery().length > 0}>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-sm session-search-clear"
+                    aria-label={t("clearSearch")}
+                    onClick={clearSearch}
+                  >
+                    {t("clear")}
+                  </button>
+                </Show>
+              </div>
+              <span
+                class="muted session-count"
+                role="status"
+                aria-live="polite"
+              >
+                {countLabel()}
+              </span>
+            </div>
+          </Show>
+
           <div aria-busy={sandboxData.loading}>
             <Show when={sandboxData.loading && sandboxData.latest}>
               <div role="status" class="muted status-note">
@@ -167,9 +253,11 @@ export default function Dashboard() {
               </div>
             </Show>
             <SessionTable
-              sessions={sandboxData()?.sessions ?? []}
+              sessions={filteredSessions()}
               loading={sandboxData.loading && !sandboxData.latest}
-              onDestroy={destroySandbox}
+              filtered={isFiltering()}
+              onClearFilter={clearSearch}
+              onDestroy={requestDestroySandbox}
               destroyPending={(id) => destroyRequests().has(id)}
             />
           </div>
@@ -187,6 +275,21 @@ export default function Dashboard() {
           await sandboxSessions.create(p);
           reload();
         }}
+      />
+
+      <ConfirmDialog
+        open={pendingDestroyId() !== null}
+        title={t("destroySessionTitle")}
+        description={pendingDestroyId()
+          ? t("destroySessionConfirm", { id: pendingDestroyId()! })
+          : ""}
+        detail={pendingDestroyId() ?? undefined}
+        confirmLabel={t("destroy")}
+        confirmBusyLabel={t("destroying")}
+        tone="danger"
+        busy={pendingDestroyBusy()}
+        onCancel={() => setPendingDestroyId(null)}
+        onConfirm={confirmDestroySandbox}
       />
     </div>
   );

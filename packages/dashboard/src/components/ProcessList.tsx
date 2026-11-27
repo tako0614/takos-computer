@@ -1,6 +1,14 @@
-import { createResource, createSignal, For, Show } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  For,
+  onCleanup,
+  Show,
+} from "solid-js";
 import { mcpCall } from "../lib/mcp.ts";
 import { useI18n } from "../i18n.ts";
+import ConfirmDialog from "./ConfirmDialog.tsx";
 
 interface ProcessInfo {
   user: string;
@@ -13,6 +21,13 @@ interface ProcessInfo {
 type ProcessListResult =
   | { ok: true; processes: ProcessInfo[] }
   | { ok: false; message: string };
+
+interface ProcessKillResponse {
+  killed?: boolean;
+  pid?: number;
+  signal?: string;
+  error?: string;
+}
 
 function isProcessInfo(value: unknown): value is ProcessInfo {
   if (!value || typeof value !== "object") return false;
@@ -29,6 +44,23 @@ function isProcessInfo(value: unknown): value is ProcessInfo {
 export default function ProcessList(props: { mcpUrl: string }) {
   const { t } = useI18n();
   const [version, setVersion] = createSignal(0);
+  const [pendingKill, setPendingKill] = createSignal<ProcessInfo | null>(null);
+  const [killingPid, setKillingPid] = createSignal<number | null>(null);
+  const [killError, setKillError] = createSignal("");
+  const [killStatus, setKillStatus] = createSignal("");
+  let alive = true;
+
+  onCleanup(() => {
+    alive = false;
+  });
+
+  createEffect(() => {
+    const _url = props.mcpUrl;
+    setPendingKill(null);
+    setKillingPid(null);
+    setKillError("");
+    setKillStatus("");
+  });
 
   const [procs] = createResource(
     () => ({ version: version(), mcpUrl: props.mcpUrl }),
@@ -69,6 +101,52 @@ export default function ProcessList(props: { mcpUrl: string }) {
   };
   const refresh = () => setVersion((v) => v + 1);
 
+  const confirmKill = async () => {
+    const target = pendingKill();
+    const mcpUrl = props.mcpUrl;
+    if (!target || killingPid() !== null) return;
+
+    setKillingPid(target.pid);
+    setKillError("");
+    setKillStatus("");
+
+    try {
+      const result = await mcpCall<ProcessKillResponse>(
+        mcpUrl,
+        "process_kill",
+        {
+          pid: target.pid,
+          signal: "SIGTERM",
+        },
+      );
+      if (!alive || props.mcpUrl !== mcpUrl) return;
+      if (result?.killed) {
+        setKillStatus(t("processStopped", { pid: target.pid }));
+        refresh();
+      } else {
+        const detail = typeof result?.error === "string" && result.error.trim()
+          ? result.error
+          : t("processNotManaged");
+        setKillError(
+          t("stopProcessFailed", { pid: target.pid, message: detail }),
+        );
+      }
+    } catch (err) {
+      if (!alive || props.mcpUrl !== mcpUrl) return;
+      setKillError(
+        t("stopProcessFailed", {
+          pid: target.pid,
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    } finally {
+      if (alive) {
+        setKillingPid(null);
+        setPendingKill(null);
+      }
+    }
+  };
+
   return (
     <div>
       <div class="section-header">
@@ -84,6 +162,37 @@ export default function ProcessList(props: { mcpUrl: string }) {
           {t("refresh")}
         </button>
       </div>
+
+      <Show when={killStatus()}>
+        {(message) => (
+          <div role="status" aria-live="polite" class="status-banner">
+            <span>{message()}</span>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              onClick={() => setKillStatus("")}
+            >
+              {t("dismiss")}
+            </button>
+          </div>
+        )}
+      </Show>
+
+      <Show when={killError()}>
+        {(message) => (
+          <div role="alert" class="alert-banner alert-banner-row">
+            <span>{message()}</span>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              onClick={() => setKillError("")}
+            >
+              {t("dismiss")}
+            </button>
+          </div>
+        )}
+      </Show>
+
       <div class="card panel-scroll panel-scroll-sm" aria-busy={procs.loading}>
         <Show
           when={!procs.loading}
@@ -105,19 +214,37 @@ export default function ProcessList(props: { mcpUrl: string }) {
                 }
               >
                 <For each={processes()}>
-                  {(p) => (
-                    <div class="proc-row">
-                      <span class="mono muted proc-pid">
-                        {p.pid}
-                      </span>
-                      <span class="mono flex-1 proc-cmd" title={p.command}>
-                        {p.command}
-                      </span>
-                      <span class="muted proc-stats">
-                        {p.cpu}% / {p.mem}%
-                      </span>
-                    </div>
-                  )}
+                  {(p) => {
+                    const busy = () => killingPid() === p.pid;
+                    return (
+                      <div class="proc-row">
+                        <span class="mono muted proc-pid">
+                          {p.pid}
+                        </span>
+                        <span class="mono flex-1 proc-cmd" title={p.command}>
+                          {p.command}
+                        </span>
+                        <span class="muted proc-stats">
+                          {p.cpu}% / {p.mem}%
+                        </span>
+                        <Show when={p.pid > 1}>
+                          <button
+                            type="button"
+                            class="btn btn-danger-ghost btn-sm proc-kill-btn"
+                            aria-label={t("stopProcessAria", {
+                              pid: p.pid,
+                              command: p.command,
+                            })}
+                            disabled={killingPid() !== null}
+                            aria-busy={busy()}
+                            onClick={() => setPendingKill(p)}
+                          >
+                            {busy() ? t("stopping") : t("stop")}
+                          </button>
+                        </Show>
+                      </div>
+                    );
+                  }}
                 </For>
               </Show>
             }
@@ -137,6 +264,21 @@ export default function ProcessList(props: { mcpUrl: string }) {
           </Show>
         </Show>
       </div>
+
+      <ConfirmDialog
+        open={pendingKill() !== null}
+        title={t("stopProcessTitle")}
+        description={pendingKill()
+          ? t("stopProcessConfirm", { pid: pendingKill()!.pid })
+          : ""}
+        detail={pendingKill()?.command}
+        confirmLabel={t("stopProcess")}
+        confirmBusyLabel={t("stopping")}
+        tone="danger"
+        busy={killingPid() !== null}
+        onCancel={() => setPendingKill(null)}
+        onConfirm={confirmKill}
+      />
     </div>
   );
 }
