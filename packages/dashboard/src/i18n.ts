@@ -38,7 +38,6 @@ const en = {
   noSessions: "No sessions yet",
   noSessionsHint: "Create a sandbox session to open a shell and workspace.",
   open: "Open",
-  openSessionAria: "Open session {id}",
   parentDirectory: "Parent directory",
   processes: "Processes",
   refresh: "Refresh",
@@ -117,7 +116,6 @@ const ja: Record<TranslationKey, string> = {
   noSessionsHint:
     "サンドボックスセッションを作成するとシェルと作業フォルダを開けます。",
   open: "開く",
-  openSessionAria: "セッション {id} を開く",
   parentDirectory: "親フォルダへ",
   processes: "プロセス",
   refresh: "更新",

@@ -41,6 +41,9 @@ export default function SandboxViewer() {
     const id = sessionId();
     document.title = id ? `${id} — ${t("appTitle")}` : t("appTitle");
   });
+  onCleanup(() => {
+    document.title = t("appTitle");
+  });
 
   const [cwd, setDirectory] = createSignal(
     restoredDirectory(location.state, sessionId()),

@@ -9,7 +9,16 @@ const Layout: ParentComponent = (props) => {
   const { t } = useI18n();
   return (
     <>
-      <a href="#main" class="skip-link">
+      <a
+        href="#main"
+        class="skip-link"
+        onClick={(e) => {
+          e.preventDefault();
+          const main = document.getElementById("main");
+          main?.focus();
+          main?.scrollIntoView();
+        }}
+      >
         {t("skipToContent")}
       </a>
       {props.children}
