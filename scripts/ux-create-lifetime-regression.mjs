@@ -277,7 +277,7 @@ try {
   await releaseCreates();
   await wait(`document.querySelector('[role=dialog]')?.getAttribute('aria-busy')==='false'`,"current create refusal");
   v=await snap("04-current-refusal");
-  check("current modal still receives its own explicit refusal",dialogs.length-currentDialogsBefore===1&&dialogs.at(-1)?.type==='alert'&&dialogs.at(-1)?.message.includes('Synthetic create unavailable'),dialogs);
+  check("current modal still receives its own explicit inline refusal",dialogs.length===currentDialogsBefore&&v.alerts.some(msg=>msg.includes('Synthetic create unavailable')),{dialogs,alerts:v.alerts});
   check("current refused draft keeps original tuple and active focus",v.dialog?.inputs.every(x=>x.value===payload[x.name])&&await ev(`document.querySelector('[role=dialog]').contains(document.activeElement)`),v);
   await key("Escape");
   check("Escape from settled refusal restores Create trigger",await ev(`!document.querySelector('[role=dialog]')&&document.activeElement===(${button("+ Sandbox Session")})`),await snap("05-current-cancel"));

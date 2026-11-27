@@ -231,7 +231,7 @@ try {
   releaseCreate = null;
   await wait(`document.querySelector('[role=dialog]')?.getAttribute('aria-busy')==='false'`, "failed submission settles");
   v = await snap("03-refusal-return");
-  check("failed create reports one explicit alert", dialogs.length === 1 && dialogs[0].type === "alert" && dialogs[0].message.includes("Synthetic create request refused"), dialogs);
+  check("failed create reports one explicit inline alert without native popup", dialogs.length === 0 && v.alerts.some((msg) => msg.includes("Synthetic create request refused")), { dialogs, alerts: v.alerts });
   check("refusal retains the exact entered draft", v.dialog?.inputs.every((x) => x.value === payload[x.name]), v.dialog);
   check("refusal returns to usable focus inside its dialog", await ev(`document.querySelector('[role=dialog]').contains(document.activeElement)`), v.focus);
   check("refusal reenables original submit and cancel controls", await ev(`![...document.querySelectorAll('[role=dialog] button')].some(e=>e.disabled)`), v);

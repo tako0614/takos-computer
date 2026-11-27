@@ -1,4 +1,10 @@
-import { createResource, createSignal, For, Show } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  For,
+  Show,
+} from "solid-js";
 import { mcpCall } from "../lib/mcp.ts";
 import { useI18n } from "../i18n.ts";
 
@@ -31,9 +37,17 @@ function formatSize(bytes: number): string {
 export default function FileBrowser(
   props: { mcpUrl: string; cwd: () => string; setCwd: (v: string) => void },
 ) {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const [version, setVersion] = createSignal(0);
   let pathInput!: HTMLInputElement;
+  let composing = false;
+
+  createEffect(() => {
+    const next = props.cwd();
+    if (!composing && pathInput && pathInput.value !== next) {
+      pathInput.value = next;
+    }
+  });
 
   const [entries] = createResource(
     () => ({ cwd: props.cwd(), v: version(), mcpUrl: props.mcpUrl }),
@@ -84,7 +98,8 @@ export default function FileBrowser(
     // Replacing the directory rows can remove the keyboard's focused button.
     queueMicrotask(() => {
       if (
-        pathInput.isConnected && props.mcpUrl === mcpUrl && props.cwd() === next &&
+        pathInput.isConnected && props.mcpUrl === mcpUrl &&
+        props.cwd() === next &&
         document.activeElement === document.body &&
         (!previousFocus?.isConnected ||
           previousFocus instanceof HTMLButtonElement && previousFocus.disabled)
@@ -103,50 +118,62 @@ export default function FileBrowser(
     navigateTo(current === "/" ? `/${name}` : `${current}/${name}`);
   };
 
+  const refresh = () => setVersion((v) => v + 1);
+
   return (
     <div>
-      <div class="flex gap-2 items-center" style="margin-bottom:0.5rem">
-        <span style="font-size:0.8125rem; font-weight:600">{t("files")}</span>
+      <div class="section-header">
+        <span role="heading" aria-level={2} class="section-title">
+          {t("files")}
+        </span>
         <button
           type="button"
           class="btn btn-ghost btn-sm"
           aria-label={props.cwd().startsWith("/")
-            ? language() === "ja" ? "作業フォルダのルートへ" : "Workspace root"
-            : language() === "ja" ? "親フォルダへ" : "Parent directory"}
+            ? t("workspaceRoot")
+            : t("parentDirectory")}
           disabled={props.cwd() === "."}
           onClick={() => navigate("..")}
         >
-          ↑ {props.cwd().startsWith("/")
-            ? language() === "ja" ? "ルート" : "Root"
-            : language() === "ja" ? "上へ" : "Up"}
+          ↑ {props.cwd().startsWith("/") ? t("root") : t("up")}
         </button>
         <input
-          ref={pathInput}
-          class="input input-mono flex-1"
-          style="font-size:0.8125rem; min-width:0"
-          aria-label={language() === "ja" ? "フォルダのパス" : "Directory path"}
-          value={props.cwd()}
-          onInput={(e) => props.setCwd(e.currentTarget.value)}
+          ref={(el) => {
+            pathInput = el;
+            el.value = props.cwd();
+          }}
+          class="input input-mono flex-1 file-toolbar-path"
+          aria-label={t("directoryPath")}
+          onCompositionStart={() => {
+            composing = true;
+          }}
+          onCompositionEnd={(e) => {
+            composing = false;
+            props.setCwd(e.currentTarget.value);
+          }}
+          onInput={(e) => {
+            if (!e.isComposing && !composing) {
+              props.setCwd(e.currentTarget.value);
+            }
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") setVersion((v) => v + 1);
+            if (e.isComposing || e.keyCode === 229) return;
+            if (e.key === "Enter") refresh();
           }}
         />
         <button
           type="button"
           class="btn btn-ghost btn-sm"
-          onClick={() => setVersion((v) => v + 1)}
+          onClick={refresh}
         >
           {t("refresh")}
         </button>
       </div>
-      <div
-        class="card"
-        style="max-height:240px; overflow-y:auto; font-size:0.8125rem"
-      >
+      <div class="card panel-scroll" aria-busy={entries.loading}>
         <Show
           when={!entries.loading}
           fallback={
-            <div style="padding:1rem; text-align:center" class="muted">
+            <div class="panel-placeholder muted">
               {t("loadingEllipsis")}
             </div>
           }
@@ -154,19 +181,28 @@ export default function FileBrowser(
           <Show
             when={!entries.error}
             fallback={
-              <div role="alert" style="padding:0.75rem; color:#fca5a5">
-                {t("error", {
-                  message: entries.error instanceof Error
-                    ? entries.error.message
-                    : String(entries.error),
-                })}
+              <div role="alert" class="panel-error">
+                <span>
+                  {t("error", {
+                    message: entries.error instanceof Error
+                      ? entries.error.message
+                      : String(entries.error),
+                  })}
+                </span>
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  onClick={refresh}
+                >
+                  {t("retry")}
+                </button>
               </div>
             }
           >
             <Show
               when={(entries() ?? []).length > 0}
               fallback={
-                <div style="padding:0.75rem" class="muted">
+                <div class="panel-empty muted">
                   {t("emptyDirectory")}
                 </div>
               }
@@ -175,41 +211,34 @@ export default function FileBrowser(
                 {(e) => {
                   const content = () => (
                     <>
-                      <span>
+                      <span aria-hidden="true">
                         {e.type === "directory" ? "\u{1F4C1}" : "\u{1F4C4}"}
                       </span>
                       <span
-                        class="flex-1"
-                        style={{
-                          "min-width": "0",
-                          "overflow-wrap": "anywhere",
-                          color: e.type === "directory" ? "#60a5fa" : "#e2e8f0",
-                        }}
+                        class="flex-1 file-name"
+                        classList={{ "file-name-dir": e.type === "directory" }}
                       >
                         {e.name}
                       </span>
                       <Show when={e.type === "file"}>
-                        <span class="mono muted" style="font-size:0.75rem">
+                        <span class="mono muted file-size">
                           {formatSize(e.size)}
                         </span>
                       </Show>
                     </>
                   );
-                  const rowStyle =
-                    "padding:0.375rem 0.75rem; border-bottom:1px solid #0f172a;";
                   return e.type === "directory"
                     ? (
                       <button
                         type="button"
-                        class="flex gap-2 items-center"
-                        style={`${rowStyle}width:100%; border-top:0; border-left:0; border-right:0; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer`}
+                        class="file-row file-row-btn"
                         onClick={() => navigate(e.name)}
                       >
                         {content()}
                       </button>
                     )
                     : (
-                      <div class="flex gap-2 items-center" style={rowStyle}>
+                      <div class="file-row">
                         {content()}
                       </div>
                     );

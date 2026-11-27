@@ -11,19 +11,16 @@ export default function LanguageSwitcher() {
 
   return (
     <div
-      class="inline-flex rounded-lg"
-      style="border:1px solid #334155; background:#0f172a; padding:0.125rem"
+      class="lang-switcher"
+      role="group"
       aria-label={t("language")}
     >
       <For each={LANGUAGES}>
         {(lang) => (
           <button
             type="button"
-            class="btn btn-sm"
-            style={{
-              background: language() === lang.value ? "#334155" : "transparent",
-              color: language() === lang.value ? "#f1f5f9" : "#94a3b8",
-            }}
+            class="lang-btn"
+            classList={{ active: language() === lang.value }}
             aria-pressed={language() === lang.value}
             onClick={() => setLanguage(lang.value)}
           >

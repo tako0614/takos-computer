@@ -2,16 +2,19 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Takos Computer</title>
     <meta
       name="description"
       content="Dashboard for the Takos Computer containerized sandbox environment for AI agents."
     >
     <meta name="robots" content="noindex, nofollow">
+    <meta name="color-scheme" content="dark light">
     <meta name="theme-color" content="#0f172a">
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)">
     <!-- Home-screen install. The Worker serves these before the /gui/* auth gate. -->
     <link rel="manifest" href="/gui/manifest.webmanifest">
+    <link rel="icon" type="image/png" href="/gui/icons/icon-192.png">
     <link rel="apple-touch-icon" sizes="180x180" href="/gui/icons/apple-touch-icon.png">
     <script>
       /* Pre-hydration language init: mirrors i18n.ts detectInitialLanguage
@@ -39,6 +42,13 @@
         margin: 0;
         background: #0f172a;
         color: #e2e8f0;
+      }
+      @media (prefers-color-scheme: light) {
+        html,
+        body {
+          background: #f8fafc;
+          color: #0f172a;
+        }
       }
     </style>
   </head>

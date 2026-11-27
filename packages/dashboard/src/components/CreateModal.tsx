@@ -19,16 +19,24 @@ export default function CreateModal(props: {
   const { t } = useI18n();
   const id = createUniqueId();
   const [loading, setLoading] = createSignal(false);
+  const [error, setError] = createSignal("");
   let formRef!: HTMLFormElement;
   let dialogRef!: HTMLDivElement;
   let active = true;
-  onCleanup(() => active = false);
+  onCleanup(() => (active = false));
   const close = () => {
-    if (!loading()) props.onClose();
+    if (!loading()) {
+      setError("");
+      props.onClose();
+    }
   };
 
   createEffect(() => {
-    if (!props.open) return;
+    if (!props.open) {
+      setError("");
+      return;
+    }
+    setError("");
     const previous = document.activeElement;
     let open = true;
     const focusable = () =>
@@ -66,14 +74,20 @@ export default function CreateModal(props: {
     onCleanup(() => {
       open = false;
       document.removeEventListener("keydown", handleKey, true);
-      if (previous instanceof HTMLElement && previous.isConnected)
+      if (previous instanceof HTMLElement && previous.isConnected) {
         previous.focus();
+      }
     });
   });
+
+  const clearError = () => {
+    if (error()) setError("");
+  };
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
     if (loading()) return;
+    setError("");
     setLoading(true);
     // Disabling the submitter must not leave keyboard focus behind the modal.
     queueMicrotask(() => {
@@ -94,14 +108,23 @@ export default function CreateModal(props: {
       await props.onCreate(payload);
       if (!active) return;
       formRef.reset();
+      setError("");
       props.onClose();
     } catch (err) {
       if (active) {
-        alert(
+        setError(
           t("createFailed", {
             message: err instanceof Error ? err.message : String(err),
           }),
         );
+        queueMicrotask(() => {
+          if (
+            active && props.open && dialogRef.isConnected &&
+            !dialogRef.contains(document.activeElement)
+          ) {
+            formRef.querySelector<HTMLInputElement>("input")?.focus();
+          }
+        });
       }
     } finally {
       if (active) setLoading(false);
@@ -124,10 +147,7 @@ export default function CreateModal(props: {
           aria-labelledby={`${id}-title`}
           aria-busy={loading()}
         >
-          <h2
-            id={`${id}-title`}
-            style="font-size:1rem; font-weight:600; margin-bottom:1rem"
-          >
+          <h2 id={`${id}-title`} class="modal-title">
             {t("createSandboxSession")}
           </h2>
           <form ref={formRef} onSubmit={handleSubmit}>
@@ -138,6 +158,7 @@ export default function CreateModal(props: {
               readOnly={loading()}
               required
               placeholder={t("sessionIdPlaceholder")}
+              onInput={clearError}
             />
 
             <label for={`${id}-space`}>{t("spaceId")}</label>
@@ -147,6 +168,7 @@ export default function CreateModal(props: {
               readOnly={loading()}
               required
               placeholder={t("spaceIdPlaceholder")}
+              onInput={clearError}
             />
 
             <label for={`${id}-user`}>{t("userId")}</label>
@@ -156,12 +178,18 @@ export default function CreateModal(props: {
               readOnly={loading()}
               required
               placeholder={t("userIdPlaceholder")}
+              onInput={clearError}
             />
 
-            <div
-              class="flex gap-2"
-              style="justify-content:flex-end; margin-top:0.5rem"
-            >
+            <Show when={error()}>
+              {(message) => (
+                <div class="alert-banner" role="alert">
+                  {message()}
+                </div>
+              )}
+            </Show>
+
+            <div class="modal-actions">
               <button
                 type="button"
                 class="btn btn-ghost"
