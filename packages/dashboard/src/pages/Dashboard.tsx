@@ -54,6 +54,7 @@ export default function Dashboard() {
   const reload = () => setVersion((v) => v + 1);
   let refreshButton!: HTMLButtonElement;
   let searchInput: HTMLInputElement | undefined;
+  let searchComposing = false;
   const statusChipRefs: Partial<
     Record<SessionStatusFilter, HTMLButtonElement>
   > = {};
@@ -76,6 +77,14 @@ export default function Dashboard() {
 
   createEffect(() => {
     document.title = t("appTitle");
+  });
+
+  // Keep search input DOM value in sync without interrupting CJK IME composition.
+  createEffect(() => {
+    const next = searchQuery();
+    if (!searchComposing && searchInput && searchInput.value !== next) {
+      searchInput.value = next;
+    }
   });
 
   const [sandboxData] = createResource(
@@ -198,11 +207,13 @@ export default function Dashboard() {
   };
 
   const clearSearch = () => {
+    searchComposing = false;
     setSearchQuery("");
     searchInput?.focus();
   };
 
   const clearAllFilters = () => {
+    searchComposing = false;
     setSearchQuery("");
     setStatusFilter("all");
     queueMicrotask(() => {
@@ -327,17 +338,29 @@ export default function Dashboard() {
                   <input
                     ref={(el) => {
                       searchInput = el;
+                      el.value = searchQuery();
                     }}
                     type="search"
                     class="input session-search-input"
                     aria-label={t("searchSessions")}
                     placeholder={t("searchSessionsPlaceholder")}
-                    value={searchQuery()}
-                    onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                    onCompositionStart={() => {
+                      searchComposing = true;
+                    }}
+                    onCompositionEnd={(e) => {
+                      searchComposing = false;
+                      setSearchQuery(e.currentTarget.value);
+                    }}
+                    onInput={(e) => {
+                      if (!e.isComposing && !searchComposing) {
+                        setSearchQuery(e.currentTarget.value);
+                      }
+                    }}
                     onKeyDown={(e) => {
                       if (e.isComposing || e.keyCode === 229) return;
                       if (e.key === "Escape" && searchQuery()) {
                         e.preventDefault();
+                        searchComposing = false;
                         setSearchQuery("");
                       }
                     }}

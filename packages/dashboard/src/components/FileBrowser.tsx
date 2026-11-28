@@ -230,7 +230,10 @@ export default function FileBrowser(
         <button
           type="button"
           class="btn btn-ghost btn-sm"
-          onClick={refresh}
+          aria-disabled={entries.loading}
+          onClick={() => {
+            if (!entries.loading) refresh();
+          }}
         >
           {t("refresh")}
         </button>
@@ -562,6 +565,7 @@ function CreateFileDialog(props: {
     const validation = validateNewFileName(inputRef?.value ?? "");
     if (!validation.ok) {
       setError(t(validation.errorKey, validation.params));
+      inputRef?.focus();
       return;
     }
 
@@ -640,6 +644,10 @@ function CreateFileDialog(props: {
                 name="fileName"
                 readOnly={checking()}
                 required
+                aria-invalid={error() ? "true" : undefined}
+                aria-describedby={error()
+                  ? `${id}-hint ${id}-error`
+                  : `${id}-hint`}
                 autocomplete="off"
                 spellcheck={false}
                 placeholder={t("fileNamePlaceholder")}
@@ -654,7 +662,11 @@ function CreateFileDialog(props: {
 
               <Show when={error()}>
                 {(message) => (
-                  <div class="alert-banner" role="alert">
+                  <div
+                    id={`${id}-error`}
+                    class="alert-banner"
+                    role="alert"
+                  >
                     {message()}
                   </div>
                 )}

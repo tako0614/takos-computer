@@ -44,6 +44,15 @@ import {
   validateCreateSessionInput,
   validateNewFileName,
 } from "../packages/dashboard/src/lib/validation.ts";
+import {
+  highlightShellLines,
+  stepShellSearchMatch,
+} from "../packages/dashboard/src/lib/shell-output.ts";
+import {
+  resolveViewerStatusKey,
+  shouldAnnounceViewerStatus,
+  shouldShowViewerStatusLoading,
+} from "../packages/dashboard/src/lib/viewer-status.ts";
 
 const DASHBOARD_DIR = new URL("../packages/dashboard/", import.meta.url);
 
@@ -174,6 +183,18 @@ test("dashboard i18n translates key UI labels in both en and ja with interpolati
     "statusAll",
     "statusStarting",
     "statusStopped",
+    "closeSearch",
+    "command",
+    "cpuMem",
+    "findInOutput",
+    "nextMatch",
+    "noMatches",
+    "pid",
+    "previousMatch",
+    "processCountOne",
+    "searchShellOutput",
+    "searchShellOutputPlaceholder",
+    "wrapLines",
   ];
 
   for (const lang of ["en", "ja"] as const) {
@@ -215,6 +236,14 @@ test("dashboard i18n translates key UI labels in both en and ja with interpolati
     expect(t("processStopped", { pid: 99 })).toContain("99");
     expect(t("stopProcessFailed", { pid: 99, message: "denied" })).toContain(
       "denied",
+    );
+    expect(t("processCount", { count: 4 })).toContain("4");
+    expect(t("searchMatchCount", { current: 2, total: 9 })).toContain("2");
+    expect(t("searchMatchCountCapped", { current: 1, total: 2000 })).toContain(
+      "2000+",
+    );
+    expect(t("sessionStatusAnnouncement", { status: t("active") })).toContain(
+      t("active"),
     );
   }
   setLanguage("en");
@@ -316,6 +345,16 @@ test("dashboard CSS tokens meet WCAG AA (>= 4.5:1) contrast in dark and light th
         "term-fatal on term-bg",
         tokens["--tc-term-fatal"]!,
         tokens["--tc-term-bg"]!,
+      ],
+      [
+        "term-match-fg on term-match-bg",
+        tokens["--tc-term-match-fg"]!,
+        tokens["--tc-term-match-bg"]!,
+      ],
+      [
+        "term-match-active-fg on term-match-active-bg",
+        tokens["--tc-term-match-active-fg"]!,
+        tokens["--tc-term-match-active-bg"]!,
       ],
     ];
     for (const [label, fg, bg] of pairs) {
@@ -952,4 +991,220 @@ test("time formatting and ApiError preserve HTTP status and localized relative/a
   expect(formatAbsoluteTime("2026-11-28T12:00:00Z", "ja").length)
     .toBeGreaterThan(0);
   expect(formatClockTime(new Date(now), "en").length).toBeGreaterThan(0);
+});
+
+test("shell output search highlights case-insensitively, skips initial hint, handles regex chars, caps matches, and steps cyclically", () => {
+  const lines = [
+    { text: "Type a command and press Enter.\n", kind: "hint" as const, initialHint: true },
+    { text: "$ grep [error] log\n", kind: "cmd" as const },
+    { text: "Line 1: [ERROR] alpha [error]\n", kind: "out" as const },
+    { text: "Line 2: ok\n", kind: "out" as const },
+  ];
+
+  // Empty query returns plain segments with 0 matches
+  const empty = highlightShellLines(lines, "");
+  expect(empty.totalMatches).toBe(0);
+  expect(empty.capped).toBe(false);
+  expect(empty.lines).toHaveLength(4);
+
+  // Initial hint is never highlighted even when query matches its text
+  const hintOnly = highlightShellLines(lines, "press Enter");
+  expect(hintOnly.totalMatches).toBe(0);
+
+  // Regex metacharacters are matched literally and case-insensitively
+  const res = highlightShellLines(lines, "[error]");
+  expect(res.totalMatches).toBe(3);
+  expect(res.capped).toBe(false);
+  expect(res.lines[1]?.segments).toEqual([
+    { text: "$ grep ", matchIndex: null },
+    { text: "[error]", matchIndex: 0 },
+    { text: " log\n", matchIndex: null },
+  ]);
+  expect(res.lines[2]?.segments).toEqual([
+    { text: "Line 1: ", matchIndex: null },
+    { text: "[ERROR]", matchIndex: 1 },
+    { text: " alpha ", matchIndex: null },
+    { text: "[error]", matchIndex: 2 },
+    { text: "\n", matchIndex: null },
+  ]);
+
+  // Cap prevents DOM explosion on huge outputs
+  const capped = highlightShellLines(lines, "[error]", 2);
+  expect(capped.totalMatches).toBe(2);
+  expect(capped.capped).toBe(true);
+
+  // Cyclic navigation
+  expect(stepShellSearchMatch(0, 3, 1)).toBe(1);
+  expect(stepShellSearchMatch(2, 3, 1)).toBe(0);
+  expect(stepShellSearchMatch(0, 3, -1)).toBe(2);
+  expect(stepShellSearchMatch(-1, 3, 1)).toBe(0);
+  expect(stepShellSearchMatch(-1, 3, -1)).toBe(2);
+  expect(stepShellSearchMatch(0, 0, 1)).toBe(-1);
+});
+
+test("viewer status helpers deduplicate unchanged poll announcements and prevent background loading flicker", () => {
+  const activeState = {
+    sessionId: "s1",
+    spaceId: "sp",
+    userId: "u",
+    status: "active" as const,
+    createdAt: "2026-11-28T00:00:00Z",
+  };
+  const stoppedState = { ...activeState, status: "stopped" as const };
+
+  expect(resolveViewerStatusKey({ kind: "ok", state: activeState })).toBe("active");
+  expect(resolveViewerStatusKey({ kind: "ok", state: stoppedState })).toBe("stopped");
+  expect(resolveViewerStatusKey({ kind: "not_found" })).toBe("notFound");
+  expect(resolveViewerStatusKey({ kind: "unavailable" })).toBe("statusUnavailable");
+
+  // Initial settled status announces once; identical polls do not re-announce
+  expect(shouldAnnounceViewerStatus(null, "s1", "active")).toBe(true);
+  expect(
+    shouldAnnounceViewerStatus({ sessionId: "s1", key: "active" }, "s1", "active"),
+  ).toBe(false);
+  // Status transition or session switch announces
+  expect(
+    shouldAnnounceViewerStatus({ sessionId: "s1", key: "active" }, "s1", "stopped"),
+  ).toBe(true);
+  expect(
+    shouldAnnounceViewerStatus({ sessionId: "s1", key: "active" }, "s2", "active"),
+  ).toBe(true);
+
+  // Background poll while already ok suppresses loading badge flicker
+  expect(
+    shouldShowViewerStatusLoading({
+      loading: true,
+      manualRefresh: false,
+      sessionId: "s1",
+      lastSettled: { sessionId: "s1", result: { kind: "ok", state: activeState } },
+    }),
+  ).toBe(false);
+
+  // Manual refresh, initial load, error recovery, and session switch still show loading
+  expect(
+    shouldShowViewerStatusLoading({
+      loading: true,
+      manualRefresh: true,
+      sessionId: "s1",
+      lastSettled: { sessionId: "s1", result: { kind: "ok", state: activeState } },
+    }),
+  ).toBe(true);
+  expect(
+    shouldShowViewerStatusLoading({
+      loading: true,
+      manualRefresh: false,
+      sessionId: "s1",
+      lastSettled: null,
+    }),
+  ).toBe(true);
+  expect(
+    shouldShowViewerStatusLoading({
+      loading: true,
+      manualRefresh: false,
+      sessionId: "s1",
+      lastSettled: { sessionId: "s1", result: { kind: "unavailable" } },
+    }),
+  ).toBe(true);
+  expect(
+    shouldShowViewerStatusLoading({
+      loading: true,
+      manualRefresh: false,
+      sessionId: "s2",
+      lastSettled: { sessionId: "s1", result: { kind: "ok", state: activeState } },
+    }),
+  ).toBe(true);
+});
+
+test("attachDialogTrap uses getRestoreFocusFallback before #main when opener disconnects", async () => {
+  type Listener = (event: KeyboardEvent) => void;
+  const listeners: Listener[] = [];
+  let activeEl: FakeEl | null = null;
+  const origHTMLElement = globalThis.HTMLElement;
+
+  class FakeEl {
+    isConnected = true;
+    inert = false;
+    style: { overflow: string } = { overflow: "" };
+    children: FakeEl[] = [];
+    ownerDocument: FakeDoc;
+    constructor(ownerDocument: FakeDoc, public readonly id = "") {
+      this.ownerDocument = ownerDocument;
+    }
+    focus() {
+      if (!this.inert) activeEl = this;
+    }
+    hasAttribute() {
+      return false;
+    }
+    closest(selector: string) {
+      return selector.includes("[inert]") && this.inert ? this : null;
+    }
+    contains(node: unknown): boolean {
+      return node === this || this.children.some((c) => c.contains(node));
+    }
+    querySelector() {
+      return null;
+    }
+    querySelectorAll() {
+      return this.children;
+    }
+    getClientRects() {
+      return [{ width: 10, height: 10 }];
+    }
+  }
+
+  class FakeDoc {
+    body = new FakeEl(this, "body");
+    app = new FakeEl(this, "app");
+    main = new FakeEl(this, "main");
+    defaultView = {
+      getComputedStyle: () => ({ visibility: "visible", display: "block" }),
+    };
+    constructor() {
+      this.app.children.push(this.main);
+    }
+    get activeElement() {
+      return activeEl;
+    }
+    getElementById(id: string) {
+      if (id === "app") return this.app;
+      if (id === "main") return this.main;
+      return null;
+    }
+    addEventListener(type: string, fn: Listener) {
+      if (type === "keydown") listeners.push(fn);
+    }
+    removeEventListener(type: string, fn: Listener) {
+      const idx = listeners.indexOf(fn);
+      if (idx !== -1) listeners.splice(idx, 1);
+    }
+  }
+
+  (globalThis as unknown as { HTMLElement: unknown }).HTMLElement = FakeEl;
+  try {
+    const doc = new FakeDoc();
+    const opener = new FakeEl(doc, "row-stop-btn");
+    const fallbackBtn = new FakeEl(doc, "section-refresh-btn");
+    doc.app.children.push(opener, fallbackBtn);
+    activeEl = opener;
+
+    const dlg = new FakeEl(doc, "confirm-dialog");
+    const btn = new FakeEl(doc, "confirm-btn");
+    dlg.children.push(btn);
+
+    const detach = attachDialogTrap({
+      container: dlg as unknown as HTMLElement,
+      onEscape: () => {},
+      getRestoreFocusFallback: () => fallbackBtn as unknown as HTMLElement,
+    });
+    await Promise.resolve();
+    expect(activeEl).toBe(btn);
+
+    opener.isConnected = false;
+    detach();
+    expect(activeEl).toBe(fallbackBtn);
+  } finally {
+    (globalThis as unknown as { HTMLElement: unknown }).HTMLElement =
+      origHTMLElement;
+  }
 });

@@ -20,6 +20,7 @@ export interface ConfirmDialogProps {
   tone?: "danger" | "primary";
   busy?: boolean;
   error?: string;
+  restoreFocusFallback?: () => HTMLElement | null | undefined;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
 }
@@ -47,6 +48,7 @@ export default function ConfirmDialog(props: ConfirmDialogProps) {
       container: el,
       onEscape: close,
       getInitialFocus: () => (isDanger() ? cancelRef : confirmRef),
+      getRestoreFocusFallback: props.restoreFocusFallback,
     });
     onCleanup(detach);
   });

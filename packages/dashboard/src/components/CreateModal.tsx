@@ -24,12 +24,16 @@ export default function CreateModal(props: {
   const [dialogEl, setDialogEl] = createSignal<HTMLDivElement | undefined>();
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal("");
+  const [invalidFields, setInvalidFields] = createSignal<Set<string>>(
+    new Set(),
+  );
   let formRef!: HTMLFormElement;
   let active = true;
   onCleanup(() => (active = false));
   const close = () => {
     if (!loading()) {
       setError("");
+      setInvalidFields(new Set<string>());
       props.onClose();
     }
   };
@@ -37,10 +41,12 @@ export default function CreateModal(props: {
   createEffect(() => {
     if (!props.open) {
       setError("");
+      setInvalidFields(new Set<string>());
       setDialogEl(undefined);
       return;
     }
     setError("");
+    setInvalidFields(new Set<string>());
     const el = dialogEl();
     if (!el) return;
     const detach = attachDialogTrap({
@@ -51,24 +57,51 @@ export default function CreateModal(props: {
     onCleanup(detach);
   });
 
-  const clearError = () => {
+  const clearError = (fieldName?: string) => {
     if (error()) setError("");
+    if (fieldName && invalidFields().has(fieldName)) {
+      setInvalidFields((prev) => {
+        const next = new Set(prev);
+        next.delete(fieldName);
+        return next;
+      });
+    }
   };
 
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
     if (loading()) return;
     const fd = new FormData(formRef);
-    const validation = validateCreateSessionInput({
+    const raw = {
       sessionId: String(fd.get("sessionId") ?? ""),
       spaceId: String(fd.get("spaceId") ?? ""),
       userId: String(fd.get("userId") ?? ""),
-    });
+    };
+    const validation = validateCreateSessionInput(raw);
     if (!validation.ok) {
+      const nextInvalid = new Set<string>();
+      if (validation.errorKey === "validationRequired") {
+        if (!raw.sessionId.trim()) nextInvalid.add("sessionId");
+        if (!raw.spaceId.trim()) nextInvalid.add("spaceId");
+        if (!raw.userId.trim()) nextInvalid.add("userId");
+      } else {
+        nextInvalid.add("sessionId");
+      }
+      setInvalidFields(nextInvalid);
       setError(t(validation.errorKey, validation.params));
+      const firstInvalid = [
+        "sessionId",
+        "spaceId",
+        "userId",
+      ].find((name) => nextInvalid.has(name));
+      if (firstInvalid) {
+        formRef.querySelector<HTMLInputElement>(`input[name="${firstInvalid}"]`)
+          ?.focus();
+      }
       return;
     }
     setError("");
+    setInvalidFields(new Set<string>());
     setLoading(true);
     // Disabling the submitter must not leave keyboard focus behind the modal.
     queueMicrotask(() => {
@@ -139,10 +172,14 @@ export default function CreateModal(props: {
                 name="sessionId"
                 readOnly={loading()}
                 required
+                aria-invalid={invalidFields().has("sessionId")
+                  ? "true"
+                  : undefined}
+                aria-describedby={error() ? `${id}-error` : undefined}
                 autocomplete="off"
                 spellcheck={false}
                 placeholder={t("sessionIdPlaceholder")}
-                onInput={clearError}
+                onInput={() => clearError("sessionId")}
               />
 
               <label for={`${id}-space`}>{t("spaceId")}</label>
@@ -151,10 +188,14 @@ export default function CreateModal(props: {
                 name="spaceId"
                 readOnly={loading()}
                 required
+                aria-invalid={invalidFields().has("spaceId")
+                  ? "true"
+                  : undefined}
+                aria-describedby={error() ? `${id}-error` : undefined}
                 autocomplete="off"
                 spellcheck={false}
                 placeholder={t("spaceIdPlaceholder")}
-                onInput={clearError}
+                onInput={() => clearError("spaceId")}
               />
 
               <label for={`${id}-user`}>{t("userId")}</label>
@@ -163,15 +204,19 @@ export default function CreateModal(props: {
                 name="userId"
                 readOnly={loading()}
                 required
+                aria-invalid={invalidFields().has("userId")
+                  ? "true"
+                  : undefined}
+                aria-describedby={error() ? `${id}-error` : undefined}
                 autocomplete="off"
                 spellcheck={false}
                 placeholder={t("userIdPlaceholder")}
-                onInput={clearError}
+                onInput={() => clearError("userId")}
               />
 
               <Show when={error()}>
                 {(message) => (
-                  <div class="alert-banner" role="alert">
+                  <div id={`${id}-error`} class="alert-banner" role="alert">
                     {message()}
                   </div>
                 )}
