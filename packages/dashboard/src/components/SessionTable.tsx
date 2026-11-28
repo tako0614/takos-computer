@@ -90,7 +90,10 @@ export default function SessionTable(props: {
                         <td class="session-meta-cell" data-label={t("user")}>
                           {s.userId || "\u2014"}
                         </td>
-                        <td class="session-meta-cell" data-label={t("created")}>
+                        <td
+                          class="session-meta-cell session-created-cell"
+                          data-label={t("created")}
+                        >
                           <Show
                             when={s.createdAt}
                             fallback={<span>{"\u2014"}</span>}

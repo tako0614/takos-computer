@@ -2,25 +2,26 @@ import {
   createEffect,
   createMemo,
   createSignal,
+  createUniqueId,
   For,
+  on,
   onCleanup,
   onMount,
   Show,
 } from "solid-js";
 import { mcpCall } from "../lib/mcp.ts";
+import {
+  highlightShellLines,
+  type ShellLine,
+  type ShellLineKind,
+  stepShellSearchMatch,
+} from "../lib/shell-output.ts";
 import { pushShellHistory, stepShellHistory } from "../lib/validation.ts";
 import { useI18n } from "../i18n.ts";
 
-type LineKind = "hint" | "cmd" | "out" | "err" | "warn" | "fatal";
-
-interface ShellLine {
-  text: string;
-  kind: LineKind;
-  initialHint?: boolean;
-}
-
 export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
   const { t } = useI18n();
+  const searchBarId = createUniqueId();
   const [lines, setLines] = createSignal<ShellLine[]>([
     { text: t("typeCommandHint"), kind: "hint", initialHint: true },
   ]);
@@ -28,11 +29,18 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
   const [historyIdx, setHistoryIdx] = createSignal(-1);
   const [historyDraft, setHistoryDraft] = createSignal("");
   const [runningCount, setRunningCount] = createSignal(0);
+  const [wrapLines, setWrapLines] = createSignal(true);
+  const [searchOpen, setSearchOpen] = createSignal(false);
+  const [searchQuery, setSearchQuery] = createSignal("");
+  const [activeMatch, setActiveMatch] = createSignal(0);
   const [copyFeedback, setCopyFeedback] = createSignal<
     "copied" | "copyFailed" | null
   >(null);
   let inputRef!: HTMLInputElement;
   let outputRef!: HTMLDivElement;
+  let findBtnRef: HTMLButtonElement | undefined;
+  let searchInputRef: HTMLInputElement | undefined;
+  let searchComposing = false;
   let alive = true;
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -44,6 +52,68 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
   const hasOutput = createMemo(() =>
     lines().some((line) => !line.initialHint)
   );
+
+  const activeSearchQuery = createMemo(() =>
+    searchOpen() ? searchQuery() : ""
+  );
+
+  const highlighted = createMemo(() =>
+    highlightShellLines(lines(), activeSearchQuery())
+  );
+
+  const searchCountLabel = createMemo(() => {
+    const query = searchQuery();
+    if (!query) return "";
+    const { totalMatches, capped } = highlighted();
+    if (totalMatches === 0) return t("noMatches");
+    const current = activeMatch() >= 0 && activeMatch() < totalMatches
+      ? activeMatch() + 1
+      : 1;
+    return t(capped ? "searchMatchCountCapped" : "searchMatchCount", {
+      current,
+      total: totalMatches,
+    });
+  });
+
+  // Keep search input DOM value in sync without interrupting CJK IME composition.
+  createEffect(() => {
+    const next = searchQuery();
+    if (!searchComposing && searchInputRef && searchInputRef.value !== next) {
+      searchInputRef.value = next;
+    }
+  });
+
+  // Reset active match to first hit when the search query changes.
+  createEffect(
+    on(searchQuery, (query) => {
+      setActiveMatch(query ? 0 : -1);
+    }),
+  );
+
+  // Clamp active match when transcript lines change.
+  createEffect(() => {
+    const total = highlighted().totalMatches;
+    if (total === 0) {
+      if (activeMatch() !== -1) setActiveMatch(-1);
+    } else if (activeMatch() < 0 || activeMatch() >= total) {
+      setActiveMatch(0);
+    }
+  });
+
+  // Scroll the active search match into view inside the shell transcript.
+  createEffect(() => {
+    if (!searchOpen() || !searchQuery()) return;
+    const total = highlighted().totalMatches;
+    const idx = activeMatch();
+    if (total <= 0 || idx < 0 || idx >= total) return;
+    requestAnimationFrame(() => {
+      if (!alive || !outputRef) return;
+      const mark = outputRef.querySelector<HTMLElement>(
+        `mark[data-match-index="${idx}"]`,
+      );
+      mark?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    });
+  });
 
   // Keep the initial hint localized even after commands have been executed.
   createEffect(() => {
@@ -57,15 +127,53 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
     });
   });
 
-  const append = (text: string, kind: LineKind) => {
+  const append = (text: string, kind: ShellLineKind) => {
     if (!alive) return;
     setLines((prev) => [...prev, { text, kind }]);
-    requestAnimationFrame(() => {
-      if (alive && outputRef) outputRef.scrollTop = outputRef.scrollHeight;
+    if (!searchOpen() || !searchQuery()) {
+      requestAnimationFrame(() => {
+        if (alive && outputRef) outputRef.scrollTop = outputRef.scrollHeight;
+      });
+    }
+  };
+
+  const openSearch = () => {
+    if (!hasOutput()) return;
+    setSearchOpen(true);
+    queueMicrotask(() => {
+      if (alive && searchInputRef?.isConnected) {
+        searchInputRef.focus();
+        searchInputRef.select();
+      }
     });
   };
 
+  const closeSearch = () => {
+    searchComposing = false;
+    setSearchOpen(false);
+    setSearchQuery("");
+    setActiveMatch(-1);
+    queueMicrotask(() => {
+      if (!alive) return;
+      if (findBtnRef?.isConnected && !findBtnRef.disabled) {
+        findBtnRef.focus();
+      } else if (inputRef?.isConnected) {
+        inputRef.focus();
+      }
+    });
+  };
+
+  const stepMatch = (delta: 1 | -1) => {
+    const total = highlighted().totalMatches;
+    if (total <= 0) return;
+    setActiveMatch((cur) => stepShellSearchMatch(cur, total, delta));
+  };
+
   const clearOutput = () => {
+    searchComposing = false;
+    setSearchOpen(false);
+    setSearchQuery("");
+    setActiveMatch(-1);
     setLines([{ text: t("typeCommandHint"), kind: "hint", initialHint: true }]);
     setCopyFeedback(null);
     inputRef?.focus();
@@ -139,6 +247,40 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
     }
   };
 
+  const onShellKeyDown = (e: KeyboardEvent) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      !e.altKey &&
+      e.key.toLowerCase() === "f" &&
+      hasOutput()
+    ) {
+      e.preventDefault();
+      openSearch();
+    }
+  };
+
+  const onSearchBarKeyDown = (e: KeyboardEvent) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      if (e.target === searchInputRef && searchQuery()) {
+        searchComposing = false;
+        setSearchQuery("");
+      } else {
+        closeSearch();
+      }
+    }
+  };
+
+  const onSearchKeyDown = (e: KeyboardEvent) => {
+    if (e.isComposing || e.keyCode === 229) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      stepMatch(e.shiftKey ? -1 : 1);
+    }
+  };
+
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.isComposing || e.keyCode === 229) return;
     if (e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "l") {
@@ -172,7 +314,11 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
   onMount(() => inputRef.focus());
 
   return (
-    <section class="shell-box" aria-label={t("shell")}>
+    <section
+      class="shell-box"
+      aria-label={t("shell")}
+      onKeyDown={onShellKeyDown}
+    >
       <div class="shell-header">
         <div class="shell-header-left">
           <span role="heading" aria-level={2} class="shell-title">
@@ -188,6 +334,29 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
               {t("running")}
             </span>
           </Show>
+          <button
+            type="button"
+            class="shell-clear-btn"
+            classList={{ active: wrapLines() }}
+            aria-pressed={wrapLines()}
+            onClick={() => setWrapLines((wrap) => !wrap)}
+          >
+            {t("wrapLines")}
+          </button>
+          <button
+            ref={(el) => {
+              findBtnRef = el;
+            }}
+            type="button"
+            class="shell-clear-btn"
+            classList={{ active: searchOpen() }}
+            aria-expanded={searchOpen()}
+            aria-controls={searchOpen() ? searchBarId : undefined}
+            disabled={!hasOutput()}
+            onClick={() => (searchOpen() ? closeSearch() : openSearch())}
+          >
+            {t("findInOutput")}
+          </button>
           <button
             type="button"
             class="shell-clear-btn"
@@ -215,12 +384,79 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
           </button>
         </div>
       </div>
+      <Show when={searchOpen()}>
+        <div
+          id={searchBarId}
+          class="shell-search-bar"
+          role="search"
+          aria-label={t("searchShellOutput")}
+          onKeyDown={onSearchBarKeyDown}
+        >
+          <input
+            ref={(el) => {
+              searchInputRef = el;
+              el.value = searchQuery();
+            }}
+            type="search"
+            class="shell-search-input mono"
+            aria-label={t("searchShellOutput")}
+            placeholder={t("searchShellOutputPlaceholder")}
+            autocomplete="off"
+            spellcheck={false}
+            onCompositionStart={() => {
+              searchComposing = true;
+            }}
+            onCompositionEnd={(e) => {
+              searchComposing = false;
+              setSearchQuery(e.currentTarget.value);
+            }}
+            onInput={(e) => {
+              if (!e.isComposing && !searchComposing) {
+                setSearchQuery(e.currentTarget.value);
+              }
+            }}
+            onKeyDown={onSearchKeyDown}
+          />
+          <span class="shell-search-count mono" role="status" aria-live="polite">
+            {searchCountLabel()}
+          </span>
+          <div class="shell-search-nav">
+            <button
+              type="button"
+              class="shell-clear-btn shell-search-nav-btn"
+              aria-label={t("previousMatch")}
+              disabled={highlighted().totalMatches === 0}
+              onClick={() => stepMatch(-1)}
+            >
+              &uarr;
+            </button>
+            <button
+              type="button"
+              class="shell-clear-btn shell-search-nav-btn"
+              aria-label={t("nextMatch")}
+              disabled={highlighted().totalMatches === 0}
+              onClick={() => stepMatch(1)}
+            >
+              &darr;
+            </button>
+            <button
+              type="button"
+              class="shell-clear-btn shell-search-nav-btn"
+              aria-label={t("closeSearch")}
+              onClick={closeSearch}
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      </Show>
       <div
         ref={outputRef}
         class="shell-output mono"
+        classList={{ "shell-output-nowrap": !wrapLines() }}
         role="log"
         tabIndex={0}
-        aria-live="polite"
+        aria-live={activeSearchQuery() ? "off" : "polite"}
         aria-busy={runningCount() > 0}
         aria-label={t("shellOutput")}
         onClick={() => {
@@ -228,9 +464,35 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
         }}
       >
         <For each={lines()}>
-          {(line) => (
-            <span class={`shell-line-${line.kind}`}>{line.text}</span>
-          )}
+          {(line) => {
+            const segments = createMemo(() => {
+              if (!activeSearchQuery()) return undefined;
+              return highlighted().matchesByLine.get(line);
+            });
+            return (
+              <span class={`shell-line-${line.kind}`}>
+                <Show when={segments()} fallback={line.text}>
+                  {(segs) => (
+                    <For each={segs()}>
+                      {(seg) =>
+                        seg.matchIndex === null ? seg.text : (
+                          <mark
+                            class="shell-match"
+                            classList={{
+                              "shell-match-active":
+                                seg.matchIndex === activeMatch(),
+                            }}
+                            data-match-index={seg.matchIndex}
+                          >
+                            {seg.text}
+                          </mark>
+                        )}
+                    </For>
+                  )}
+                </Show>
+              </span>
+            );
+          }}
         </For>
       </div>
       <div class="shell-prompt-bar">

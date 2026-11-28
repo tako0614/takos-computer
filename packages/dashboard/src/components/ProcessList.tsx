@@ -148,12 +148,22 @@ export default function ProcessList(props: { mcpUrl: string }) {
     }
   };
 
+  const processCountLabel = () => {
+    const count = processes().length;
+    return count === 1
+      ? t("processCountOne")
+      : t("processCount", { count });
+  };
+
   return (
     <div>
       <div class="section-header">
         <span role="heading" aria-level={2} class="section-title">
           {t("processes")}
         </span>
+        <Show when={!procs.loading && !errorMessage() && processes().length > 0}>
+          <span class="muted proc-count">{processCountLabel()}</span>
+        </Show>
         <div class="flex-1" />
         <button
           ref={(el) => {
@@ -161,7 +171,10 @@ export default function ProcessList(props: { mcpUrl: string }) {
           }}
           type="button"
           class="btn btn-ghost btn-sm"
-          onClick={refresh}
+          aria-disabled={procs.loading}
+          onClick={() => {
+            if (!procs.loading) refresh();
+          }}
         >
           {t("refresh")}
         </button>
@@ -250,6 +263,12 @@ export default function ProcessList(props: { mcpUrl: string }) {
                   </div>
                 }
               >
+                <div class="proc-header-row muted" aria-hidden="true">
+                  <span class="proc-pid">{t("pid")}</span>
+                  <span class="flex-1">{t("command")}</span>
+                  <span class="proc-stats">{t("cpuMem")}</span>
+                  <span class="proc-action-spacer" />
+                </div>
                 <For each={processes()}>
                   {(p) => {
                     const busy = () => killingPid() === p.pid;
@@ -271,7 +290,15 @@ export default function ProcessList(props: { mcpUrl: string }) {
                         >
                           {p.cpu}% / {p.mem}%
                         </span>
-                        <Show when={p.pid > 1}>
+                        <Show
+                          when={p.pid > 1}
+                          fallback={
+                            <span
+                              class="proc-action-spacer"
+                              aria-hidden="true"
+                            />
+                          }
+                        >
                           <button
                             type="button"
                             class="btn btn-danger-ghost btn-sm proc-kill-btn"
@@ -320,6 +347,7 @@ export default function ProcessList(props: { mcpUrl: string }) {
         confirmBusyLabel={t("stopping")}
         tone="danger"
         busy={killingPid() !== null}
+        restoreFocusFallback={() => refreshButton}
         onCancel={() => setPendingKill(null)}
         onConfirm={confirmKill}
       />

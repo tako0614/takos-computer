@@ -7,7 +7,15 @@ import {
   Show,
 } from "solid-js";
 import { A, useLocation, useNavigate, useParams } from "@solidjs/router";
-import { ApiError, sandboxSessions, type SessionState } from "../lib/api.ts";
+import { ApiError, sandboxSessions } from "../lib/api.ts";
+import { formatClockTime } from "../lib/format-time.ts";
+import {
+  resolveViewerStatusKey,
+  shouldAnnounceViewerStatus,
+  shouldShowViewerStatusLoading,
+  type ViewerStatusAnnouncementState,
+  type ViewerStatusResult,
+} from "../lib/viewer-status.ts";
 import Shell from "../components/Shell.tsx";
 import FileBrowser from "../components/FileBrowser.tsx";
 import ProcessList from "../components/ProcessList.tsx";
@@ -31,7 +39,7 @@ function restoredDirectory(state: unknown, sessionId: string): string {
 }
 
 export default function SandboxViewer() {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const params = useParams<{ id: string }>();
   const sessionId = () => params.id;
   const location = useLocation();
@@ -75,31 +83,63 @@ export default function SandboxViewer() {
     });
   };
 
-  // Status polling
-  type StatusResult =
-    | { kind: "ok"; state: SessionState }
-    | { kind: "not_found" }
-    | { kind: "unavailable" };
-
+  // Status polling with deduplicated screen-reader announcements & auto-refresh control
   const [statusVersion, setStatusVersion] = createSignal(0);
+  const [autoRefreshPaused, setAutoRefreshPaused] = createSignal(false);
+  const [manualRefresh, setManualRefresh] = createSignal(false);
+  const [lastUpdated, setLastUpdated] = createSignal<Date | null>(null);
+  const [lastSettled, setLastSettled] = createSignal<
+    { sessionId: string; result: ViewerStatusResult } | null
+  >(null);
+  const [announcedStatus, setAnnouncedStatus] = createSignal<
+    ViewerStatusAnnouncementState | null
+  >(null);
+
+  let viewerActive = true;
+  let statusRequestSeq = 0;
+  let refreshStatusButton: HTMLButtonElement | undefined;
+
   const [status] = createResource(
     () => ({ id: sessionId(), version: statusVersion() }),
-    async ({ id }): Promise<StatusResult> => {
+    async ({ id }): Promise<ViewerStatusResult> => {
+      const req = ++statusRequestSeq;
+      let result: ViewerStatusResult;
       try {
         const state = await sandboxSessions.get(id);
-        return { kind: "ok", state };
+        result = { kind: "ok", state };
       } catch (err) {
         if (err instanceof ApiError && err.status === 404) {
-          return { kind: "not_found" };
+          result = { kind: "not_found" };
+        } else {
+          result = { kind: "unavailable" };
         }
-        return { kind: "unavailable" };
       }
+      if (viewerActive && req === statusRequestSeq && sessionId() === id) {
+        setManualRefresh(false);
+        setLastSettled({ sessionId: id, result });
+        if (result.kind === "ok") {
+          setLastUpdated(new Date());
+        }
+        const nextKey = resolveViewerStatusKey(result);
+        setAnnouncedStatus((previous) =>
+          shouldAnnounceViewerStatus(previous, id, nextKey)
+            ? { sessionId: id, key: nextKey }
+            : previous
+        );
+      }
+      return result;
     },
   );
-  let viewerActive = true;
-  let refreshStatusButton: HTMLButtonElement | undefined;
+
   const timer = setInterval(() => {
-    if (status()?.kind === "not_found") return;
+    if (
+      autoRefreshPaused() ||
+      status.loading ||
+      status()?.kind === "not_found"
+    ) {
+      return;
+    }
+    setManualRefresh(false);
     setStatusVersion((v) => v + 1);
   }, 10_000);
   onCleanup(() => {
@@ -107,11 +147,30 @@ export default function SandboxViewer() {
     clearInterval(timer);
   });
 
-  const isNotFound = () => !status.loading && status()?.kind === "not_found";
+  const showStatusLoading = () =>
+    shouldShowViewerStatusLoading({
+      loading: status.loading,
+      manualRefresh: manualRefresh(),
+      sessionId: sessionId(),
+      lastSettled: lastSettled(),
+    });
+
+  const effectiveStatus = (): ViewerStatusResult | undefined => {
+    if (showStatusLoading()) return undefined;
+    if (status.loading) {
+      const settled = lastSettled();
+      return settled?.sessionId === sessionId() ? settled.result : undefined;
+    }
+    return status();
+  };
+
+  const isNotFound = () =>
+    !showStatusLoading() && effectiveStatus()?.kind === "not_found";
 
   const badgeClass = () => {
-    const result = status();
-    if (status.loading || !result || result.kind === "unavailable") {
+    if (showStatusLoading()) return "badge";
+    const result = effectiveStatus();
+    if (!result || result.kind === "unavailable") {
       return "badge";
     }
     if (result.kind === "not_found") return "badge badge-stopped";
@@ -124,14 +183,16 @@ export default function SandboxViewer() {
   };
 
   const statusLabel = () => {
-    if (status.loading) return t("loading");
-    const result = status();
-    if (result?.kind === "not_found") return t("notFound");
-    const value = result?.kind === "ok" ? result.state.status : undefined;
-    if (value === "active" || value === "starting" || value === "stopped") {
-      return t(value);
-    }
-    return t("statusUnavailable");
+    if (showStatusLoading()) return t("loading");
+    const result = effectiveStatus();
+    if (!result) return t("statusUnavailable");
+    return t(resolveViewerStatusKey(result));
+  };
+
+  const statusAnnouncementText = () => {
+    const announced = announcedStatus();
+    if (!announced || announced.sessionId !== sessionId()) return "";
+    return t("sessionStatusAnnouncement", { status: t(announced.key) });
   };
 
   const [destroyDialogOpen, setDestroyDialogOpen] = createSignal(false);
@@ -145,6 +206,10 @@ export default function SandboxViewer() {
   createEffect(
     on(sessionId, () => {
       setDestroyDialogOpen(false);
+      setManualRefresh(false);
+      setLastUpdated(null);
+      setLastSettled(null);
+      setAnnouncedStatus(null);
     }),
   );
 
@@ -195,8 +260,11 @@ export default function SandboxViewer() {
         <div class="viewer-controls">
           <ThemeSwitcher />
           <LanguageSwitcher />
-          <span class={badgeClass()} role="status" aria-live="polite">
+          <span class={badgeClass()}>
             {statusLabel()}
+          </span>
+          <span class="sr-only" role="status" aria-live="polite">
+            {statusAnnouncementText()}
           </span>
           <button
             ref={(el) => {
@@ -205,8 +273,13 @@ export default function SandboxViewer() {
             type="button"
             class="btn btn-ghost btn-sm"
             aria-disabled={status.loading}
+            aria-busy={status.loading && manualRefresh()}
             onClick={() => {
-              if (!status.loading) setStatusVersion((v) => v + 1);
+              if (!status.loading) {
+                setManualRefresh(true);
+                setAnnouncedStatus(null);
+                setStatusVersion((v) => v + 1);
+              }
             }}
           >
             {t("refreshStatus")}
@@ -282,6 +355,39 @@ export default function SandboxViewer() {
         <section class="viewer-section" aria-label={t("processes")}>
           <ProcessList mcpUrl={mcpUrl()} />
         </section>
+
+        <Show when={!isNotFound()}>
+          <div class="muted footer-note">
+            <div class="footer-note-info">
+              <Show when={lastUpdated()}>
+                {(date) => (
+                  <>
+                    <span>
+                      {t("lastUpdated", {
+                        time: formatClockTime(date(), language()),
+                      })}
+                    </span>
+                    <span aria-hidden="true"> &middot; </span>
+                  </>
+                )}
+              </Show>
+              <span role="status" aria-live="polite">
+                {autoRefreshPaused()
+                  ? t("autoRefreshPaused")
+                  : t("autoRefresh")}
+              </span>
+            </div>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm footer-refresh-toggle"
+              onClick={() => setAutoRefreshPaused((paused) => !paused)}
+            >
+              {autoRefreshPaused()
+                ? t("resumeAutoRefresh")
+                : t("pauseAutoRefresh")}
+            </button>
+          </div>
+        </Show>
       </main>
 
       <ConfirmDialog

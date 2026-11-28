@@ -84,6 +84,7 @@ function unlockBackground(doc: Document | null): void {
 export function restoreDialogFocus(
   previous: Element | null,
   doc: Document | null = globalThis.document ?? null,
+  fallback?: HTMLElement | null,
 ): void {
   if (
     previous instanceof HTMLElement &&
@@ -92,6 +93,15 @@ export function restoreDialogFocus(
     !previous.closest("[inert]")
   ) {
     previous.focus();
+    return;
+  }
+  if (
+    fallback instanceof HTMLElement &&
+    fallback.isConnected &&
+    !fallback.hasAttribute("disabled") &&
+    !fallback.closest("[inert]")
+  ) {
+    fallback.focus();
     return;
   }
   const main = doc?.getElementById("main");
@@ -104,10 +114,12 @@ export interface DialogTrapOptions {
   container: HTMLElement;
   onEscape: () => void;
   getInitialFocus?: () => HTMLElement | null | undefined;
+  getRestoreFocusFallback?: () => HTMLElement | null | undefined;
 }
 
 export function attachDialogTrap(options: DialogTrapOptions): () => void {
-  const { container, onEscape, getInitialFocus } = options;
+  const { container, onEscape, getInitialFocus, getRestoreFocusFallback } =
+    options;
   const doc = container.ownerDocument;
   const id = Symbol("dialog");
   const previousFocus = doc?.activeElement ?? null;
@@ -199,6 +211,6 @@ export function attachDialogTrap(options: DialogTrapOptions): () => void {
     }
     // Unlock background inert BEFORE restoring focus so the browser accepts focus().
     unlockBackground(doc);
-    restoreDialogFocus(previousFocus, doc);
+    restoreDialogFocus(previousFocus, doc, getRestoreFocusFallback?.() ?? null);
   };
 }
