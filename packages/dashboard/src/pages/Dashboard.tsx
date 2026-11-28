@@ -8,6 +8,7 @@ import {
   Show,
 } from "solid-js";
 import { sandboxSessions } from "../lib/api.ts";
+import { formatClockTime } from "../lib/format-time.ts";
 import { filterSessions } from "../lib/session-filter.ts";
 import SessionTable from "../components/SessionTable.tsx";
 import CreateModal from "../components/CreateModal.tsx";
@@ -17,10 +18,11 @@ import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
 import { useI18n } from "../i18n.ts";
 
 export default function Dashboard() {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [modalOpen, setModalOpen] = createSignal(false);
   const [version, setVersion] = createSignal(0);
   const [searchQuery, setSearchQuery] = createSignal("");
+  const [lastUpdated, setLastUpdated] = createSignal<Date | null>(null);
   const [pendingDestroyId, setPendingDestroyId] = createSignal<string | null>(
     null,
   );
@@ -52,6 +54,9 @@ export default function Dashboard() {
       const request = ++listRequest;
       const result = await sandboxSessions.list().catch(() => null);
       if (active && request === listRequest) {
+        if (result !== null) {
+          setLastUpdated(new Date());
+        }
         const original = document.activeElement;
         focusAfterRefresh = null;
         if (original instanceof HTMLAnchorElement && original.closest("tbody")) {
@@ -183,8 +188,33 @@ export default function Dashboard() {
 
         <For each={[...unconfirmedDestroys()]}>
           {(id) => (
-            <div role="alert" class="alert-banner">
-              {t("unconfirmedDestroySession", { id })}
+            <div role="alert" class="alert-banner alert-banner-row">
+              <span>{t("unconfirmedDestroySession", { id })}</span>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                onClick={(e) => {
+                  const hadFocus = document.activeElement === e.currentTarget;
+                  setUnconfirmedDestroys((previous) => {
+                    const next = new Set(previous);
+                    next.delete(id);
+                    return next;
+                  });
+                  if (hadFocus) {
+                    queueMicrotask(() => {
+                      if (
+                        active &&
+                        document.activeElement === document.body &&
+                        refreshButton?.isConnected
+                      ) {
+                        refreshButton.focus();
+                      }
+                    });
+                  }
+                }}
+              >
+                {t("dismiss")}
+              </button>
             </div>
           )}
         </For>
@@ -204,7 +234,10 @@ export default function Dashboard() {
             </div>
           }
         >
-          <Show when={sandboxData() !== null}>
+          <Show
+            when={sandboxData() !== null &&
+              (allSessions().length > 0 || isFiltering())}
+          >
             <div class="session-toolbar">
               <div class="session-search-wrap">
                 <input
@@ -257,6 +290,7 @@ export default function Dashboard() {
               loading={sandboxData.loading && !sandboxData.latest}
               filtered={isFiltering()}
               onClearFilter={clearSearch}
+              onCreate={() => setModalOpen(true)}
               onDestroy={requestDestroySandbox}
               destroyPending={(id) => destroyRequests().has(id)}
             />
@@ -264,7 +298,19 @@ export default function Dashboard() {
         </Show>
 
         <div class="muted footer-note">
-          {t("autoRefresh")}
+          <Show when={lastUpdated()}>
+            {(date) => (
+              <>
+                <span>
+                  {t("lastUpdated", {
+                    time: formatClockTime(date(), language()),
+                  })}
+                </span>
+                <span aria-hidden="true"> &middot; </span>
+              </>
+            )}
+          </Show>
+          <span>{t("autoRefresh")}</span>
         </div>
       </main>
 

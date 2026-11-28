@@ -12,10 +12,23 @@ export interface CreateSessionPayload {
   userId: string;
 }
 
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
 async function json<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error || `HTTP ${res.status}`);
+    throw new ApiError(
+      res.status,
+      (body as { error?: string }).error || `HTTP ${res.status}`,
+    );
   }
   return res.json();
 }

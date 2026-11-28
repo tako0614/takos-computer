@@ -51,6 +51,25 @@ export default function ConfirmDialog(props: ConfirmDialogProps) {
     onCleanup(detach);
   });
 
+  // Disabling action buttons while busy must not drop focus onto document.body.
+  createEffect(() => {
+    const busy = Boolean(props.busy);
+    const el = dialogEl();
+    if (!props.open || !el) return;
+    queueMicrotask(() => {
+      if (!props.open || !el.isConnected) return;
+      if (busy) {
+        if (!el.contains(document.activeElement)) {
+          el.focus();
+        }
+      } else if (
+        document.activeElement === el || !el.contains(document.activeElement)
+      ) {
+        (isDanger() ? cancelRef : confirmRef)?.focus();
+      }
+    });
+  });
+
   return (
     <Show when={props.open}>
       <Portal>
