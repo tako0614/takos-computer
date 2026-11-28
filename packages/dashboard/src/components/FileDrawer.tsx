@@ -11,13 +11,13 @@ import { mcpCall } from "../lib/mcp.ts";
 import { useI18n } from "../i18n.ts";
 import { attachDialogTrap } from "../lib/dialog-a11y.ts";
 import {
-  base64ToBytes,
-  FILE_READ_CHUNK_BYTES,
+  type ChunkedReadOutcome,
   formatFileSize,
   getPreviewImageMimeType,
   isLikelyBinaryFile,
   MAX_DOWNLOAD_BYTES,
   MAX_IMAGE_PREVIEW_BYTES,
+  readChunkedBase64File,
 } from "../lib/file-paths.ts";
 import ConfirmDialog from "./ConfirmDialog.tsx";
 
@@ -39,52 +39,23 @@ interface FileWriteResult {
   bytes_written: number;
 }
 
-type ChunkedReadOutcome =
-  | { ok: true; chunks: Uint8Array<ArrayBuffer>[]; size: number }
-  | { ok: false; reason: "cancelled" }
-  | { ok: false; reason: "too_large"; size: number };
-
 async function readFileBytesChunked(
   mcpUrl: string,
   path: string,
   maxBytes: number,
   isCancelled: () => boolean,
 ): Promise<ChunkedReadOutcome> {
-  const chunks: Uint8Array<ArrayBuffer>[] = [];
-  let offset = 0;
-  let totalSize = 0;
-
-  while (true) {
-    if (isCancelled()) return { ok: false, reason: "cancelled" };
-    const result = await mcpCall<FileReadResult>(mcpUrl, "file_read", {
-      path,
-      offset,
-      limit: FILE_READ_CHUNK_BYTES,
-      encoding: "base64",
-    });
-    if (isCancelled()) return { ok: false, reason: "cancelled" };
-
-    const size = typeof result?.size === "number" && Number.isFinite(result.size)
-      ? result.size
-      : totalSize;
-    totalSize = size;
-    if (size > maxBytes) {
-      return { ok: false, reason: "too_large", size };
-    }
-
-    const content = typeof result?.content === "string" ? result.content : "";
-    const bytes = base64ToBytes(content);
-    if (bytes.byteLength > 0) {
-      chunks.push(bytes);
-      offset += bytes.byteLength;
-    }
-
-    if (!result?.truncated || bytes.byteLength === 0 || offset >= maxBytes) {
-      break;
-    }
-  }
-
-  return { ok: true, chunks, size: totalSize };
+  return readChunkedBase64File(
+    (offset, limit) =>
+      mcpCall<FileReadResult>(mcpUrl, "file_read", {
+        path,
+        offset,
+        limit,
+        encoding: "base64",
+      }),
+    maxBytes,
+    isCancelled,
+  );
 }
 
 export default function FileDrawer(props: {
@@ -248,7 +219,9 @@ export default function FileDrawer(props: {
     lastLoadedFile = file;
     lastLoadedMcpUrl = mcpUrl;
 
-    setFileSize(file.size);
+    if (targetChanged) {
+      setFileSize(file.size);
+    }
     setLoadError("");
 
     if (targetChanged && file.isNew) {
@@ -280,7 +253,7 @@ export default function FileDrawer(props: {
       setOriginalContent("");
       setDraft("");
 
-      if (file.size > MAX_IMAGE_PREVIEW_BYTES) {
+      if (targetChanged && file.size > MAX_IMAGE_PREVIEW_BYTES) {
         setLoading(false);
         setImageTooLarge(true);
         return;
@@ -328,12 +301,43 @@ export default function FileDrawer(props: {
     }
 
     if (isLikelyBinaryFile(file.name)) {
+      const announceReload = pendingReloadNotice;
       pendingReloadNotice = false;
-      setLoading(false);
       setBinary(true);
       setTruncated(false);
       setOriginalContent("");
       setDraft("");
+      if (targetChanged) {
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
+      keepFocusInDrawer(closeBtnRef);
+      void (async () => {
+        try {
+          const probe = await mcpCall<FileReadResult>(mcpUrl, "file_read", {
+            path: file.path,
+            offset: 0,
+            limit: 1,
+            encoding: "base64",
+          });
+          if (!alive || token !== activeReadToken) return;
+          if (typeof probe?.size === "number" && Number.isFinite(probe.size)) {
+            setFileSize(probe.size);
+          }
+          if (announceReload) {
+            setSaveStatus(t("fileReloaded"));
+          }
+        } catch (err) {
+          if (!alive || token !== activeReadToken) return;
+          setLoadError(err instanceof Error ? err.message : String(err));
+        } finally {
+          if (alive && token === activeReadToken) {
+            setLoading(false);
+            keepFocusInDrawer(closeBtnRef);
+          }
+        }
+      })();
       return;
     }
 
@@ -467,21 +471,35 @@ export default function FileDrawer(props: {
       return;
     }
 
-    if (fileSize() > MAX_DOWNLOAD_BYTES) {
-      setDownloadError(
-        t("downloadTooLarge", {
-          size: formatFileSize(fileSize()),
-          max: formatFileSize(MAX_DOWNLOAD_BYTES),
-        }),
-      );
-      return;
-    }
-
     const token = ++activeDownloadToken;
     setDownloading(true);
     keepFocusInDrawer(closeBtnRef);
 
     try {
+      if (fileSize() > MAX_DOWNLOAD_BYTES) {
+        const probe = await mcpCall<FileReadResult>(mcpUrl, "file_read", {
+          path: file.path,
+          offset: 0,
+          limit: 1,
+          encoding: "base64",
+        });
+        if (!alive || token !== activeDownloadToken) return;
+        const liveSize = typeof probe?.size === "number" &&
+            Number.isFinite(probe.size)
+          ? probe.size
+          : fileSize();
+        setFileSize(liveSize);
+        if (liveSize > MAX_DOWNLOAD_BYTES) {
+          setDownloadError(
+            t("downloadTooLarge", {
+              size: formatFileSize(liveSize),
+              max: formatFileSize(MAX_DOWNLOAD_BYTES),
+            }),
+          );
+          return;
+        }
+      }
+
       const outcome = await readFileBytesChunked(
         mcpUrl,
         file.path,

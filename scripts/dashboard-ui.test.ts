@@ -20,6 +20,7 @@ import {
   isLikelyBinaryFile,
   joinWorkspacePath,
   parentWorkspaceDirectory,
+  readChunkedBase64File,
 } from "../packages/dashboard/src/lib/file-paths.ts";
 import {
   countSessionsByStatus,
@@ -456,6 +457,89 @@ test("file path helpers build clickable breadcrumbs and detect binary files", ()
     "log-10-error.txt",
   ]);
   expect(filterFileEntries(files, "missing")).toEqual([]);
+});
+
+test("readChunkedBase64File handles multi-chunk reads, concurrent growth, empty truncated chunks, and cancellation", async () => {
+  // Multi-chunk byte-exact reassembly
+  const multiChunks = [
+    { content: btoa("hello "), size: 11, truncated: true },
+    { content: btoa("world"), size: 11, truncated: false },
+  ];
+  let idx = 0;
+  const okOutcome = await readChunkedBase64File(
+    async () => multiChunks[idx++]!,
+    32,
+    () => false,
+    6,
+  );
+  expect(okOutcome.ok).toBe(true);
+  if (okOutcome.ok) {
+    const merged = new Uint8Array(
+      okOutcome.chunks.reduce((acc, c) => acc + c.byteLength, 0),
+    );
+    let pos = 0;
+    for (const c of okOutcome.chunks) {
+      merged.set(c, pos);
+      pos += c.byteLength;
+    }
+    expect(new TextDecoder().decode(merged)).toBe("hello world");
+    expect(okOutcome.size).toBe(11);
+  }
+
+  // Reported size exceeds maxBytes -> too_large without decoding content
+  const reportedLarge = await readChunkedBase64File(
+    async () => ({ content: btoa("abc"), size: 100, truncated: true }),
+    10,
+    () => false,
+    4,
+  );
+  expect(reportedLarge).toEqual({ ok: false, reason: "too_large", size: 100 });
+
+  // Concurrent growth with missing/stale size: truncated=true when offset >= maxBytes -> too_large
+  const grownCalls = [
+    { content: btoa("1234"), size: 8, truncated: true },
+    { content: btoa("5678"), size: 8, truncated: true },
+  ];
+  let grownIdx = 0;
+  const grownOutcome = await readChunkedBase64File(
+    async () => grownCalls[grownIdx++]!,
+    8,
+    () => false,
+    4,
+  );
+  expect(grownOutcome).toEqual({ ok: false, reason: "too_large", size: 8 });
+
+  // Single chunk exceeding maxBytes when size is omitted -> too_large
+  const oversizeChunk = await readChunkedBase64File(
+    async () => ({ content: btoa("123456"), truncated: false }),
+    4,
+    () => false,
+    6,
+  );
+  expect(oversizeChunk).toEqual({ ok: false, reason: "too_large", size: 6 });
+
+  // Concurrent shrink / empty chunk while truncated=true -> throws instead of silent partial read
+  await expect(
+    readChunkedBase64File(
+      async () => ({ content: "", size: 10, truncated: true }),
+      32,
+      () => false,
+      4,
+    ),
+  ).rejects.toThrow("Unexpected empty chunk");
+
+  // Cancellation mid-stream
+  let calls = 0;
+  const cancelledOutcome = await readChunkedBase64File(
+    async () => {
+      calls++;
+      return { content: btoa("ab"), size: 6, truncated: true };
+    },
+    32,
+    () => calls >= 1,
+    2,
+  );
+  expect(cancelledOutcome).toEqual({ ok: false, reason: "cancelled" });
 });
 
 test("filterSessions and countSessionsByStatus support multi-term queries and status chips", () => {

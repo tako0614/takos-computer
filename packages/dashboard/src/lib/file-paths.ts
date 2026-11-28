@@ -174,6 +174,78 @@ export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+export interface ChunkedFileReadChunk {
+  content?: string;
+  size?: number;
+  truncated?: boolean;
+}
+
+export type ChunkedReadOutcome =
+  | { ok: true; chunks: Uint8Array<ArrayBuffer>[]; size: number }
+  | { ok: false; reason: "cancelled" }
+  | { ok: false; reason: "too_large"; size: number };
+
+export async function readChunkedBase64File(
+  readChunk: (
+    offset: number,
+    limit: number,
+  ) => Promise<ChunkedFileReadChunk | null | undefined>,
+  maxBytes: number,
+  isCancelled: () => boolean,
+  chunkBytes: number = FILE_READ_CHUNK_BYTES,
+): Promise<ChunkedReadOutcome> {
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let offset = 0;
+  let totalSize = 0;
+
+  while (true) {
+    if (isCancelled()) return { ok: false, reason: "cancelled" };
+    const result = await readChunk(offset, chunkBytes);
+    if (isCancelled()) return { ok: false, reason: "cancelled" };
+
+    const size = typeof result?.size === "number" && Number.isFinite(result.size)
+      ? result.size
+      : totalSize;
+    totalSize = size;
+    if (size > maxBytes) {
+      return { ok: false, reason: "too_large", size };
+    }
+
+    const content = typeof result?.content === "string" ? result.content : "";
+    const bytes = base64ToBytes(content);
+    if (bytes.byteLength > 0) {
+      chunks.push(bytes);
+      offset += bytes.byteLength;
+    }
+
+    if (offset > maxBytes) {
+      return {
+        ok: false,
+        reason: "too_large",
+        size: Math.max(totalSize, offset),
+      };
+    }
+
+    if (!result?.truncated) {
+      break;
+    }
+
+    if (offset >= maxBytes) {
+      return {
+        ok: false,
+        reason: "too_large",
+        size: Math.max(totalSize, offset),
+      };
+    }
+
+    if (bytes.byteLength === 0) {
+      throw new Error("Unexpected empty chunk before end of file");
+    }
+  }
+
+  return { ok: true, chunks, size: Math.max(totalSize, offset) };
+}
+
 export function filterFileEntries<T extends { name: string }>(
   entries: readonly T[],
   rawQuery: string,

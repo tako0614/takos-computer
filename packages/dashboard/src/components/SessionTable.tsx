@@ -116,6 +116,7 @@ export default function SessionTable(props: {
                             <button
                               type="button"
                               class="btn btn-danger btn-sm"
+                              data-session-delete={s.sessionId}
                               aria-label={t("deleteSessionAria", {
                                 id: s.sessionId,
                               })}

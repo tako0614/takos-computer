@@ -60,18 +60,29 @@ export default function FileBrowser(
   let pathInput!: HTMLInputElement;
   let filterInput: HTMLInputElement | undefined;
   let composing = false;
+  let filterComposing = false;
 
   createEffect(() => {
     const next = props.cwd();
+    filterComposing = false;
     setFileFilter("");
     if (!composing && pathInput && pathInput.value !== next) {
       pathInput.value = next;
     }
   });
 
+  // Keep filter input DOM value in sync without interrupting CJK IME composition.
+  createEffect(() => {
+    const next = fileFilter();
+    if (!filterComposing && filterInput && filterInput.value !== next) {
+      filterInput.value = next;
+    }
+  });
+
   // Close drawer & new-file dialog and reset filter when switching sandbox sessions.
   createEffect(() => {
     const _url = props.mcpUrl;
+    filterComposing = false;
     setFileFilter("");
     setSelectedFile(null);
     setNewFileOpen(false);
@@ -120,6 +131,7 @@ export default function FileBrowser(
   });
 
   const clearFileFilter = () => {
+    filterComposing = false;
     setFileFilter("");
     queueMicrotask(() => {
       if (filterInput?.isConnected) {
@@ -277,17 +289,29 @@ export default function FileBrowser(
             <input
               ref={(el) => {
                 filterInput = el;
+                el.value = fileFilter();
               }}
               type="search"
               class="input file-filter-input"
               aria-label={t("filterFiles")}
               placeholder={t("filterFilesPlaceholder")}
-              value={fileFilter()}
-              onInput={(e) => setFileFilter(e.currentTarget.value)}
+              onCompositionStart={() => {
+                filterComposing = true;
+              }}
+              onCompositionEnd={(e) => {
+                filterComposing = false;
+                setFileFilter(e.currentTarget.value);
+              }}
+              onInput={(e) => {
+                if (!e.isComposing && !filterComposing) {
+                  setFileFilter(e.currentTarget.value);
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.isComposing || e.keyCode === 229) return;
                 if (e.key === "Escape" && fileFilter()) {
                   e.preventDefault();
+                  filterComposing = false;
                   setFileFilter("");
                 }
               }}

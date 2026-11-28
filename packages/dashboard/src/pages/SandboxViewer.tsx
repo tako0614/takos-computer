@@ -290,9 +290,7 @@ export default function SandboxViewer() {
         description={t("destroyCurrentConfirm")}
         detail={sessionId()}
         confirmLabel={t("destroy")}
-        confirmBusyLabel={t("destroying")}
         tone="danger"
-        busy={destroyPending()}
         onCancel={() => setDestroyDialogOpen(false)}
         onConfirm={confirmDestroySession}
       />

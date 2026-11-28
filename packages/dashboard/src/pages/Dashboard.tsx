@@ -59,11 +59,20 @@ export default function Dashboard() {
   > = {};
   let active = true;
   let listRequest = 0;
-  let focusAfterRefresh: {
-    request: number;
-    original: HTMLAnchorElement;
-    href: string;
-  } | null = null;
+  let focusAfterRefresh:
+    | {
+        request: number;
+        original: HTMLAnchorElement;
+        kind: "link";
+        href: string;
+      }
+    | {
+        request: number;
+        original: HTMLButtonElement;
+        kind: "button";
+        deleteSessionId: string | null;
+      }
+    | null = null;
 
   createEffect(() => {
     document.title = t("appTitle");
@@ -82,7 +91,18 @@ export default function Dashboard() {
         focusAfterRefresh = null;
         if (original instanceof HTMLAnchorElement && original.closest("tbody")) {
           const href = original.getAttribute("href");
-          if (href) focusAfterRefresh = { request, original, href };
+          if (href) {
+            focusAfterRefresh = { request, original, kind: "link", href };
+          }
+        } else if (
+          original instanceof HTMLButtonElement && original.closest("tbody")
+        ) {
+          focusAfterRefresh = {
+            request,
+            original,
+            kind: "button",
+            deleteSessionId: original.dataset.sessionDelete ?? null,
+          };
         }
       }
       return result;
@@ -118,10 +138,19 @@ export default function Dashboard() {
         !active || focus.request !== listRequest || focus.original.isConnected ||
         document.activeElement !== document.body
       ) return;
-      const link = Array.from(
-        document.querySelectorAll<HTMLAnchorElement>("tbody a"),
-      ).find((link) => link.getAttribute("href") === focus.href);
-      (link ?? refreshButton).focus();
+      let target: HTMLElement | undefined;
+      if (focus.kind === "link") {
+        target = Array.from(
+          document.querySelectorAll<HTMLAnchorElement>("tbody a"),
+        ).find((link) => link.getAttribute("href") === focus.href);
+      } else if (focus.deleteSessionId !== null) {
+        target = Array.from(
+          document.querySelectorAll<HTMLButtonElement>(
+            "tbody button[data-session-delete]",
+          ),
+        ).find((btn) => btn.dataset.sessionDelete === focus.deleteSessionId);
+      }
+      (target ?? refreshButton).focus();
     });
   });
 
@@ -206,11 +235,6 @@ export default function Dashboard() {
     const nextOption = STATUS_FILTER_OPTIONS[nextIndex]!;
     setStatusFilter(nextOption.value);
     statusChipRefs[nextOption.value]?.focus();
-  };
-
-  const pendingDestroyBusy = () => {
-    const id = pendingDestroyId();
-    return id !== null && destroyRequests().has(id);
   };
 
   return (
@@ -402,14 +426,13 @@ export default function Dashboard() {
                 </>
               )}
             </Show>
-            <span>
+            <span role="status" aria-live="polite">
               {autoRefreshPaused() ? t("autoRefreshPaused") : t("autoRefresh")}
             </span>
           </div>
           <button
             type="button"
             class="btn btn-ghost btn-sm footer-refresh-toggle"
-            aria-pressed={autoRefreshPaused()}
             onClick={() => setAutoRefreshPaused((paused) => !paused)}
           >
             {autoRefreshPaused()
@@ -436,9 +459,7 @@ export default function Dashboard() {
           : ""}
         detail={pendingDestroyId() ?? undefined}
         confirmLabel={t("destroy")}
-        confirmBusyLabel={t("destroying")}
         tone="danger"
-        busy={pendingDestroyBusy()}
         onCancel={() => setPendingDestroyId(null)}
         onConfirm={confirmDestroySandbox}
       />
