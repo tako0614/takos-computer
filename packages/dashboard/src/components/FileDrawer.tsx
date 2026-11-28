@@ -11,8 +11,13 @@ import { mcpCall } from "../lib/mcp.ts";
 import { useI18n } from "../i18n.ts";
 import { attachDialogTrap } from "../lib/dialog-a11y.ts";
 import {
+  base64ToBytes,
+  FILE_READ_CHUNK_BYTES,
   formatFileSize,
+  getPreviewImageMimeType,
   isLikelyBinaryFile,
+  MAX_DOWNLOAD_BYTES,
+  MAX_IMAGE_PREVIEW_BYTES,
 } from "../lib/file-paths.ts";
 import ConfirmDialog from "./ConfirmDialog.tsx";
 
@@ -34,6 +39,54 @@ interface FileWriteResult {
   bytes_written: number;
 }
 
+type ChunkedReadOutcome =
+  | { ok: true; chunks: Uint8Array<ArrayBuffer>[]; size: number }
+  | { ok: false; reason: "cancelled" }
+  | { ok: false; reason: "too_large"; size: number };
+
+async function readFileBytesChunked(
+  mcpUrl: string,
+  path: string,
+  maxBytes: number,
+  isCancelled: () => boolean,
+): Promise<ChunkedReadOutcome> {
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let offset = 0;
+  let totalSize = 0;
+
+  while (true) {
+    if (isCancelled()) return { ok: false, reason: "cancelled" };
+    const result = await mcpCall<FileReadResult>(mcpUrl, "file_read", {
+      path,
+      offset,
+      limit: FILE_READ_CHUNK_BYTES,
+      encoding: "base64",
+    });
+    if (isCancelled()) return { ok: false, reason: "cancelled" };
+
+    const size = typeof result?.size === "number" && Number.isFinite(result.size)
+      ? result.size
+      : totalSize;
+    totalSize = size;
+    if (size > maxBytes) {
+      return { ok: false, reason: "too_large", size };
+    }
+
+    const content = typeof result?.content === "string" ? result.content : "";
+    const bytes = base64ToBytes(content);
+    if (bytes.byteLength > 0) {
+      chunks.push(bytes);
+      offset += bytes.byteLength;
+    }
+
+    if (!result?.truncated || bytes.byteLength === 0 || offset >= maxBytes) {
+      break;
+    }
+  }
+
+  return { ok: true, chunks, size: totalSize };
+}
+
 export default function FileDrawer(props: {
   mcpUrl: string;
   file: OpenFileTarget | null;
@@ -52,10 +105,20 @@ export default function FileDrawer(props: {
   const [fileSize, setFileSize] = createSignal(0);
   const [truncated, setTruncated] = createSignal(false);
   const [binary, setBinary] = createSignal(false);
+  const [imagePreviewUrl, setImagePreviewUrl] = createSignal<string | null>(
+    null,
+  );
+  const [imageTooLarge, setImageTooLarge] = createSignal(false);
+  const [imagePreviewFailed, setImagePreviewFailed] = createSignal(false);
+  const [imageDims, setImageDims] = createSignal<
+    { width: number; height: number } | null
+  >(null);
 
   const [saving, setSaving] = createSignal(false);
   const [saveError, setSaveError] = createSignal("");
   const [saveStatus, setSaveStatus] = createSignal("");
+  const [downloading, setDownloading] = createSignal(false);
+  const [downloadError, setDownloadError] = createSignal("");
   const [copyFeedback, setCopyFeedback] = createSignal<
     "copied" | "copyFailed" | null
   >(null);
@@ -73,10 +136,29 @@ export default function FileDrawer(props: {
   let lastLoadedMcpUrl = "";
   let activeReadToken = 0;
   let activeWriteToken = 0;
+  let activeDownloadToken = 0;
+  let currentPreviewUrl: string | null = null;
+  let cachedImageBlob: Blob | null = null;
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const revokePreviewUrl = () => {
+    if (currentPreviewUrl) {
+      URL.revokeObjectURL(currentPreviewUrl);
+      currentPreviewUrl = null;
+    }
+    cachedImageBlob = null;
+    setImagePreviewUrl(null);
+    setImageDims(null);
+    setImageTooLarge(false);
+    setImagePreviewFailed(false);
+  };
 
   onCleanup(() => {
     alive = false;
+    activeReadToken++;
+    activeWriteToken++;
+    activeDownloadToken++;
+    revokePreviewUrl();
     if (copyTimer !== undefined) clearTimeout(copyTimer);
   });
 
@@ -134,12 +216,16 @@ export default function FileDrawer(props: {
     const _nonce = reloadNonce();
     activeReadToken++;
     activeWriteToken++;
+    activeDownloadToken++;
     const token = activeReadToken;
     composing = false;
 
+    revokePreviewUrl();
     setDiscardAction(null);
     setSaveError("");
     setSaveStatus("");
+    setDownloadError("");
+    setDownloading(false);
     setCopyFeedback(null);
     setSaving(false);
 
@@ -183,6 +269,62 @@ export default function FileDrawer(props: {
 
     if (targetChanged) {
       setIsNewFile(false);
+    }
+
+    const imageMime = getPreviewImageMimeType(file.name);
+    if (imageMime) {
+      const announceReload = pendingReloadNotice;
+      pendingReloadNotice = false;
+      setBinary(true);
+      setTruncated(false);
+      setOriginalContent("");
+      setDraft("");
+
+      if (file.size > MAX_IMAGE_PREVIEW_BYTES) {
+        setLoading(false);
+        setImageTooLarge(true);
+        return;
+      }
+
+      setLoading(true);
+      keepFocusInDrawer(closeBtnRef);
+
+      void (async () => {
+        try {
+          const outcome = await readFileBytesChunked(
+            mcpUrl,
+            file.path,
+            MAX_IMAGE_PREVIEW_BYTES,
+            () => !alive || token !== activeReadToken,
+          );
+          if (!alive || token !== activeReadToken) return;
+          if (!outcome.ok) {
+            if (outcome.reason === "too_large") {
+              setFileSize(outcome.size);
+              setImageTooLarge(true);
+            }
+            return;
+          }
+          const blob = new Blob(outcome.chunks, { type: imageMime });
+          const objectUrl = URL.createObjectURL(blob);
+          currentPreviewUrl = objectUrl;
+          cachedImageBlob = blob;
+          setFileSize(outcome.size);
+          setImagePreviewUrl(objectUrl);
+          if (announceReload) {
+            setSaveStatus(t("fileReloaded"));
+          }
+        } catch (err) {
+          if (!alive || token !== activeReadToken) return;
+          setLoadError(err instanceof Error ? err.message : String(err));
+        } finally {
+          if (alive && token === activeReadToken) {
+            setLoading(false);
+            keepFocusInDrawer(closeBtnRef);
+          }
+        }
+      })();
+      return;
     }
 
     if (isLikelyBinaryFile(file.name)) {
@@ -291,7 +433,7 @@ export default function FileDrawer(props: {
   });
 
   const triggerReload = () => {
-    if (loading() || saving() || isNewFile()) return;
+    if (loading() || saving() || downloading() || isNewFile()) return;
     if (isDirty()) {
       setDiscardAction("reload");
       return;
@@ -299,6 +441,84 @@ export default function FileDrawer(props: {
     pendingReloadNotice = true;
     keepFocusInDrawer(closeBtnRef);
     setReloadNonce((n) => n + 1);
+  };
+
+  const triggerBrowserDownload = (blob: Blob, filename: string) => {
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = filename;
+    link.style.display = "none";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 1000);
+  };
+
+  const downloadFile = async () => {
+    const file = props.file;
+    const mcpUrl = props.mcpUrl;
+    if (!file || isNewFile() || loading() || saving() || downloading()) return;
+
+    setDownloadError("");
+
+    if (cachedImageBlob) {
+      triggerBrowserDownload(cachedImageBlob, file.name);
+      return;
+    }
+
+    if (fileSize() > MAX_DOWNLOAD_BYTES) {
+      setDownloadError(
+        t("downloadTooLarge", {
+          size: formatFileSize(fileSize()),
+          max: formatFileSize(MAX_DOWNLOAD_BYTES),
+        }),
+      );
+      return;
+    }
+
+    const token = ++activeDownloadToken;
+    setDownloading(true);
+    keepFocusInDrawer(closeBtnRef);
+
+    try {
+      const outcome = await readFileBytesChunked(
+        mcpUrl,
+        file.path,
+        MAX_DOWNLOAD_BYTES,
+        () => !alive || token !== activeDownloadToken,
+      );
+      if (!alive || token !== activeDownloadToken) return;
+      if (!outcome.ok) {
+        if (outcome.reason === "too_large") {
+          setFileSize(outcome.size);
+          setDownloadError(
+            t("downloadTooLarge", {
+              size: formatFileSize(outcome.size),
+              max: formatFileSize(MAX_DOWNLOAD_BYTES),
+            }),
+          );
+        }
+        return;
+      }
+      setFileSize(outcome.size);
+      const mimeType = getPreviewImageMimeType(file.name) ??
+        "application/octet-stream";
+      const blob = new Blob(outcome.chunks, { type: mimeType });
+      triggerBrowserDownload(blob, file.name);
+    } catch (err) {
+      if (!alive || token !== activeDownloadToken) return;
+      setDownloadError(
+        t("downloadFailed", {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+    } finally {
+      if (alive && token === activeDownloadToken) {
+        setDownloading(false);
+        keepFocusInDrawer(editorRef ?? closeBtnRef);
+      }
+    }
   };
 
   const copyPath = async () => {
@@ -399,7 +619,7 @@ export default function FileDrawer(props: {
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby={`${id}-title`}
-                aria-busy={loading() || saving()}
+                aria-busy={loading() || saving() || downloading()}
                 tabIndex={-1}
                 onKeyDown={onDrawerKeyDown}
               >
@@ -467,6 +687,14 @@ export default function FileDrawer(props: {
                     )}
                   </Show>
 
+                  <Show when={downloadError()}>
+                    {(message) => (
+                      <div role="alert" class="alert-banner">
+                        {message()}
+                      </div>
+                    )}
+                  </Show>
+
                   <Show when={saveStatus()}>
                     {(message) => (
                       <div
@@ -513,11 +741,46 @@ export default function FileDrawer(props: {
                       <Show
                         when={!binary()}
                         fallback={
-                          <div class="info-banner" role="status">
-                            {t("binaryFileNotice", {
-                              size: formatFileSize(fileSize()),
-                            })}
-                          </div>
+                          <Show
+                            when={!imagePreviewFailed()
+                              ? imagePreviewUrl()
+                              : null}
+                            fallback={
+                              <div class="info-banner" role="status">
+                                {imageTooLarge()
+                                  ? t("imageTooLargeNotice", {
+                                    size: formatFileSize(fileSize()),
+                                    max: formatFileSize(MAX_IMAGE_PREVIEW_BYTES),
+                                  })
+                                  : imagePreviewFailed()
+                                  ? t("imagePreviewFailed", {
+                                    size: formatFileSize(fileSize()),
+                                  })
+                                  : t("binaryFileNotice", {
+                                    size: formatFileSize(fileSize()),
+                                  })}
+                              </div>
+                            }
+                          >
+                            {(url) => (
+                              <div class="drawer-image-stage">
+                                <img
+                                  src={url()}
+                                  alt={file().name}
+                                  class="drawer-image-preview"
+                                  onLoad={(e) => {
+                                    setImageDims({
+                                      width: e.currentTarget.naturalWidth,
+                                      height: e.currentTarget.naturalHeight,
+                                    });
+                                  }}
+                                  onError={() => {
+                                    setImagePreviewFailed(true);
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </Show>
                         }
                       >
                         <Show when={truncated()}>
@@ -561,6 +824,16 @@ export default function FileDrawer(props: {
                 <div class="drawer-footer">
                   <div class="drawer-meta muted">
                     <span class="mono">{formatFileSize(fileSize())}</span>
+                    <Show when={imageDims()}>
+                      {(dims) => (
+                        <>
+                          <span>&middot;</span>
+                          <span class="mono">
+                            {dims().width}&times;{dims().height} px
+                          </span>
+                        </>
+                      )}
+                    </Show>
                     <Show when={!loading() && !loadError() && !binary()}>
                       <span>&middot;</span>
                       <span>{t("linesCount", { count: lineCount() })}</span>
@@ -572,11 +845,24 @@ export default function FileDrawer(props: {
                     </Show>
                   </div>
                   <div class="drawer-actions">
+                    <Show when={!isNewFile() && !loadError()}>
+                      <button
+                        type="button"
+                        class={`btn btn-sm ${
+                          readOnly() ? "btn-primary" : "btn-ghost"
+                        }`}
+                        disabled={loading() || saving() || downloading()}
+                        aria-busy={downloading()}
+                        onClick={() => void downloadFile()}
+                      >
+                        {downloading() ? t("downloading") : t("download")}
+                      </button>
+                    </Show>
                     <Show when={!isNewFile()}>
                       <button
                         type="button"
                         class="btn btn-ghost btn-sm"
-                        disabled={loading() || saving()}
+                        disabled={loading() || saving() || downloading()}
                         onClick={triggerReload}
                       >
                         {t("reload")}

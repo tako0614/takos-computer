@@ -18,7 +18,7 @@ const destroyRequests = [], heldDestroys = [], dialogs = [];
 const listRequests = [], heldLists = [], listNetwork = [], deliveredLists = [];
 let holdNextList = false, nextListMode = "rows";
 let nextId = 1, ws, chrome, chromeExit, profile, fixturePort, debugPort, fatal = null;
-let chromeStderr = "", confirmAccept = false, nextDestroyOutcome = "refusal";
+let chromeStderr = "", nextDestroyOutcome = "refusal";
 let creates = 0, cleanup = {}, browserVersion;
 const entry = (name, type = "file") => ({ name, type, size: 24, modified: "2026-01-01T00:00:00.000Z" });
 const otherSessionId = "synthetic-session-with-a-long-identifier-1234567890";
@@ -169,7 +169,7 @@ try {
   fixturePort = await listen(server);
   debugPort = await reserve();
   profile = await mkdtemp(join(tmpdir(), "computer-dashboard-action-chrome-"));
-  chrome = spawn("google-chrome", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--no-first-run", "--no-default-browser-check", "--remote-debugging-address=127.0.0.1", `--remote-debugging-port=${debugPort}`, "--remote-allow-origins=*", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+  chrome = spawn("google-chrome", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--password-store=basic", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--no-first-run", "--no-default-browser-check", "--remote-debugging-address=127.0.0.1", `--remote-debugging-port=${debugPort}`, "--remote-allow-origins=*", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
   chrome.stderr.on("data", (chunk) => {
     chromeStderr = (chromeStderr + chunk.toString()).slice(0, 65536);
   });
@@ -208,11 +208,9 @@ try {
     } else if (m.method === "Network.loadingFinished") networkFinished.add(m.params.requestId);
     else if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
     else if (m.method === "Page.javascriptDialogOpening") {
-      const accept = m.params.type === "confirm" ? confirmAccept : true;
-      dialogs.push({ type: m.params.type, message: m.params.message, accepted: accept });
-      actions.push({ action: "answer synthetic lifecycle confirmation", kind: "native-confirm", accepted: accept, at: Date.now() });
-      if (m.params.type !== "confirm") errors.push("unexpected native dialog " + m.params.type);
-      const task = cdp("Page.handleJavaScriptDialog", { accept }).catch((e) => interceptorErrors.push(e.message)).finally(() => tasks.delete(task));
+      dialogs.push({ type: m.params.type, message: m.params.message, accepted: false });
+      errors.push("unexpected native dialog " + m.params.type);
+      const task = cdp("Page.handleJavaScriptDialog", { accept: false }).catch((e) => interceptorErrors.push(e.message)).finally(() => tasks.delete(task));
       tasks.add(task);
     } else if (m.method === "Fetch.requestPaused") {
       const u = new URL(m.params.request.url);
@@ -241,6 +239,9 @@ try {
   const open = (id) => `(${row(id)})?.querySelector('a')`;
   const isPending = (id) => `(${remove(id)})?.getAttribute('aria-disabled')==='true'&&(${remove(id)})?.getAttribute('aria-busy')==='true'`;
   const refresh = `[...document.querySelectorAll('button')].find(e=>['Refresh sessions','一覧を更新'].includes(e.textContent.trim()))`;
+  const alertDialog = `document.querySelector('[role="alertdialog"]')`;
+  const dialogCancel = `document.querySelector('[role="alertdialog"] button.btn-ghost')`;
+  const dialogConfirm = `document.querySelector('[role="alertdialog"] button.btn-danger')`;
   async function until(predicate, label) {
     const end = Date.now() + 3000;
     while (!predicate() && Date.now() < end) await delay(20);
@@ -249,10 +250,20 @@ try {
   async function paint() {
     await ev("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
   }
+  async function cancelDelete(id, label) {
+    await click(remove(id), label + " (open dialog)");
+    await wait(alertDialog, "destroy confirmation dialog");
+    await click(dialogCancel, label + " (cancel)");
+    await wait(`!(${alertDialog})`, "destroy confirmation dialog closed");
+    await paint();
+  }
   async function beginDelete(id, outcome = "refusal") {
-    nextDestroyOutcome = outcome; confirmAccept = true;
+    nextDestroyOutcome = outcome;
     const before = destroyRequests.length;
-    await click(remove(id), "confirm no-op row deletion " + id + " " + outcome);
+    await click(remove(id), "open confirm dialog for " + id + " " + outcome);
+    await wait(alertDialog, "destroy confirmation dialog");
+    await click(dialogConfirm, "confirm no-op row deletion " + id + " " + outcome);
+    await wait(`!(${alertDialog})`, "destroy confirmation dialog closed");
     await until(() => destroyRequests.length === before + 1, "original row DELETE not captured");
     return destroyRequests.at(-1);
   }
@@ -280,14 +291,12 @@ try {
     await wait(`location.pathname.endsWith('/${otherSessionId}')&&document.body.innerText.includes('b-root.txt')`, "actual B Viewer");
   }
   await navigate("/gui"); await wait(remove("synthetic"), "actual row controls");
-  confirmAccept = false;
-  await click(remove("synthetic"), "cancel no-op row deletion");
-  check("cancel preserves rows without DELETE", destroyRequests.length === 0 && await ev(`!!(${row("synthetic")})`), destroyRequests);
+  await cancelDelete("synthetic", "cancel no-op row deletion");
+  check("cancel preserves rows without DELETE", destroyRequests.length === 0 && dialogs.length === 0 && await ev(`!!(${row("synthetic")})`), destroyRequests);
   const a = await beginDelete("synthetic");
   check("only pending A advertises disabled busy state with focus preserved", await ev(`(${isPending("synthetic")})&&!(${isPending(otherSessionId)})&&document.activeElement===(${remove("synthetic")})`), await snap("01-A-pending"));
-  const confirmsBefore = dialogs.length;
   await key("Enter"); await delay(60);
-  check("pending A repeated Enter is rejected before confirmation and DELETE", destroyRequests.length === 1 && dialogs.length === confirmsBefore, { destroyRequests, dialogs });
+  check("pending A repeated Enter is rejected before confirmation and DELETE", destroyRequests.length === 1 && dialogs.length === 0 && await ev(`!(${alertDialog})`), { destroyRequests, dialogs });
   const b = await beginDelete(otherSessionId);
   check("different B remains actionable while A is pending", a.sessionId === "synthetic" && b.sessionId === otherSessionId && await ev(`(${isPending("synthetic")})&&(${isPending(otherSessionId)})`), await snap("02-both-pending"));
   await releaseDelete(b);
@@ -304,8 +313,8 @@ try {
   await click(button("English"), "return row controls to English");
   await cdp("Emulation.setDeviceMetricsOverride", { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
   const countBeforeCancel = destroyRequests.length;
-  confirmAccept = false; await click(remove("synthetic"), "cancel explicit retry");
-  check("cancelled retry preserves original uncertainty without another request", destroyRequests.length === countBeforeCancel && await ev(`document.querySelectorAll('[role=alert]').length===2`), destroyRequests);
+  await cancelDelete("synthetic", "cancel explicit retry");
+  check("cancelled retry preserves original uncertainty without another request", destroyRequests.length === countBeforeCancel && dialogs.length === 0 && await ev(`document.querySelectorAll('[role=alert]').length===2`), destroyRequests);
   const retry = await beginDelete("synthetic", "success");
   check("only explicit A retry clears A alert and preserves B alert", await ev(`document.querySelectorAll('[role=alert]').length===1&&document.querySelector('[role=alert]').textContent.includes(${JSON.stringify(otherSessionId)})`), await snap("06-A-retry"));
   holdNextList = true;

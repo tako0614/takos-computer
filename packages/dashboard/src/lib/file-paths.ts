@@ -142,6 +142,51 @@ export function isLikelyBinaryFile(name: string, content?: string): boolean {
   return false;
 }
 
+export const FILE_READ_CHUNK_BYTES = 256 * 1024;
+export const MAX_IMAGE_PREVIEW_BYTES = 4 * 1024 * 1024;
+export const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+
+const PREVIEW_IMAGE_MIME_TYPES: Record<string, string> = {
+  ".bmp": "image/bmp",
+  ".gif": "image/gif",
+  ".ico": "image/x-icon",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+};
+
+export function getPreviewImageMimeType(name: string): string | null {
+  const lower = name.toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  if (dot <= 0) return null;
+  return PREVIEW_IMAGE_MIME_TYPES[lower.slice(dot)] ?? null;
+}
+
+export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  if (!base64) return new Uint8Array(new ArrayBuffer(0));
+  const binary = atob(base64);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+export function filterFileEntries<T extends { name: string }>(
+  entries: readonly T[],
+  rawQuery: string,
+): T[] {
+  const normalized = rawQuery.trim().toLowerCase();
+  if (!normalized) return [...entries];
+  const terms = normalized.split(/\s+/).filter(Boolean);
+  return entries.filter((entry) => {
+    const lowerName = entry.name.toLowerCase();
+    return terms.every((term) => lowerName.includes(term));
+  });
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} K`;

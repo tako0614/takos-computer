@@ -9,19 +9,37 @@ import {
 } from "solid-js";
 import { sandboxSessions } from "../lib/api.ts";
 import { formatClockTime } from "../lib/format-time.ts";
-import { filterSessions } from "../lib/session-filter.ts";
+import {
+  countSessionsByStatus,
+  filterSessions,
+  type SessionStatusFilter,
+} from "../lib/session-filter.ts";
 import SessionTable from "../components/SessionTable.tsx";
 import CreateModal from "../components/CreateModal.tsx";
 import ConfirmDialog from "../components/ConfirmDialog.tsx";
 import LanguageSwitcher from "../components/LanguageSwitcher.tsx";
 import ThemeSwitcher from "../components/ThemeSwitcher.tsx";
-import { useI18n } from "../i18n.ts";
+import { type TranslationKey, useI18n } from "../i18n.ts";
+
+const STATUS_FILTER_OPTIONS: ReadonlyArray<{
+  value: SessionStatusFilter;
+  labelKey: TranslationKey;
+}> = [
+  { value: "all", labelKey: "statusAll" },
+  { value: "active", labelKey: "statusActive" },
+  { value: "starting", labelKey: "statusStarting" },
+  { value: "stopped", labelKey: "statusStopped" },
+];
 
 export default function Dashboard() {
   const { language, t } = useI18n();
   const [modalOpen, setModalOpen] = createSignal(false);
   const [version, setVersion] = createSignal(0);
   const [searchQuery, setSearchQuery] = createSignal("");
+  const [statusFilter, setStatusFilter] = createSignal<SessionStatusFilter>(
+    "all",
+  );
+  const [autoRefreshPaused, setAutoRefreshPaused] = createSignal(false);
   const [lastUpdated, setLastUpdated] = createSignal<Date | null>(null);
   const [pendingDestroyId, setPendingDestroyId] = createSignal<string | null>(
     null,
@@ -36,6 +54,9 @@ export default function Dashboard() {
   const reload = () => setVersion((v) => v + 1);
   let refreshButton!: HTMLButtonElement;
   let searchInput: HTMLInputElement | undefined;
+  const statusChipRefs: Partial<
+    Record<SessionStatusFilter, HTMLButtonElement>
+  > = {};
   let active = true;
   let listRequest = 0;
   let focusAfterRefresh: {
@@ -69,10 +90,13 @@ export default function Dashboard() {
   );
 
   const allSessions = createMemo(() => sandboxData()?.sessions ?? []);
+  const statusCounts = createMemo(() => countSessionsByStatus(allSessions()));
   const filteredSessions = createMemo(() =>
-    filterSessions(allSessions(), searchQuery())
+    filterSessions(allSessions(), searchQuery(), statusFilter())
   );
-  const isFiltering = createMemo(() => searchQuery().trim().length > 0);
+  const isFiltering = createMemo(() =>
+    searchQuery().trim().length > 0 || statusFilter() !== "all"
+  );
   const countLabel = createMemo(() => {
     const total = allSessions().length;
     const shown = filteredSessions().length;
@@ -101,7 +125,9 @@ export default function Dashboard() {
     });
   });
 
-  const timer = setInterval(reload, 10_000);
+  const timer = setInterval(() => {
+    if (!autoRefreshPaused()) reload();
+  }, 10_000);
   onCleanup(() => {
     active = false;
     clearInterval(timer);
@@ -115,6 +141,7 @@ export default function Dashboard() {
   const confirmDestroySandbox = async () => {
     const id = pendingDestroyId();
     if (!id || destroyRequests().has(id)) return;
+    setPendingDestroyId(null);
     const request = {};
     setDestroyRequests((previous) => new Map(previous).set(id, request));
     setUnconfirmedDestroys((previous) => {
@@ -138,15 +165,47 @@ export default function Dashboard() {
           return next;
         });
       }
-      if (active && pendingDestroyId() === id) {
-        setPendingDestroyId(null);
-      }
     }
   };
 
   const clearSearch = () => {
     setSearchQuery("");
     searchInput?.focus();
+  };
+
+  const clearAllFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("all");
+    queueMicrotask(() => {
+      if (active && searchInput?.isConnected) {
+        searchInput.focus();
+      } else if (active && refreshButton?.isConnected) {
+        refreshButton.focus();
+      }
+    });
+  };
+
+  const onStatusChipKeyDown = (
+    event: KeyboardEvent,
+    currentIndex: number,
+  ) => {
+    if (event.isComposing || event.keyCode === 229) return;
+    const total = STATUS_FILTER_OPTIONS.length;
+    let nextIndex = -1;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = (currentIndex + 1) % total;
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = (currentIndex - 1 + total) % total;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = total - 1;
+    }
+    if (nextIndex === -1) return;
+    event.preventDefault();
+    const nextOption = STATUS_FILTER_OPTIONS[nextIndex]!;
+    setStatusFilter(nextOption.value);
+    statusChipRefs[nextOption.value]?.focus();
   };
 
   const pendingDestroyBusy = () => {
@@ -239,43 +298,75 @@ export default function Dashboard() {
               (allSessions().length > 0 || isFiltering())}
           >
             <div class="session-toolbar">
-              <div class="session-search-wrap">
-                <input
-                  ref={(el) => {
-                    searchInput = el;
-                  }}
-                  type="search"
-                  class="input session-search-input"
-                  aria-label={t("searchSessions")}
-                  placeholder={t("searchSessionsPlaceholder")}
-                  value={searchQuery()}
-                  onInput={(e) => setSearchQuery(e.currentTarget.value)}
-                  onKeyDown={(e) => {
-                    if (e.isComposing || e.keyCode === 229) return;
-                    if (e.key === "Escape" && searchQuery()) {
-                      e.preventDefault();
-                      setSearchQuery("");
-                    }
-                  }}
-                />
-                <Show when={searchQuery().length > 0}>
-                  <button
-                    type="button"
-                    class="btn btn-ghost btn-sm session-search-clear"
-                    aria-label={t("clearSearch")}
-                    onClick={clearSearch}
-                  >
-                    {t("clear")}
-                  </button>
-                </Show>
+              <div class="session-toolbar-top">
+                <div class="session-search-wrap">
+                  <input
+                    ref={(el) => {
+                      searchInput = el;
+                    }}
+                    type="search"
+                    class="input session-search-input"
+                    aria-label={t("searchSessions")}
+                    placeholder={t("searchSessionsPlaceholder")}
+                    value={searchQuery()}
+                    onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      if (e.isComposing || e.keyCode === 229) return;
+                      if (e.key === "Escape" && searchQuery()) {
+                        e.preventDefault();
+                        setSearchQuery("");
+                      }
+                    }}
+                  />
+                  <Show when={searchQuery().length > 0}>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm session-search-clear"
+                      aria-label={t("clearSearch")}
+                      onClick={clearSearch}
+                    >
+                      {t("clear")}
+                    </button>
+                  </Show>
+                </div>
+                <span
+                  class="muted session-count"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {countLabel()}
+                </span>
               </div>
-              <span
-                class="muted session-count"
-                role="status"
-                aria-live="polite"
+              <div
+                class="status-filter-group"
+                role="radiogroup"
+                aria-label={t("filterByStatus")}
               >
-                {countLabel()}
-              </span>
+                <For each={STATUS_FILTER_OPTIONS}>
+                  {(option, index) => {
+                    const selected = () => statusFilter() === option.value;
+                    const count = () => statusCounts()[option.value];
+                    return (
+                      <button
+                        ref={(el) => {
+                          statusChipRefs[option.value] = el;
+                        }}
+                        type="button"
+                        role="radio"
+                        class="filter-chip"
+                        classList={{ active: selected() }}
+                        aria-checked={selected()}
+                        tabIndex={selected() ? 0 : -1}
+                        onClick={() => setStatusFilter(option.value)}
+                        onKeyDown={(e) => onStatusChipKeyDown(e, index())}
+                      >
+                        <span>{t(option.labelKey)}</span>
+                        <span class="filter-chip-count mono">{count()}</span>
+                      </button>
+                    );
+                  }}
+                </For>
+              </div>
             </div>
           </Show>
 
@@ -289,7 +380,7 @@ export default function Dashboard() {
               sessions={filteredSessions()}
               loading={sandboxData.loading && !sandboxData.latest}
               filtered={isFiltering()}
-              onClearFilter={clearSearch}
+              onClearFilter={clearAllFilters}
               onCreate={() => setModalOpen(true)}
               onDestroy={requestDestroySandbox}
               destroyPending={(id) => destroyRequests().has(id)}
@@ -298,19 +389,33 @@ export default function Dashboard() {
         </Show>
 
         <div class="muted footer-note">
-          <Show when={lastUpdated()}>
-            {(date) => (
-              <>
-                <span>
-                  {t("lastUpdated", {
-                    time: formatClockTime(date(), language()),
-                  })}
-                </span>
-                <span aria-hidden="true"> &middot; </span>
-              </>
-            )}
-          </Show>
-          <span>{t("autoRefresh")}</span>
+          <div class="footer-note-info">
+            <Show when={lastUpdated()}>
+              {(date) => (
+                <>
+                  <span>
+                    {t("lastUpdated", {
+                      time: formatClockTime(date(), language()),
+                    })}
+                  </span>
+                  <span aria-hidden="true"> &middot; </span>
+                </>
+              )}
+            </Show>
+            <span>
+              {autoRefreshPaused() ? t("autoRefreshPaused") : t("autoRefresh")}
+            </span>
+          </div>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm footer-refresh-toggle"
+            aria-pressed={autoRefreshPaused()}
+            onClick={() => setAutoRefreshPaused((paused) => !paused)}
+          >
+            {autoRefreshPaused()
+              ? t("resumeAutoRefresh")
+              : t("pauseAutoRefresh")}
+          </button>
         </div>
       </main>
 

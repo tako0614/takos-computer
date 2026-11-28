@@ -12,13 +12,19 @@ import {
   THEME_STORAGE_KEY,
 } from "../packages/dashboard/src/lib/theme.ts";
 import {
+  base64ToBytes,
   buildBreadcrumbs,
+  filterFileEntries,
   formatFileSize,
+  getPreviewImageMimeType,
   isLikelyBinaryFile,
   joinWorkspacePath,
   parentWorkspaceDirectory,
 } from "../packages/dashboard/src/lib/file-paths.ts";
-import { filterSessions } from "../packages/dashboard/src/lib/session-filter.ts";
+import {
+  countSessionsByStatus,
+  filterSessions,
+} from "../packages/dashboard/src/lib/session-filter.ts";
 import {
   attachDialogTrap,
   getOpenDialogCount,
@@ -151,6 +157,22 @@ test("dashboard i18n translates key UI labels in both en and ja with interpolati
     "validationSessionIdInvalid",
     "workspaceRoot",
     "workspaceRootLabel",
+    "autoRefreshPaused",
+    "clearFileFilter",
+    "download",
+    "downloading",
+    "fileCountOne",
+    "filterByStatus",
+    "filterFiles",
+    "filterFilesPlaceholder",
+    "noMatchingFiles",
+    "noMatchingFilesHint",
+    "pauseAutoRefresh",
+    "resumeAutoRefresh",
+    "statusActive",
+    "statusAll",
+    "statusStarting",
+    "statusStopped",
   ];
 
   for (const lang of ["en", "ja"] as const) {
@@ -159,6 +181,15 @@ test("dashboard i18n translates key UI labels in both en and ja with interpolati
       expect(t(key).trim().length).toBeGreaterThan(0);
     }
     expect(t("cpuMemLabel", { cpu: "1.2", mem: "3.4" })).toContain("1.2");
+    expect(t("downloadFailed", { message: "network" })).toContain("network");
+    expect(t("downloadTooLarge", { size: "30.0 M", max: "20.0 M" })).toContain(
+      "20.0 M",
+    );
+    expect(t("fileCount", { count: 12 })).toContain("12");
+    expect(t("fileMatchCount", { shown: 2, total: 12 })).toContain("12");
+    expect(t("imagePreviewFailed", { size: "4.0 K" })).toContain("4.0 K");
+    expect(t("imageTooLargeNotice", { size: "8.0 M", max: "4.0 M" }))
+      .toContain("4.0 M");
     expect(t("lastUpdated", { time: "12:34:56" })).toContain("12:34:56");
     expect(t("validationSessionIdReserved", { prefix: "pmcp-" })).toContain(
       "pmcp-",
@@ -295,14 +326,24 @@ test("dashboard CSS tokens meet WCAG AA (>= 4.5:1) contrast in dark and light th
   }
 
   // Banner button contrast: .status-banner .btn-ghost inherits --tc-status-fg on
-  // --tc-status-bg (already verified >= 4.5:1 above), and .alert-banner-row .btn-ghost
-  // renders --tc-fg-muted over --tc-alert-bg (composited over --tc-bg in dark mode).
+  // --tc-status-bg (already verified >= 4.5:1 above), and .alert-banner-row/.panel-error
+  // .btn-ghost renders --tc-alert-fg over --tc-alert-bg (composited over --tc-bg in dark mode).
   expect(css).toContain(".status-banner .btn-ghost {\n  color: inherit;");
-  expect(contrastRatio(lightTokens["--tc-fg-muted"]!, lightTokens["--tc-alert-bg"]!))
+  expect(css).toContain(
+    ".alert-banner-row .btn-ghost,\n.panel-error .btn-ghost {\n  color: var(--tc-alert-fg);",
+  );
+  expect(contrastRatio(lightTokens["--tc-alert-fg"]!, lightTokens["--tc-alert-bg"]!))
     .toBeGreaterThanOrEqual(4.5);
   // Dark --tc-alert-bg is rgba(127, 29, 29, 0.35) over --tc-bg (#0f172a) -> #381823.
-  expect(contrastRatio(darkTokens["--tc-fg-muted"]!, "#381823"))
+  expect(contrastRatio(darkTokens["--tc-alert-fg"]!, "#381823"))
     .toBeGreaterThanOrEqual(4.5);
+  // Status filter chips: inactive --tc-fg-muted on --tc-surface-subtle meets WCAG AA.
+  expect(
+    contrastRatio(darkTokens["--tc-fg-muted"]!, darkTokens["--tc-surface-subtle"]!),
+  ).toBeGreaterThanOrEqual(4.5);
+  expect(
+    contrastRatio(lightTokens["--tc-fg-muted"]!, lightTokens["--tc-surface-subtle"]!),
+  ).toBeGreaterThanOrEqual(4.5);
 });
 
 test("dashboard index.html includes favicon, color-scheme, theme-color, and pre-hydration theme guard", () => {
@@ -382,9 +423,42 @@ test("file path helpers build clickable breadcrumbs and detect binary files", ()
   expect(formatFileSize(512)).toBe("512 B");
   expect(formatFileSize(2048)).toBe("2.0 K");
   expect(formatFileSize(2 * 1024 * 1024)).toBe("2.0 M");
+
+  expect(getPreviewImageMimeType("photo.PNG")).toBe("image/png");
+  expect(getPreviewImageMimeType("avatar.jpg")).toBe("image/jpeg");
+  expect(getPreviewImageMimeType("banner.webp")).toBe("image/webp");
+  expect(getPreviewImageMimeType("icon.ico")).toBe("image/x-icon");
+  expect(getPreviewImageMimeType("vector.svg")).toBeNull();
+  expect(getPreviewImageMimeType("notes.txt")).toBeNull();
+  expect(getPreviewImageMimeType(".png")).toBeNull();
+
+  expect(Array.from(base64ToBytes(""))).toEqual([]);
+  expect(Array.from(base64ToBytes(btoa("hello")))).toEqual([
+    104,
+    101,
+    108,
+    108,
+    111,
+  ]);
+  expect(Array.from(base64ToBytes("AAEC/w=="))).toEqual([0, 1, 2, 255]);
+
+  const files = [
+    { name: "src", type: "directory" as const },
+    { name: "README.md", type: "file" as const },
+    { name: "log-01.txt", type: "file" as const },
+    { name: "log-10-error.txt", type: "file" as const },
+  ];
+  expect(filterFileEntries(files, "")).toHaveLength(4);
+  expect(filterFileEntries(files, "readme").map((f) => f.name)).toEqual([
+    "README.md",
+  ]);
+  expect(filterFileEntries(files, "log error").map((f) => f.name)).toEqual([
+    "log-10-error.txt",
+  ]);
+  expect(filterFileEntries(files, "missing")).toEqual([]);
 });
 
-test("filterSessions matches across sessionId, spaceId, userId, and status with multi-term queries", () => {
+test("filterSessions and countSessionsByStatus support multi-term queries and status chips", () => {
   const sessions = [
     {
       sessionId: "alpha-dev",
@@ -392,6 +466,13 @@ test("filterSessions matches across sessionId, spaceId, userId, and status with 
       userId: "alice",
       status: "active" as const,
       createdAt: "2026-11-27T00:00:00Z",
+    },
+    {
+      sessionId: "gamma-boot",
+      spaceId: "space-one",
+      userId: "alice",
+      status: "starting" as const,
+      createdAt: "2026-11-27T00:30:00Z",
     },
     {
       sessionId: "beta-prod",
@@ -402,11 +483,23 @@ test("filterSessions matches across sessionId, spaceId, userId, and status with 
     },
   ];
 
-  expect(filterSessions(sessions, "")).toHaveLength(2);
+  expect(countSessionsByStatus(sessions)).toEqual({
+    all: 3,
+    active: 1,
+    starting: 1,
+    stopped: 1,
+  });
+
+  expect(filterSessions(sessions, "")).toHaveLength(3);
   expect(filterSessions(sessions, "  ALPHA ")).toEqual([sessions[0]]);
-  expect(filterSessions(sessions, "space-two")).toEqual([sessions[1]]);
-  expect(filterSessions(sessions, "bob stopped")).toEqual([sessions[1]]);
+  expect(filterSessions(sessions, "space-two")).toEqual([sessions[2]]);
+  expect(filterSessions(sessions, "bob stopped")).toEqual([sessions[2]]);
   expect(filterSessions(sessions, "alice stopped")).toEqual([]);
+  expect(filterSessions(sessions, "", "active")).toEqual([sessions[0]]);
+  expect(filterSessions(sessions, "", "starting")).toEqual([sessions[1]]);
+  expect(filterSessions(sessions, "", "stopped")).toEqual([sessions[2]]);
+  expect(filterSessions(sessions, "alice", "starting")).toEqual([sessions[1]]);
+  expect(filterSessions(sessions, "alice", "stopped")).toEqual([]);
 });
 
 test("attachDialogTrap handles stacking, IME-safe Escape, Shift+Tab from panel, inert ref-counting, and #main fallback", async () => {

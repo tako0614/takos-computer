@@ -31,6 +31,11 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" });
       return res.end(html);
     }
+    if (req.method === "GET" && ["/gui/manifest.webmanifest", "/gui/icons/icon-192.png", "/gui/icons/icon-512.png", "/gui/icons/icon-maskable-512.png", "/gui/icons/apple-touch-icon.png"].includes(u.pathname)) {
+      const resource = await readFile(join(repo, "packages/dashboard/public", u.pathname.slice(5)));
+      res.writeHead(200, { "content-type": u.pathname.endsWith(".png") ? "image/png" : "application/manifest+json" });
+      return res.end(resource);
+    }
     if (req.method === "GET" && u.pathname === "/favicon.ico") {
       res.writeHead(204);
       return res.end();
@@ -183,7 +188,7 @@ try {
   fixturePort = await listen(server);
   debugPort = await reserve();
   profile = await mkdtemp(join(tmpdir(), "computer-navigation-chrome-"));
-  chrome = spawn("google-chrome", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--no-first-run", "--no-default-browser-check", "--remote-debugging-address=127.0.0.1", `--remote-debugging-port=${debugPort}`, "--remote-allow-origins=*", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+  chrome = spawn("google-chrome", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--password-store=basic", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--no-first-run", "--no-default-browser-check", "--remote-debugging-address=127.0.0.1", `--remote-debugging-port=${debugPort}`, "--remote-allow-origins=*", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
   chromeExit = new Promise((resolve2) => {
     chrome.once("exit", (code, signal) => resolve2({ code, signal }));
     chrome.once("error", (e) => resolve2({ error: e.message }));
@@ -234,6 +239,7 @@ try {
     await wait(`document.querySelector('[data-forced-missing-fixture]')`, "intentional missing DOM", 300);
   }
   await navigate("/gui");
+  await wait(`[...document.querySelectorAll('a')].some(e=>e.textContent.trim()==='Open')`, "session list ready");
   await click(`[...document.querySelectorAll('a')].find(e=>e.textContent.trim()==='Open')`, "open synthetic session");
   await wait(`(${filesRoot})?.innerText.includes('notes.txt')`, "root ready");
   let s = await snap("01-desktop-root");
