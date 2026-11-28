@@ -224,7 +224,14 @@ export default function ProcessList(props: { mcpUrl: string }) {
                         <span class="mono flex-1 proc-cmd" title={p.command}>
                           {p.command}
                         </span>
-                        <span class="muted proc-stats">
+                        <span
+                          class="muted proc-stats"
+                          title={t("cpuMemLabel", { cpu: p.cpu, mem: p.mem })}
+                          aria-label={t("cpuMemLabel", {
+                            cpu: p.cpu,
+                            mem: p.mem,
+                          })}
+                        >
                           {p.cpu}% / {p.mem}%
                         </span>
                         <Show when={p.pid > 1}>

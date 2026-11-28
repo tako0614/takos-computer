@@ -20,6 +20,7 @@ export interface OpenFileTarget {
   path: string;
   name: string;
   size: number;
+  isNew?: boolean;
 }
 
 interface FileReadResult {
@@ -45,6 +46,7 @@ export default function FileDrawer(props: {
   const [drawerEl, setDrawerEl] = createSignal<HTMLDivElement | undefined>();
   const [loading, setLoading] = createSignal(false);
   const [loadError, setLoadError] = createSignal("");
+  const [isNewFile, setIsNewFile] = createSignal(false);
   const [originalContent, setOriginalContent] = createSignal("");
   const [draft, setDraft] = createSignal("");
   const [fileSize, setFileSize] = createSignal(0);
@@ -54,6 +56,9 @@ export default function FileDrawer(props: {
   const [saving, setSaving] = createSignal(false);
   const [saveError, setSaveError] = createSignal("");
   const [saveStatus, setSaveStatus] = createSignal("");
+  const [copyFeedback, setCopyFeedback] = createSignal<
+    "copied" | "copyFailed" | null
+  >(null);
   const [discardAction, setDiscardAction] = createSignal<
     "close" | "reload" | null
   >(null);
@@ -62,11 +67,17 @@ export default function FileDrawer(props: {
   let closeBtnRef: HTMLButtonElement | undefined;
   let editorRef: HTMLTextAreaElement | undefined;
   let alive = true;
+  let composing = false;
+  let pendingReloadNotice = false;
+  let lastLoadedFile: OpenFileTarget | null = null;
+  let lastLoadedMcpUrl = "";
   let activeReadToken = 0;
   let activeWriteToken = 0;
+  let copyTimer: ReturnType<typeof setTimeout> | undefined;
 
   onCleanup(() => {
     alive = false;
+    if (copyTimer !== undefined) clearTimeout(copyTimer);
   });
 
   const isOpen = () => Boolean(props.file);
@@ -76,10 +87,44 @@ export default function FileDrawer(props: {
       !loading() && !loadError() && !readOnly() &&
       draft() !== originalContent(),
   );
+  const canSave = createMemo(
+    () =>
+      !loading() && !loadError() && !readOnly() &&
+      (isNewFile() || draft() !== originalContent()),
+  );
   const lineCount = createMemo(() => {
     const text = draft();
     if (!text) return 0;
     return text.split("\n").length;
+  });
+
+  const keepFocusInDrawer = (preferred?: HTMLElement | null) => {
+    queueMicrotask(() => {
+      const el = drawerEl();
+      if (!alive || !isOpen() || !el?.isConnected) return;
+      if (el.contains(document.activeElement)) return;
+      if (preferred && el.contains(preferred) && !preferred.hasAttribute("disabled")) {
+        preferred.focus();
+        return;
+      }
+      if (editorRef && el.contains(editorRef)) {
+        editorRef.focus();
+        return;
+      }
+      if (closeBtnRef && el.contains(closeBtnRef) && !closeBtnRef.disabled) {
+        closeBtnRef.focus();
+        return;
+      }
+      el.focus();
+    });
+  };
+
+  // Keep textarea DOM value in sync with external state without interrupting IME composition.
+  createEffect(() => {
+    const next = draft();
+    if (!composing && editorRef && editorRef.value !== next) {
+      editorRef.value = next;
+    }
   });
 
   // Load file whenever target file, mcpUrl, or reloadNonce changes.
@@ -90,14 +135,20 @@ export default function FileDrawer(props: {
     activeReadToken++;
     activeWriteToken++;
     const token = activeReadToken;
+    composing = false;
 
     setDiscardAction(null);
     setSaveError("");
     setSaveStatus("");
+    setCopyFeedback(null);
     setSaving(false);
 
     if (!file) {
+      lastLoadedFile = null;
+      lastLoadedMcpUrl = mcpUrl;
+      pendingReloadNotice = false;
       setDrawerEl(undefined);
+      setIsNewFile(false);
       setLoading(false);
       setLoadError("");
       setOriginalContent("");
@@ -107,10 +158,35 @@ export default function FileDrawer(props: {
       return;
     }
 
+    const targetChanged = file !== lastLoadedFile || mcpUrl !== lastLoadedMcpUrl;
+    lastLoadedFile = file;
+    lastLoadedMcpUrl = mcpUrl;
+
     setFileSize(file.size);
     setLoadError("");
 
+    if (targetChanged && file.isNew) {
+      pendingReloadNotice = false;
+      setIsNewFile(true);
+      setLoading(false);
+      setBinary(false);
+      setTruncated(false);
+      setOriginalContent("");
+      setDraft("");
+      queueMicrotask(() => {
+        if (alive && isOpen() && editorRef?.isConnected) {
+          editorRef.focus();
+        }
+      });
+      return;
+    }
+
+    if (targetChanged) {
+      setIsNewFile(false);
+    }
+
     if (isLikelyBinaryFile(file.name)) {
+      pendingReloadNotice = false;
       setLoading(false);
       setBinary(true);
       setTruncated(false);
@@ -119,6 +195,8 @@ export default function FileDrawer(props: {
       return;
     }
 
+    const announceReload = pendingReloadNotice;
+    pendingReloadNotice = false;
     setLoading(true);
     setBinary(false);
     setTruncated(false);
@@ -148,6 +226,20 @@ export default function FileDrawer(props: {
         } else {
           setOriginalContent(content);
           setDraft(content);
+          if (announceReload) {
+            setSaveStatus(t("fileReloaded"));
+          }
+          queueMicrotask(() => {
+            const el = drawerEl();
+            if (!alive || !el?.isConnected || !editorRef?.isConnected) return;
+            const activeEl = document.activeElement;
+            if (
+              !activeEl || activeEl === document.body || activeEl === el ||
+              activeEl === closeBtnRef
+            ) {
+              editorRef.focus();
+            }
+          });
         }
       } catch (err) {
         if (!alive || token !== activeReadToken) return;
@@ -155,9 +247,23 @@ export default function FileDrawer(props: {
       } finally {
         if (alive && token === activeReadToken) {
           setLoading(false);
+          keepFocusInDrawer(editorRef ?? closeBtnRef);
         }
       }
     })();
+  });
+
+  // Warn before closing/reloading the browser tab while edits are unsaved.
+  createEffect(() => {
+    if (!isOpen() || !isDirty()) return;
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    onCleanup(() => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    });
   });
 
   const requestClose = () => {
@@ -176,34 +282,70 @@ export default function FileDrawer(props: {
     const detach = attachDialogTrap({
       container: el,
       onEscape: requestClose,
-      getInitialFocus: () => closeBtnRef,
+      getInitialFocus: () => editorRef ?? closeBtnRef,
     });
     onCleanup(detach);
   });
 
+  const triggerReload = () => {
+    if (loading() || saving() || isNewFile()) return;
+    if (isDirty()) {
+      setDiscardAction("reload");
+      return;
+    }
+    pendingReloadNotice = true;
+    keepFocusInDrawer(closeBtnRef);
+    setReloadNonce((n) => n + 1);
+  };
+
+  const copyPath = async () => {
+    const file = props.file;
+    if (!file) return;
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("Clipboard API unavailable");
+      }
+      await navigator.clipboard.writeText(file.path);
+      if (!alive) return;
+      setCopyFeedback("copied");
+    } catch {
+      if (!alive) return;
+      setCopyFeedback("copyFailed");
+    }
+    if (copyTimer !== undefined) clearTimeout(copyTimer);
+    copyTimer = setTimeout(() => {
+      if (alive) setCopyFeedback(null);
+    }, 2000);
+  };
+
   const save = async () => {
     const file = props.file;
     const mcpUrl = props.mcpUrl;
-    if (
-      !file || saving() || loading() || loadError() || readOnly() || !isDirty()
-    ) {
+    if (!file || saving() || !canSave()) {
       return;
     }
-    const contentToSave = draft();
+    const contentToSave = editorRef ? editorRef.value : draft();
+    if (contentToSave !== draft()) {
+      setDraft(contentToSave);
+    }
+    const createDirs = isNewFile();
     const token = ++activeWriteToken;
     setSaving(true);
     setSaveError("");
     setSaveStatus("");
+    keepFocusInDrawer(editorRef);
 
     try {
       const result = await mcpCall<FileWriteResult>(mcpUrl, "file_write", {
         path: file.path,
         content: contentToSave,
+        ...(createDirs ? { create_dirs: true } : {}),
       });
       if (!alive || token !== activeWriteToken) return;
       const bytes = typeof result?.bytes_written === "number"
         ? result.bytes_written
         : new TextEncoder().encode(contentToSave).byteLength;
+      setIsNewFile(false);
       setOriginalContent(contentToSave);
       setFileSize(bytes);
       setSaveStatus(t("fileSaved", { bytes }));
@@ -218,6 +360,7 @@ export default function FileDrawer(props: {
     } finally {
       if (alive && token === activeWriteToken) {
         setSaving(false);
+        keepFocusInDrawer(editorRef ?? closeBtnRef);
       }
     }
   };
@@ -263,7 +406,12 @@ export default function FileDrawer(props: {
                       <h2 id={`${id}-title`} class="drawer-title mono">
                         {file().name}
                       </h2>
-                      <Show when={isDirty()}>
+                      <Show when={isNewFile()}>
+                        <span class="badge badge-starting">
+                          {t("newFileBadge")}
+                        </span>
+                      </Show>
+                      <Show when={!isNewFile() && isDirty()}>
                         <span class="badge badge-starting">
                           {t("unsavedChanges")}
                         </span>
@@ -272,8 +420,25 @@ export default function FileDrawer(props: {
                         <span class="badge">{t("readOnly")}</span>
                       </Show>
                     </div>
-                    <div class="drawer-path mono muted" title={file().path}>
-                      {file().path}
+                    <div class="drawer-path-row">
+                      <div class="drawer-path mono muted" title={file().path}>
+                        {file().path}
+                      </div>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm drawer-copy-btn"
+                        aria-label={t("copyPath")}
+                        onClick={() => void copyPath()}
+                      >
+                        {copyFeedback() ? t(copyFeedback()!) : t("copyPath")}
+                      </button>
+                      <span class="sr-only" role="status" aria-live="polite">
+                        {copyFeedback() === "copied"
+                          ? t("pathCopied")
+                          : copyFeedback() === "copyFailed"
+                          ? t("copyFailed")
+                          : ""}
+                      </span>
                     </div>
                   </div>
                   <button
@@ -314,8 +479,16 @@ export default function FileDrawer(props: {
                   <Show
                     when={!loading()}
                     fallback={
-                      <div class="drawer-placeholder muted">
-                        {t("loadingEllipsis")}
+                      <div class="drawer-placeholder" role="status">
+                        <div class="skeleton-stack" aria-hidden="true">
+                          <div class="skeleton-line skeleton-line-lg" />
+                          <div class="skeleton-line skeleton-line-md" />
+                          <div class="skeleton-line skeleton-line-lg" />
+                          <div class="skeleton-line skeleton-line-sm" />
+                        </div>
+                        <div class="muted drawer-loading-label">
+                          {t("loadingEllipsis")}
+                        </div>
                       </div>
                     }
                   >
@@ -354,16 +527,27 @@ export default function FileDrawer(props: {
                         <textarea
                           ref={(el) => {
                             editorRef = el;
+                            el.value = draft();
                           }}
                           class="file-editor mono"
                           aria-label={t("fileContents")}
-                          value={draft()}
                           readOnly={readOnly() || saving()}
                           spellcheck={false}
-                          onInput={(e) => {
+                          onCompositionStart={() => {
+                            composing = true;
+                          }}
+                          onCompositionEnd={(e) => {
+                            composing = false;
                             setDraft(e.currentTarget.value);
                             if (saveStatus()) setSaveStatus("");
                             if (saveError()) setSaveError("");
+                          }}
+                          onInput={(e) => {
+                            if (!e.isComposing && !composing) {
+                              setDraft(e.currentTarget.value);
+                              if (saveStatus()) setSaveStatus("");
+                              if (saveError()) setSaveError("");
+                            }
                           }}
                         />
                       </Show>
@@ -385,26 +569,21 @@ export default function FileDrawer(props: {
                     </Show>
                   </div>
                   <div class="drawer-actions">
-                    <button
-                      type="button"
-                      class="btn btn-ghost btn-sm"
-                      disabled={loading() || saving()}
-                      onClick={() => {
-                        if (isDirty()) {
-                          setDiscardAction("reload");
-                          return;
-                        }
-                        setReloadNonce((n) => n + 1);
-                      }}
-                    >
-                      {t("reload")}
-                    </button>
+                    <Show when={!isNewFile()}>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        disabled={loading() || saving()}
+                        onClick={triggerReload}
+                      >
+                        {t("reload")}
+                      </button>
+                    </Show>
                     <Show when={!readOnly()}>
                       <button
                         type="button"
                         class="btn btn-primary btn-sm"
-                        disabled={loading() || !!loadError() || !isDirty() ||
-                          saving()}
+                        disabled={!canSave() || saving()}
                         aria-busy={saving()}
                         onClick={() => void save()}
                       >
@@ -432,6 +611,7 @@ export default function FileDrawer(props: {
               const action = discardAction();
               setDiscardAction(null);
               if (action === "reload") {
+                pendingReloadNotice = true;
                 setReloadNonce((n) => n + 1);
               } else {
                 props.onClose();

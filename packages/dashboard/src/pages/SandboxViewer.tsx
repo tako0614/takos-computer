@@ -7,7 +7,7 @@ import {
   Show,
 } from "solid-js";
 import { A, useLocation, useNavigate, useParams } from "@solidjs/router";
-import { sandboxSessions } from "../lib/api.ts";
+import { ApiError, sandboxSessions, type SessionState } from "../lib/api.ts";
 import Shell from "../components/Shell.tsx";
 import FileBrowser from "../components/FileBrowser.tsx";
 import ProcessList from "../components/ProcessList.tsx";
@@ -76,21 +76,45 @@ export default function SandboxViewer() {
   };
 
   // Status polling
+  type StatusResult =
+    | { kind: "ok"; state: SessionState }
+    | { kind: "not_found" }
+    | { kind: "unavailable" };
+
   const [statusVersion, setStatusVersion] = createSignal(0);
   const [status] = createResource(
     () => ({ id: sessionId(), version: statusVersion() }),
-    ({ id }) => sandboxSessions.get(id).catch(() => null),
+    async ({ id }): Promise<StatusResult> => {
+      try {
+        const state = await sandboxSessions.get(id);
+        return { kind: "ok", state };
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          return { kind: "not_found" };
+        }
+        return { kind: "unavailable" };
+      }
+    },
   );
   let viewerActive = true;
-  const timer = setInterval(() => setStatusVersion((v) => v + 1), 10_000);
+  const timer = setInterval(() => {
+    if (status()?.kind === "not_found") return;
+    setStatusVersion((v) => v + 1);
+  }, 10_000);
   onCleanup(() => {
     viewerActive = false;
     clearInterval(timer);
   });
 
+  const isNotFound = () => !status.loading && status()?.kind === "not_found";
+
   const badgeClass = () => {
-    if (status.loading || !status()) return "badge";
-    const s = status()?.status;
+    const result = status();
+    if (status.loading || !result || result.kind === "unavailable") {
+      return "badge";
+    }
+    if (result.kind === "not_found") return "badge badge-stopped";
+    const s = result.state.status;
     return s === "active"
       ? "badge badge-active"
       : s === "starting"
@@ -100,7 +124,9 @@ export default function SandboxViewer() {
 
   const statusLabel = () => {
     if (status.loading) return t("loading");
-    const value = status()?.status;
+    const result = status();
+    if (result?.kind === "not_found") return t("notFound");
+    const value = result?.kind === "ok" ? result.state.status : undefined;
     if (value === "active" || value === "starting" || value === "stopped") {
       return t(value);
     }
@@ -124,7 +150,7 @@ export default function SandboxViewer() {
   const destroyPending = () => destroyRequest()?.id === sessionId();
 
   const requestDestroySession = () => {
-    if (destroyPending()) return;
+    if (destroyPending() || isNotFound()) return;
     setDestroyDialogOpen(true);
   };
 
@@ -185,7 +211,7 @@ export default function SandboxViewer() {
           <button
             type="button"
             class="btn btn-danger btn-sm"
-            aria-disabled={destroyPending()}
+            aria-disabled={destroyPending() || isNotFound()}
             aria-busy={destroyPending()}
             onClick={requestDestroySession}
           >
@@ -195,9 +221,32 @@ export default function SandboxViewer() {
       </header>
 
       <main id="main" tabIndex={-1}>
+        <Show when={isNotFound()}>
+          <div role="alert" class="alert-banner session-missing-banner">
+            <div class="session-missing-copy">
+              <strong class="session-missing-title">
+                {t("sessionNotFoundTitle")}
+              </strong>
+              <p class="session-missing-hint">{t("sessionNotFoundHint")}</p>
+            </div>
+            <div class="session-missing-actions">
+              <A href="/" class="btn btn-primary btn-sm">
+                &larr; {t("backToSessions")}
+              </A>
+            </div>
+          </div>
+        </Show>
+
         <Show when={unconfirmedDestroy() === sessionId()}>
-          <div role="alert" class="alert-banner">
-            {t("unconfirmedDestroyCurrent")}
+          <div role="alert" class="alert-banner alert-banner-row">
+            <span>{t("unconfirmedDestroyCurrent")}</span>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              onClick={() => setUnconfirmedDestroy(null)}
+            >
+              {t("dismiss")}
+            </button>
           </div>
         </Show>
 

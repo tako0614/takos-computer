@@ -8,6 +8,7 @@ import {
 import { Portal } from "solid-js/web";
 import { useI18n } from "../i18n.ts";
 import { attachDialogTrap } from "../lib/dialog-a11y.ts";
+import { validateCreateSessionInput } from "../lib/validation.ts";
 
 export default function CreateModal(props: {
   open: boolean;
@@ -57,6 +58,16 @@ export default function CreateModal(props: {
   const handleSubmit = async (e: Event) => {
     e.preventDefault();
     if (loading()) return;
+    const fd = new FormData(formRef);
+    const validation = validateCreateSessionInput({
+      sessionId: String(fd.get("sessionId") ?? ""),
+      spaceId: String(fd.get("spaceId") ?? ""),
+      userId: String(fd.get("userId") ?? ""),
+    });
+    if (!validation.ok) {
+      setError(t(validation.errorKey, validation.params));
+      return;
+    }
     setError("");
     setLoading(true);
     // Disabling the submitter must not leave keyboard focus behind the modal.
@@ -69,12 +80,7 @@ export default function CreateModal(props: {
         formRef.querySelector<HTMLInputElement>("input")?.focus();
       }
     });
-    const fd = new FormData(formRef);
-    const payload = {
-      sessionId: fd.get("sessionId") as string,
-      spaceId: fd.get("spaceId") as string,
-      userId: fd.get("userId") as string,
-    };
+    const payload = validation.value;
     try {
       await props.onCreate(payload);
       if (!active) return;
@@ -133,6 +139,8 @@ export default function CreateModal(props: {
                 name="sessionId"
                 readOnly={loading()}
                 required
+                autocomplete="off"
+                spellcheck={false}
                 placeholder={t("sessionIdPlaceholder")}
                 onInput={clearError}
               />
@@ -143,6 +151,8 @@ export default function CreateModal(props: {
                 name="spaceId"
                 readOnly={loading()}
                 required
+                autocomplete="off"
+                spellcheck={false}
                 placeholder={t("spaceIdPlaceholder")}
                 onInput={clearError}
               />
@@ -153,6 +163,8 @@ export default function CreateModal(props: {
                 name="userId"
                 readOnly={loading()}
                 required
+                autocomplete="off"
+                spellcheck={false}
                 placeholder={t("userIdPlaceholder")}
                 onInput={clearError}
               />

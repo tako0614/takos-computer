@@ -23,6 +23,19 @@ import {
   attachDialogTrap,
   getOpenDialogCount,
 } from "../packages/dashboard/src/lib/dialog-a11y.ts";
+import { ApiError } from "../packages/dashboard/src/lib/api.ts";
+import {
+  formatAbsoluteTime,
+  formatClockTime,
+  formatRelativeTime,
+} from "../packages/dashboard/src/lib/format-time.ts";
+import {
+  MAX_SESSION_ID_BYTES,
+  pushShellHistory,
+  stepShellHistory,
+  validateCreateSessionInput,
+  validateNewFileName,
+} from "../packages/dashboard/src/lib/validation.ts";
 
 const DASHBOARD_DIR = new URL("../packages/dashboard/", import.meta.url);
 
@@ -102,8 +115,37 @@ test("dashboard i18n translates key UI labels in both en and ja with interpolati
     "themeLight",
     "themeSystem",
     "unconfirmedDestroyCurrent",
+    "backToSessions",
+    "copied",
+    "copyFailed",
+    "copyOutput",
+    "copyPath",
+    "createFileTitle",
+    "createFirstSession",
+    "fileNameHint",
+    "fileNameLabel",
+    "fileNamePlaceholder",
+    "fileReloaded",
+    "modified",
+    "newFile",
+    "newFileBadge",
+    "notFound",
+    "notFoundDescription",
+    "notFoundHeading",
+    "notFoundTitle",
+    "outputCopied",
+    "pathCopied",
+    "sessionNotFoundHint",
+    "sessionNotFoundTitle",
+    "symlink",
     "unsavedChanges",
+    "user",
+    "validationFileNameInvalid",
+    "validationFileNameRequired",
+    "validationRequired",
+    "validationSessionIdInvalid",
     "workspaceRoot",
+    "workspaceRootLabel",
   ];
 
   for (const lang of ["en", "ja"] as const) {
@@ -111,6 +153,12 @@ test("dashboard i18n translates key UI labels in both en and ja with interpolati
     for (const key of keys) {
       expect(t(key).trim().length).toBeGreaterThan(0);
     }
+    expect(t("cpuMemLabel", { cpu: "1.2", mem: "3.4" })).toContain("1.2");
+    expect(t("lastUpdated", { time: "12:34:56" })).toContain("12:34:56");
+    expect(t("validationSessionIdReserved", { prefix: "pmcp-" })).toContain(
+      "pmcp-",
+    );
+    expect(t("validationSessionIdTooLong", { max: 120 })).toContain("120");
     expect(t("deleteSessionAria", { id: "s-01" })).toContain("s-01");
     expect(t("unconfirmedDestroySession", { id: "s-01" })).toContain("s-01");
     expect(t("openFileAria", { name: "app.ts" })).toContain("app.ts");
@@ -521,4 +569,169 @@ test("attachDialogTrap handles stacking, IME-safe Escape, Shift+Tab from panel, 
     (globalThis as unknown as { HTMLElement: unknown }).HTMLElement =
       origHTMLElement;
   }
+});
+
+test("validateCreateSessionInput trims inputs and rejects whitespace, reserved prefixes, control chars, and byte overflow", () => {
+  expect(
+    validateCreateSessionInput({
+      sessionId: "  dev-01  ",
+      spaceId: " space-a ",
+      userId: " alice ",
+    }),
+  ).toEqual({
+    ok: true,
+    value: { sessionId: "dev-01", spaceId: "space-a", userId: "alice" },
+  });
+
+  expect(
+    validateCreateSessionInput({
+      sessionId: "   ",
+      spaceId: "space-a",
+      userId: "alice",
+    }),
+  ).toEqual({ ok: false, errorKey: "validationRequired" });
+
+  expect(
+    validateCreateSessionInput({
+      sessionId: "pmcp-forbidden",
+      spaceId: "space-a",
+      userId: "alice",
+    }),
+  ).toEqual({
+    ok: false,
+    errorKey: "validationSessionIdReserved",
+    params: { prefix: "pmcp-" },
+  });
+
+  expect(
+    validateCreateSessionInput({
+      sessionId: "bad\nid",
+      spaceId: "space-a",
+      userId: "alice",
+    }),
+  ).toEqual({ ok: false, errorKey: "validationSessionIdInvalid" });
+
+  expect(
+    validateCreateSessionInput({
+      sessionId: "あ".repeat(41), // 123 UTF-8 bytes > 120
+      spaceId: "space-a",
+      userId: "alice",
+    }),
+  ).toEqual({
+    ok: false,
+    errorKey: "validationSessionIdTooLong",
+    params: { max: MAX_SESSION_ID_BYTES },
+  });
+});
+
+test("validateNewFileName accepts nested relative paths and rejects traversal or invalid paths", () => {
+  expect(validateNewFileName("  README.md ")).toEqual({
+    ok: true,
+    value: { relativePath: "README.md", basename: "README.md" },
+  });
+  expect(validateNewFileName("src/components/App.tsx")).toEqual({
+    ok: true,
+    value: { relativePath: "src/components/App.tsx", basename: "App.tsx" },
+  });
+
+  expect(validateNewFileName("   ")).toEqual({
+    ok: false,
+    errorKey: "validationFileNameRequired",
+  });
+  for (
+    const invalid of [
+      "/etc/passwd",
+      "dir/",
+      "../escape.txt",
+      "a/../b.txt",
+      "./notes.txt",
+      "a//b.txt",
+      "a\\b.txt",
+      "bad\u0000name",
+    ]
+  ) {
+    expect(validateNewFileName(invalid), invalid).toEqual({
+      ok: false,
+      errorKey: "validationFileNameInvalid",
+    });
+  }
+});
+
+test("shell history helpers deduplicate consecutive commands and preserve unsubmitted drafts", () => {
+  let history = pushShellHistory([], "ls");
+  history = pushShellHistory(history, "ls");
+  history = pushShellHistory(history, "pwd");
+  expect(history).toEqual(["pwd", "ls"]);
+
+  // Step up from unsubmitted draft -> preserves draft
+  const up1 = stepShellHistory(
+    { entries: history, index: -1, draft: "" },
+    "up",
+    "git sta",
+  );
+  expect(up1).toEqual({
+    nextIndex: 0,
+    nextDraft: "git sta",
+    nextInput: "pwd",
+    changed: true,
+  });
+
+  // Step up further -> keeps saved draft
+  const up2 = stepShellHistory(
+    { entries: history, index: up1.nextIndex, draft: up1.nextDraft },
+    "up",
+    up1.nextInput,
+  );
+  expect(up2).toEqual({
+    nextIndex: 1,
+    nextDraft: "git sta",
+    nextInput: "ls",
+    changed: true,
+  });
+
+  // Step down back to index 0 -> pwd
+  const down1 = stepShellHistory(
+    { entries: history, index: up2.nextIndex, draft: up2.nextDraft },
+    "down",
+    up2.nextInput,
+  );
+  expect(down1).toEqual({
+    nextIndex: 0,
+    nextDraft: "git sta",
+    nextInput: "pwd",
+    changed: true,
+  });
+
+  // Step down past 0 -> restores original unsubmitted draft
+  const down2 = stepShellHistory(
+    { entries: history, index: down1.nextIndex, draft: down1.nextDraft },
+    "down",
+    down1.nextInput,
+  );
+  expect(down2).toEqual({
+    nextIndex: -1,
+    nextDraft: "",
+    nextInput: "git sta",
+    changed: true,
+  });
+});
+
+test("time formatting and ApiError preserve HTTP status and localized relative/absolute labels", () => {
+  const err = new ApiError(404, "Session not found");
+  expect(err).toBeInstanceOf(Error);
+  expect(err.status).toBe(404);
+  expect(err.message).toBe("Session not found");
+
+  setLanguage("en");
+  const now = Date.parse("2026-11-28T12:00:00Z");
+  expect(formatRelativeTime("2026-11-28T11:59:30Z", t, now)).toBe("just now");
+  expect(formatRelativeTime("2026-11-28T11:45:00Z", t, now)).toBe("15m ago");
+  expect(formatRelativeTime("2026-11-28T09:00:00Z", t, now)).toBe("3h ago");
+  expect(formatRelativeTime("2026-11-26T12:00:00Z", t, now)).toBe("2d ago");
+  expect(formatRelativeTime("not-a-date", t, now)).toBe("");
+  expect(formatAbsoluteTime("2026-11-28T12:00:00Z", "en").length)
+    .toBeGreaterThan(0);
+  expect(formatAbsoluteTime("2026-11-28T12:00:00Z", "ja").length)
+    .toBeGreaterThan(0);
+  expect(formatClockTime(new Date(now), "en").length).toBeGreaterThan(0);
 });

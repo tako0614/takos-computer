@@ -3,17 +3,23 @@ import {
   createMemo,
   createResource,
   createSignal,
+  createUniqueId,
   For,
+  onCleanup,
   Show,
 } from "solid-js";
+import { Portal } from "solid-js/web";
 import { mcpCall } from "../lib/mcp.ts";
 import { useI18n } from "../i18n.ts";
+import { attachDialogTrap } from "../lib/dialog-a11y.ts";
 import {
   buildBreadcrumbs,
   formatFileSize,
   joinWorkspacePath,
   parentWorkspaceDirectory,
 } from "../lib/file-paths.ts";
+import { formatAbsoluteTime, formatRelativeTime } from "../lib/format-time.ts";
+import { validateNewFileName } from "../lib/validation.ts";
 import FileDrawer, { type OpenFileTarget } from "./FileDrawer.tsx";
 
 interface FileEntry {
@@ -39,11 +45,12 @@ function isFileEntry(value: unknown): value is FileEntry {
 export default function FileBrowser(
   props: { mcpUrl: string; cwd: () => string; setCwd: (v: string) => void },
 ) {
-  const { t } = useI18n();
+  const { language, t } = useI18n();
   const [version, setVersion] = createSignal(0);
   const [selectedFile, setSelectedFile] = createSignal<OpenFileTarget | null>(
     null,
   );
+  const [newFileOpen, setNewFileOpen] = createSignal(false);
   let pathInput!: HTMLInputElement;
   let composing = false;
 
@@ -54,10 +61,11 @@ export default function FileBrowser(
     }
   });
 
-  // Close drawer when switching sandbox sessions.
+  // Close drawer & new-file dialog when switching sandbox sessions.
   createEffect(() => {
     const _url = props.mcpUrl;
     setSelectedFile(null);
+    setNewFileOpen(false);
   });
 
   const breadcrumbs = createMemo(() => buildBreadcrumbs(props.cwd()));
@@ -117,6 +125,16 @@ export default function FileBrowser(
     });
   };
 
+  const openNewFile = (relativePath: string, basename: string) => {
+    setNewFileOpen(false);
+    setSelectedFile({
+      path: joinWorkspacePath(props.cwd(), relativePath),
+      name: basename,
+      size: 0,
+      isNew: true,
+    });
+  };
+
   const refresh = () => setVersion((v) => v + 1);
 
   return (
@@ -167,6 +185,13 @@ export default function FileBrowser(
         >
           {t("refresh")}
         </button>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          onClick={() => setNewFileOpen(true)}
+        >
+          {t("newFile")}
+        </button>
       </div>
 
       <nav
@@ -175,29 +200,36 @@ export default function FileBrowser(
       >
         <ol class="breadcrumb-list">
           <For each={breadcrumbs()}>
-            {(crumb, index) => (
-              <li class="breadcrumb-item">
-                <Show when={index() > 0}>
-                  <span class="breadcrumb-sep" aria-hidden="true">/</span>
-                </Show>
-                <Show
-                  when={!crumb.current}
-                  fallback={
-                    <span class="breadcrumb-current" aria-current="page">
-                      {crumb.label}
-                    </span>
-                  }
-                >
-                  <button
-                    type="button"
-                    class="breadcrumb-btn"
-                    onClick={() => navigateTo(crumb.path)}
+            {(crumb, index) => {
+              const displayLabel = () =>
+                crumb.path === "." ? t("workspaceRootLabel") : crumb.label;
+              return (
+                <li class="breadcrumb-item">
+                  <Show when={index() > 0}>
+                    <span class="breadcrumb-sep" aria-hidden="true">/</span>
+                  </Show>
+                  <Show
+                    when={!crumb.current}
+                    fallback={
+                      <span class="breadcrumb-current" aria-current="page">
+                        {displayLabel()}
+                      </span>
+                    }
                   >
-                    {crumb.label}
-                  </button>
-                </Show>
-              </li>
-            )}
+                    <button
+                      type="button"
+                      class="breadcrumb-btn"
+                      aria-label={crumb.path === "."
+                        ? t("workspaceRoot")
+                        : undefined}
+                      onClick={() => navigateTo(crumb.path)}
+                    >
+                      {displayLabel()}
+                    </button>
+                  </Show>
+                </li>
+              );
+            }}
           </For>
         </ol>
       </nav>
@@ -206,8 +238,15 @@ export default function FileBrowser(
         <Show
           when={!entries.loading}
           fallback={
-            <div class="panel-placeholder muted">
-              {t("loadingEllipsis")}
+            <div class="panel-placeholder" role="status">
+              <div class="skeleton-stack" aria-hidden="true">
+                <div class="skeleton-line skeleton-line-md" />
+                <div class="skeleton-line skeleton-line-lg" />
+                <div class="skeleton-line skeleton-line-sm" />
+              </div>
+              <div class="muted panel-loading-label">
+                {t("loadingEllipsis")}
+              </div>
             </div>
           }
         >
@@ -242,17 +281,38 @@ export default function FileBrowser(
             >
               <For each={entries()}>
                 {(e) => {
+                  const icon = () =>
+                    e.type === "directory"
+                      ? "\u{1F4C1}"
+                      : e.type === "symlink"
+                      ? "\u{1F517}"
+                      : "\u{1F4C4}";
                   const content = () => (
                     <>
-                      <span aria-hidden="true">
-                        {e.type === "directory" ? "\u{1F4C1}" : "\u{1F4C4}"}
-                      </span>
+                      <span aria-hidden="true">{icon()}</span>
                       <span
                         class="flex-1 file-name"
                         classList={{ "file-name-dir": e.type === "directory" }}
                       >
                         {e.name}
                       </span>
+                      <Show when={e.type === "symlink"}>
+                        <span class="badge file-kind-badge">
+                          {t("symlink")}
+                        </span>
+                      </Show>
+                      <Show when={e.modified}>
+                        {(iso) => (
+                          <time
+                            class="mono muted file-modified"
+                            dateTime={iso()}
+                            title={formatAbsoluteTime(iso(), language()) ||
+                              undefined}
+                          >
+                            {formatRelativeTime(iso(), t)}
+                          </time>
+                        )}
+                      </Show>
                       <Show when={e.type === "file"}>
                         <span class="mono muted file-size">
                           {formatFileSize(e.size)}
@@ -295,6 +355,13 @@ export default function FileBrowser(
         </Show>
       </div>
 
+      <CreateFileDialog
+        open={newFileOpen()}
+        cwd={props.cwd()}
+        onClose={() => setNewFileOpen(false)}
+        onCreate={openNewFile}
+      />
+
       <FileDrawer
         mcpUrl={props.mcpUrl}
         file={selectedFile()}
@@ -302,5 +369,115 @@ export default function FileBrowser(
         onSaved={refresh}
       />
     </div>
+  );
+}
+
+function CreateFileDialog(props: {
+  open: boolean;
+  cwd: string;
+  onClose: () => void;
+  onCreate: (relativePath: string, basename: string) => void;
+}) {
+  const { t } = useI18n();
+  const id = createUniqueId();
+  const [dialogEl, setDialogEl] = createSignal<HTMLDivElement | undefined>();
+  const [error, setError] = createSignal("");
+  let inputRef: HTMLInputElement | undefined;
+
+  createEffect(() => {
+    if (!props.open) {
+      setError("");
+      setDialogEl(undefined);
+      return;
+    }
+    setError("");
+    const el = dialogEl();
+    if (!el) return;
+    const detach = attachDialogTrap({
+      container: el,
+      onEscape: props.onClose,
+      getInitialFocus: () => inputRef,
+    });
+    onCleanup(detach);
+  });
+
+  const handleSubmit = (e: Event) => {
+    e.preventDefault();
+    const validation = validateNewFileName(inputRef?.value ?? "");
+    if (!validation.ok) {
+      setError(t(validation.errorKey, validation.params));
+      return;
+    }
+    setError("");
+    props.onCreate(validation.value.relativePath, validation.value.basename);
+  };
+
+  return (
+    <Show when={props.open}>
+      <Portal>
+        <div
+          class="modal-overlay"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) props.onClose();
+          }}
+        >
+          <div
+            ref={(el) => {
+              setDialogEl(el);
+            }}
+            class="modal-content"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`${id}-title`}
+            aria-describedby={`${id}-hint`}
+            tabIndex={-1}
+          >
+            <h2 id={`${id}-title`} class="modal-title">
+              {t("createFileTitle")}
+            </h2>
+            <form onSubmit={handleSubmit}>
+              <label for={`${id}-name`}>{t("fileNameLabel")}</label>
+              <input
+                ref={(el) => {
+                  inputRef = el;
+                }}
+                id={`${id}-name`}
+                name="fileName"
+                required
+                placeholder={t("fileNamePlaceholder")}
+                onInput={() => {
+                  if (error()) setError("");
+                }}
+              />
+              <p id={`${id}-hint`} class="muted file-path-hint">
+                {t("fileNameHint")}{" "}
+                <span class="mono">({props.cwd})</span>
+              </p>
+
+              <Show when={error()}>
+                {(message) => (
+                  <div class="alert-banner" role="alert">
+                    {message()}
+                  </div>
+                )}
+              </Show>
+
+              <div class="modal-actions">
+                <button
+                  type="button"
+                  class="btn btn-ghost"
+                  onClick={props.onClose}
+                >
+                  {t("cancel")}
+                </button>
+                <button type="submit" class="btn btn-primary">
+                  {t("create")}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </Portal>
+    </Show>
   );
 }
