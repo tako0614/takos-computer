@@ -15,6 +15,7 @@ const en = {
   binaryFileNotice:
     "Binary file ({size}) cannot be edited in the text drawer.",
   cancel: "Cancel",
+  checking: "Checking…",
   clear: "Clear",
   clearFilter: "Clear filter",
   clearOutput: "Clear shell output",
@@ -41,6 +42,7 @@ const en = {
   destroyCurrentConfirm: "Destroy this sandbox session?",
   destroySessionConfirm: 'Destroy sandbox session "{id}"?',
   destroySessionTitle: "Destroy sandbox session",
+  directoryAlreadyExists: "A directory already exists at this path.",
   directoryBreadcrumbs: "Directory breadcrumbs",
   directoryPath: "Directory path",
   discard: "Discard",
@@ -49,7 +51,9 @@ const en = {
   dismiss: "Dismiss",
   emptyDirectory: "Empty directory",
   error: "Error: {message}",
+  fileAlreadyExists: "A file already exists at this path.",
   fileContents: "File contents",
+  fileExistsCheckFailed: "Could not verify whether this path already exists.",
   fileNameHint:
     "Relative to the current directory. Nested folders are created automatically.",
   fileNameLabel: "File name or relative path",
@@ -179,6 +183,7 @@ const ja: Record<TranslationKey, string> = {
   binaryFileNotice:
     "バイナリファイル ({size}) はテキストエディタで編集できません。",
   cancel: "キャンセル",
+  checking: "確認中…",
   clear: "クリア",
   clearFilter: "絞り込みを解除",
   clearOutput: "シェルの出力をクリア",
@@ -205,6 +210,7 @@ const ja: Record<TranslationKey, string> = {
   destroyCurrentConfirm: "このサンドボックスセッションを破棄しますか？",
   destroySessionConfirm: 'サンドボックスセッション "{id}" を破棄しますか？',
   destroySessionTitle: "サンドボックスセッションを破棄",
+  directoryAlreadyExists: "このパスにはすでにディレクトリが存在します。",
   directoryBreadcrumbs: "フォルダのパンくずリスト",
   directoryPath: "フォルダのパス",
   discard: "破棄",
@@ -213,7 +219,9 @@ const ja: Record<TranslationKey, string> = {
   dismiss: "閉じる",
   emptyDirectory: "空のディレクトリ",
   error: "エラー: {message}",
+  fileAlreadyExists: "このパスにはすでにファイルが存在します。",
   fileContents: "ファイルの内容",
+  fileExistsCheckFailed: "パスの存在を確認できませんでした。",
   fileNameHint:
     "現在のフォルダからの相対パスを入力します。途中のフォルダは自動で作成されます。",
   fileNameLabel: "ファイル名または相対パス",

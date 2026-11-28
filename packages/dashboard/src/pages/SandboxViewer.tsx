@@ -97,6 +97,7 @@ export default function SandboxViewer() {
     },
   );
   let viewerActive = true;
+  let refreshStatusButton: HTMLButtonElement | undefined;
   const timer = setInterval(() => {
     if (status()?.kind === "not_found") return;
     setStatusVersion((v) => v + 1);
@@ -199,6 +200,9 @@ export default function SandboxViewer() {
             {statusLabel()}
           </span>
           <button
+            ref={(el) => {
+              refreshStatusButton = el;
+            }}
             type="button"
             class="btn btn-ghost btn-sm"
             aria-disabled={status.loading}
@@ -243,7 +247,22 @@ export default function SandboxViewer() {
             <button
               type="button"
               class="btn btn-ghost btn-sm"
-              onClick={() => setUnconfirmedDestroy(null)}
+              onClick={(e) => {
+                const hadFocus = document.activeElement === e.currentTarget;
+                setUnconfirmedDestroy(null);
+                if (hadFocus) {
+                  queueMicrotask(() => {
+                    if (
+                      viewerActive &&
+                      document.activeElement === document.body
+                    ) {
+                      (refreshStatusButton?.isConnected
+                        ? refreshStatusButton
+                        : document.getElementById("main"))?.focus();
+                    }
+                  });
+                }
+              }}
             >
               {t("dismiss")}
             </button>

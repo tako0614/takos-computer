@@ -591,6 +591,15 @@ textarea {
   overflow-wrap: anywhere;
   margin-bottom: 0.75rem;
 }
+.status-banner .btn-ghost {
+  color: inherit;
+  border-color: currentColor;
+}
+.status-banner .btn-ghost:hover:not(:disabled):not([aria-disabled="true"]) {
+  background: transparent;
+  color: inherit;
+  text-decoration: underline;
+}
 .info-banner {
   padding: 0.6875rem 0.875rem;
   border: 1px solid var(--tc-info-border);

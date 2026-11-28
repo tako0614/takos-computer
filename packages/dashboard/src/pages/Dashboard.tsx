@@ -193,12 +193,24 @@ export default function Dashboard() {
               <button
                 type="button"
                 class="btn btn-ghost btn-sm"
-                onClick={() => {
+                onClick={(e) => {
+                  const hadFocus = document.activeElement === e.currentTarget;
                   setUnconfirmedDestroys((previous) => {
                     const next = new Set(previous);
                     next.delete(id);
                     return next;
                   });
+                  if (hadFocus) {
+                    queueMicrotask(() => {
+                      if (
+                        active &&
+                        document.activeElement === document.body &&
+                        refreshButton?.isConnected
+                      ) {
+                        refreshButton.focus();
+                      }
+                    });
+                  }
                 }}
               >
                 {t("dismiss")}

@@ -48,6 +48,7 @@ export default function ProcessList(props: { mcpUrl: string }) {
   const [killingPid, setKillingPid] = createSignal<number | null>(null);
   const [killError, setKillError] = createSignal("");
   const [killStatus, setKillStatus] = createSignal("");
+  let refreshButton: HTMLButtonElement | undefined;
   let alive = true;
 
   onCleanup(() => {
@@ -155,6 +156,9 @@ export default function ProcessList(props: { mcpUrl: string }) {
         </span>
         <div class="flex-1" />
         <button
+          ref={(el) => {
+            refreshButton = el;
+          }}
           type="button"
           class="btn btn-ghost btn-sm"
           onClick={refresh}
@@ -170,7 +174,20 @@ export default function ProcessList(props: { mcpUrl: string }) {
             <button
               type="button"
               class="btn btn-ghost btn-sm"
-              onClick={() => setKillStatus("")}
+              onClick={(e) => {
+                const hadFocus = document.activeElement === e.currentTarget;
+                setKillStatus("");
+                if (hadFocus) {
+                  queueMicrotask(() => {
+                    if (
+                      alive && document.activeElement === document.body &&
+                      refreshButton?.isConnected
+                    ) {
+                      refreshButton.focus();
+                    }
+                  });
+                }
+              }}
             >
               {t("dismiss")}
             </button>
@@ -185,7 +202,20 @@ export default function ProcessList(props: { mcpUrl: string }) {
             <button
               type="button"
               class="btn btn-ghost btn-sm"
-              onClick={() => setKillError("")}
+              onClick={(e) => {
+                const hadFocus = document.activeElement === e.currentTarget;
+                setKillError("");
+                if (hadFocus) {
+                  queueMicrotask(() => {
+                    if (
+                      alive && document.activeElement === document.body &&
+                      refreshButton?.isConnected
+                    ) {
+                      refreshButton.focus();
+                    }
+                  });
+                }
+              }}
             >
               {t("dismiss")}
             </button>

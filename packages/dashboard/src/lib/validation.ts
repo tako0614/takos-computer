@@ -76,6 +76,30 @@ export function validateNewFileName(
   };
 }
 
+export interface FileInfoShape {
+  exists?: unknown;
+  type?: unknown;
+}
+
+export type NewFileTargetCheck =
+  | { ok: true }
+  | { ok: false; errorKey: TranslationKey };
+
+export function checkNewFileTargetInfo(
+  info: FileInfoShape | null | undefined,
+): NewFileTargetCheck {
+  if (!info || typeof info.exists !== "boolean") {
+    return { ok: false, errorKey: "fileExistsCheckFailed" };
+  }
+  if (!info.exists) {
+    return { ok: true };
+  }
+  if (info.type === "directory") {
+    return { ok: false, errorKey: "directoryAlreadyExists" };
+  }
+  return { ok: false, errorKey: "fileAlreadyExists" };
+}
+
 export interface ShellHistoryState {
   entries: string[];
   index: number;

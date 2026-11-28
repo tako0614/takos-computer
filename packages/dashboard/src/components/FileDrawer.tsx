@@ -200,6 +200,9 @@ export default function FileDrawer(props: {
     setLoading(true);
     setBinary(false);
     setTruncated(false);
+    // Keep keyboard focus inside the drawer across all reload entry points
+    // (toolbar Reload, dirty-reload ConfirmDialog Discard, and error Retry).
+    keepFocusInDrawer(closeBtnRef);
 
     void (async () => {
       try {

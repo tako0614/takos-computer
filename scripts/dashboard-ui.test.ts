@@ -30,6 +30,7 @@ import {
   formatRelativeTime,
 } from "../packages/dashboard/src/lib/format-time.ts";
 import {
+  checkNewFileTargetInfo,
   MAX_SESSION_ID_BYTES,
   pushShellHistory,
   stepShellHistory,
@@ -116,12 +117,16 @@ test("dashboard i18n translates key UI labels in both en and ja with interpolati
     "themeSystem",
     "unconfirmedDestroyCurrent",
     "backToSessions",
+    "checking",
     "copied",
     "copyFailed",
     "copyOutput",
     "copyPath",
     "createFileTitle",
     "createFirstSession",
+    "directoryAlreadyExists",
+    "fileAlreadyExists",
+    "fileExistsCheckFailed",
     "fileNameHint",
     "fileNameLabel",
     "fileNamePlaceholder",
@@ -288,6 +293,16 @@ test("dashboard CSS tokens meet WCAG AA (>= 4.5:1) contrast in dark and light th
       );
     }
   }
+
+  // Banner button contrast: .status-banner .btn-ghost inherits --tc-status-fg on
+  // --tc-status-bg (already verified >= 4.5:1 above), and .alert-banner-row .btn-ghost
+  // renders --tc-fg-muted over --tc-alert-bg (composited over --tc-bg in dark mode).
+  expect(css).toContain(".status-banner .btn-ghost {\n  color: inherit;");
+  expect(contrastRatio(lightTokens["--tc-fg-muted"]!, lightTokens["--tc-alert-bg"]!))
+    .toBeGreaterThanOrEqual(4.5);
+  // Dark --tc-alert-bg is rgba(127, 29, 29, 0.35) over --tc-bg (#0f172a) -> #381823.
+  expect(contrastRatio(darkTokens["--tc-fg-muted"]!, "#381823"))
+    .toBeGreaterThanOrEqual(4.5);
 });
 
 test("dashboard index.html includes favicon, color-scheme, theme-color, and pre-hydration theme guard", () => {
@@ -655,6 +670,32 @@ test("validateNewFileName accepts nested relative paths and rejects traversal or
       errorKey: "validationFileNameInvalid",
     });
   }
+});
+
+test("checkNewFileTargetInfo allows only confirmed non-existent targets and fails closed otherwise", () => {
+  expect(checkNewFileTargetInfo({ exists: false, type: "unknown" })).toEqual({
+    ok: true,
+  });
+  expect(checkNewFileTargetInfo({ exists: true, type: "file" })).toEqual({
+    ok: false,
+    errorKey: "fileAlreadyExists",
+  });
+  expect(checkNewFileTargetInfo({ exists: true, type: "symlink" })).toEqual({
+    ok: false,
+    errorKey: "fileAlreadyExists",
+  });
+  expect(checkNewFileTargetInfo({ exists: true, type: "directory" })).toEqual({
+    ok: false,
+    errorKey: "directoryAlreadyExists",
+  });
+  expect(checkNewFileTargetInfo(null)).toEqual({
+    ok: false,
+    errorKey: "fileExistsCheckFailed",
+  });
+  expect(checkNewFileTargetInfo({})).toEqual({
+    ok: false,
+    errorKey: "fileExistsCheckFailed",
+  });
 });
 
 test("shell history helpers deduplicate consecutive commands and preserve unsubmitted drafts", () => {

@@ -19,7 +19,11 @@ import {
   parentWorkspaceDirectory,
 } from "../lib/file-paths.ts";
 import { formatAbsoluteTime, formatRelativeTime } from "../lib/format-time.ts";
-import { validateNewFileName } from "../lib/validation.ts";
+import {
+  checkNewFileTargetInfo,
+  type FileInfoShape,
+  validateNewFileName,
+} from "../lib/validation.ts";
 import FileDrawer, { type OpenFileTarget } from "./FileDrawer.tsx";
 
 interface FileEntry {
@@ -357,6 +361,7 @@ export default function FileBrowser(
 
       <CreateFileDialog
         open={newFileOpen()}
+        mcpUrl={props.mcpUrl}
         cwd={props.cwd()}
         onClose={() => setNewFileOpen(false)}
         onCreate={openNewFile}
@@ -374,6 +379,7 @@ export default function FileBrowser(
 
 function CreateFileDialog(props: {
   open: boolean;
+  mcpUrl: string;
   cwd: string;
   onClose: () => void;
   onCreate: (relativePath: string, basename: string) => void;
@@ -381,35 +387,107 @@ function CreateFileDialog(props: {
   const { t } = useI18n();
   const id = createUniqueId();
   const [dialogEl, setDialogEl] = createSignal<HTMLDivElement | undefined>();
+  const [checking, setChecking] = createSignal(false);
   const [error, setError] = createSignal("");
   let inputRef: HTMLInputElement | undefined;
+  let alive = true;
+  let checkToken = 0;
+
+  onCleanup(() => {
+    alive = false;
+    checkToken++;
+  });
+
+  const close = () => {
+    if (!checking()) {
+      checkToken++;
+      setError("");
+      props.onClose();
+    }
+  };
 
   createEffect(() => {
+    const _mcpUrl = props.mcpUrl;
     if (!props.open) {
+      checkToken++;
+      setChecking(false);
       setError("");
       setDialogEl(undefined);
       return;
     }
+    checkToken++;
+    setChecking(false);
     setError("");
     const el = dialogEl();
     if (!el) return;
     const detach = attachDialogTrap({
       container: el,
-      onEscape: props.onClose,
+      onEscape: close,
       getInitialFocus: () => inputRef,
     });
     onCleanup(detach);
   });
 
-  const handleSubmit = (e: Event) => {
+  const keepFocusInDialog = () => {
+    queueMicrotask(() => {
+      const el = dialogEl();
+      if (
+        alive && props.open && el?.isConnected &&
+        !el.contains(document.activeElement)
+      ) {
+        (inputRef ?? el).focus();
+      }
+    });
+  };
+
+  const handleSubmit = async (e: Event) => {
     e.preventDefault();
+    if (checking()) return;
     const validation = validateNewFileName(inputRef?.value ?? "");
     if (!validation.ok) {
       setError(t(validation.errorKey, validation.params));
       return;
     }
+
+    const { relativePath, basename } = validation.value;
+    const targetPath = joinWorkspacePath(props.cwd, relativePath);
+    const mcpUrl = props.mcpUrl;
+    const token = ++checkToken;
+
     setError("");
-    props.onCreate(validation.value.relativePath, validation.value.basename);
+    setChecking(true);
+    keepFocusInDialog();
+
+    try {
+      const info = await mcpCall<FileInfoShape>(mcpUrl, "file_info", {
+        path: targetPath,
+      });
+      if (!alive || !props.open || token !== checkToken || props.mcpUrl !== mcpUrl) {
+        return;
+      }
+      const targetCheck = checkNewFileTargetInfo(info);
+      if (!targetCheck.ok) {
+        setError(t(targetCheck.errorKey));
+        keepFocusInDialog();
+        return;
+      }
+      setChecking(false);
+      props.onCreate(relativePath, basename);
+    } catch (err) {
+      if (!alive || !props.open || token !== checkToken || props.mcpUrl !== mcpUrl) {
+        return;
+      }
+      setError(
+        t("error", {
+          message: err instanceof Error ? err.message : String(err),
+        }),
+      );
+      keepFocusInDialog();
+    } finally {
+      if (alive && token === checkToken) {
+        setChecking(false);
+      }
+    }
   };
 
   return (
@@ -418,7 +496,7 @@ function CreateFileDialog(props: {
         <div
           class="modal-overlay"
           onClick={(e) => {
-            if (e.target === e.currentTarget) props.onClose();
+            if (e.target === e.currentTarget) close();
           }}
         >
           <div
@@ -430,12 +508,13 @@ function CreateFileDialog(props: {
             aria-modal="true"
             aria-labelledby={`${id}-title`}
             aria-describedby={`${id}-hint`}
+            aria-busy={checking()}
             tabIndex={-1}
           >
             <h2 id={`${id}-title`} class="modal-title">
               {t("createFileTitle")}
             </h2>
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={(e) => void handleSubmit(e)}>
               <label for={`${id}-name`}>{t("fileNameLabel")}</label>
               <input
                 ref={(el) => {
@@ -443,7 +522,10 @@ function CreateFileDialog(props: {
                 }}
                 id={`${id}-name`}
                 name="fileName"
+                readOnly={checking()}
                 required
+                autocomplete="off"
+                spellcheck={false}
                 placeholder={t("fileNamePlaceholder")}
                 onInput={() => {
                   if (error()) setError("");
@@ -466,12 +548,17 @@ function CreateFileDialog(props: {
                 <button
                   type="button"
                   class="btn btn-ghost"
-                  onClick={props.onClose}
+                  disabled={checking()}
+                  onClick={close}
                 >
                   {t("cancel")}
                 </button>
-                <button type="submit" class="btn btn-primary">
-                  {t("create")}
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  disabled={checking()}
+                >
+                  {checking() ? t("checking") : t("create")}
                 </button>
               </div>
             </form>
