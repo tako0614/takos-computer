@@ -158,6 +158,7 @@ export default function SandboxViewer() {
   const confirmDestroySession = async () => {
     const id = sessionId();
     if (destroyPending()) return;
+    setDestroyDialogOpen(false);
     const request = { id };
     setDestroyRequest(request);
     setUnconfirmedDestroy(null);
@@ -166,7 +167,6 @@ export default function SandboxViewer() {
     try {
       await sandboxSessions.destroy(id);
       if (current()) {
-        setDestroyDialogOpen(false);
         window.location.href = "/gui";
       }
     } catch {
@@ -174,7 +174,6 @@ export default function SandboxViewer() {
     } finally {
       if (viewerActive && destroyRequest() === request) {
         setDestroyRequest(null);
-        setDestroyDialogOpen(false);
       }
     }
   };
@@ -291,9 +290,7 @@ export default function SandboxViewer() {
         description={t("destroyCurrentConfirm")}
         detail={sessionId()}
         confirmLabel={t("destroy")}
-        confirmBusyLabel={t("destroying")}
         tone="danger"
-        busy={destroyPending()}
         onCancel={() => setDestroyDialogOpen(false)}
         onConfirm={confirmDestroySession}
       />

@@ -16,7 +16,7 @@ const pending = /* @__PURE__ */ new Map(), tasks = /* @__PURE__ */ new Set();
 const networkFinished = /* @__PURE__ */ new Set(), deleteNetwork = [], deliveredDeletes = [];
 const destroyRequests = [], heldDestroys = [], dialogs = [];
 let nextId = 1, ws, chrome, chromeExit, profile, fixturePort, debugPort, fatal = null;
-let chromeStderr = "", confirmAccept = false, nextDestroyOutcome = "refusal";
+let chromeStderr = "", nextDestroyOutcome = "refusal";
 let creates = 0, cleanup = {}, browserVersion;
 const entry = (name, type = "file") => ({ name, type, size: 24, modified: "2026-01-01T00:00:00.000Z" });
 const otherSessionId = "synthetic-session-with-a-long-identifier-1234567890";
@@ -157,7 +157,7 @@ try {
   fixturePort = await listen(server);
   debugPort = await reserve();
   profile = await mkdtemp(join(tmpdir(), "computer-viewer-action-chrome-"));
-  chrome = spawn("google-chrome", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--no-first-run", "--no-default-browser-check", "--remote-debugging-address=127.0.0.1", `--remote-debugging-port=${debugPort}`, "--remote-allow-origins=*", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
+  chrome = spawn("google-chrome", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--password-store=basic", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--no-first-run", "--no-default-browser-check", "--remote-debugging-address=127.0.0.1", `--remote-debugging-port=${debugPort}`, "--remote-allow-origins=*", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost", `--user-data-dir=${profile}`, "about:blank"], { stdio: ["ignore", "ignore", "pipe"] });
   chrome.stderr.on("data", (chunk) => {
     chromeStderr = (chromeStderr + chunk.toString()).slice(0, 65536);
   });
@@ -193,11 +193,9 @@ try {
     } else if (m.method === "Network.loadingFinished") networkFinished.add(m.params.requestId);
     else if (m.method === "Runtime.exceptionThrown") errors.push(m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text);
     else if (m.method === "Page.javascriptDialogOpening") {
-      const accept = m.params.type === "confirm" ? confirmAccept : true;
-      dialogs.push({ type: m.params.type, message: m.params.message, accepted: accept });
-      actions.push({ action: "answer synthetic lifecycle confirmation", kind: "native-confirm", accepted: accept, at: Date.now() });
-      if (m.params.type !== "confirm") errors.push("unexpected native dialog " + m.params.type);
-      const task = cdp("Page.handleJavaScriptDialog", { accept }).catch((e) => interceptorErrors.push(e.message)).finally(() => tasks.delete(task));
+      dialogs.push({ type: m.params.type, message: m.params.message, accepted: false });
+      errors.push("unexpected native dialog " + m.params.type);
+      const task = cdp("Page.handleJavaScriptDialog", { accept: false }).catch((e) => interceptorErrors.push(e.message)).finally(() => tasks.delete(task));
       tasks.add(task);
     } else if (m.method === "Fetch.requestPaused") {
       const u = new URL(m.params.request.url);
@@ -221,6 +219,9 @@ try {
     await wait(`document.querySelector('[data-forced-missing-fixture]')`, "intentional missing DOM", 300);
   }
   const destroyButton = `document.querySelector('button.btn-danger')`;
+  const alertDialog = `document.querySelector('[role="alertdialog"]')`;
+  const dialogCancel = `document.querySelector('[role="alertdialog"] button.btn-ghost')`;
+  const dialogConfirm = `document.querySelector('[role="alertdialog"] button.btn-danger')`;
   async function openSession(id) {
     await wait(`[...document.querySelectorAll('tr')].some(r=>r.textContent.includes('${id}'))`, "listed session");
     await click(`[...document.querySelectorAll('tr')].find(r=>r.textContent.includes('${id}'))?.querySelector('a')`, "open " + id);
@@ -232,9 +233,11 @@ try {
   }
   async function startDestroy(outcome) {
     nextDestroyOutcome = outcome;
-    confirmAccept = true;
     const before = destroyRequests.length;
-    await click(destroyButton, "confirm synthetic destruction " + outcome);
+    await click(destroyButton, "open destroy confirmation dialog " + outcome);
+    await wait(alertDialog, "destroy confirmation dialog");
+    await click(dialogConfirm, "confirm synthetic destruction " + outcome);
+    await wait(`!(${alertDialog})`, "destroy confirmation dialog closed");
     const end = Date.now() + 3e3;
     while (destroyRequests.length === before && Date.now() < end) await delay(20);
     if (destroyRequests.length === before) throw Error("synthetic delete not captured");
@@ -252,16 +255,18 @@ try {
   }
   await navigate("/gui");
   await openSession("synthetic");
-  confirmAccept = false;
-  await click(destroyButton, "cancel synthetic destruction");
+  await click(destroyButton, "open cancel synthetic destruction dialog");
+  await wait(alertDialog, "cancel destroy confirmation dialog");
+  await click(dialogCancel, "cancel synthetic destruction");
+  await wait(`!(${alertDialog})`, "cancel destroy confirmation closed");
   let v = await snap("01-cancelled");
-  check("canceling confirmation sends no lifecycle request", destroyRequests.length === 0 && v.url === "/gui/sandbox/synthetic", { requests: destroyRequests, view: v });
+  check("canceling confirmation sends no lifecycle request", destroyRequests.length === 0 && dialogs.length === 0 && v.url === "/gui/sandbox/synthetic", { requests: destroyRequests, dialogs, view: v });
   await startDestroy("refusal");
   v = await snap("02-pending");
   check("pending lifecycle action is visibly busy and locally reentry-guarded", await ev(`(${destroyButton})?.getAttribute('aria-disabled')==='true'&&(${destroyButton})?.getAttribute('aria-busy')==='true'`), v);
   await key("Enter");
   await delay(60);
-  check("repeated Enter during pending action sends no second DELETE", destroyRequests.length === 1, { requests: destroyRequests, dialogs });
+  check("repeated Enter during pending action sends no second DELETE", destroyRequests.length === 1 && dialogs.length === 0 && await ev(`!(${alertDialog})`), { requests: destroyRequests, dialogs });
   await releaseDestroys();
   v = await snap("03-refused");
   check("refusal is caught and reported as unconfirmed outcome in the same view", v.url === "/gui/sandbox/synthetic" && v.alerts.some((x) => x.includes("Could not confirm destruction")), v);

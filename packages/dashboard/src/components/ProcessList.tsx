@@ -227,8 +227,15 @@ export default function ProcessList(props: { mcpUrl: string }) {
         <Show
           when={!procs.loading}
           fallback={
-            <div class="panel-placeholder muted">
-              {t("loadingEllipsis")}
+            <div class="panel-placeholder" role="status">
+              <div class="skeleton-stack" aria-hidden="true">
+                <div class="skeleton-line skeleton-line-lg" />
+                <div class="skeleton-line skeleton-line-md" />
+                <div class="skeleton-line skeleton-line-sm" />
+              </div>
+              <div class="muted panel-loading-label">
+                {t("loadingEllipsis")}
+              </div>
             </div>
           }
         >

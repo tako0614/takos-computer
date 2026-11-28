@@ -14,6 +14,7 @@ import { useI18n } from "../i18n.ts";
 import { attachDialogTrap } from "../lib/dialog-a11y.ts";
 import {
   buildBreadcrumbs,
+  filterFileEntries,
   formatFileSize,
   joinWorkspacePath,
   parentWorkspaceDirectory,
@@ -51,23 +52,38 @@ export default function FileBrowser(
 ) {
   const { language, t } = useI18n();
   const [version, setVersion] = createSignal(0);
+  const [fileFilter, setFileFilter] = createSignal("");
   const [selectedFile, setSelectedFile] = createSignal<OpenFileTarget | null>(
     null,
   );
   const [newFileOpen, setNewFileOpen] = createSignal(false);
   let pathInput!: HTMLInputElement;
+  let filterInput: HTMLInputElement | undefined;
   let composing = false;
+  let filterComposing = false;
 
   createEffect(() => {
     const next = props.cwd();
+    filterComposing = false;
+    setFileFilter("");
     if (!composing && pathInput && pathInput.value !== next) {
       pathInput.value = next;
     }
   });
 
-  // Close drawer & new-file dialog when switching sandbox sessions.
+  // Keep filter input DOM value in sync without interrupting CJK IME composition.
+  createEffect(() => {
+    const next = fileFilter();
+    if (!filterComposing && filterInput && filterInput.value !== next) {
+      filterInput.value = next;
+    }
+  });
+
+  // Close drawer & new-file dialog and reset filter when switching sandbox sessions.
   createEffect(() => {
     const _url = props.mcpUrl;
+    filterComposing = false;
+    setFileFilter("");
     setSelectedFile(null);
     setNewFileOpen(false);
   });
@@ -96,6 +112,35 @@ export default function FileBrowser(
       return items;
     },
   );
+
+  const allEntries = createMemo(() => {
+    if (entries.loading || entries.error) return [];
+    return entries() ?? [];
+  });
+  const filteredEntries = createMemo(() =>
+    filterFileEntries(allEntries(), fileFilter())
+  );
+  const isFiltering = createMemo(() => fileFilter().trim().length > 0);
+  const fileCountLabel = createMemo(() => {
+    const total = allEntries().length;
+    const shown = filteredEntries().length;
+    if (isFiltering()) {
+      return t("fileMatchCount", { shown, total });
+    }
+    return total === 1 ? t("fileCountOne") : t("fileCount", { count: total });
+  });
+
+  const clearFileFilter = () => {
+    filterComposing = false;
+    setFileFilter("");
+    queueMicrotask(() => {
+      if (filterInput?.isConnected) {
+        filterInput.focus();
+      } else if (pathInput?.isConnected) {
+        pathInput.focus();
+      }
+    });
+  };
 
   const navigateTo = (next: string) => {
     const previousFocus = document.activeElement;
@@ -238,6 +283,56 @@ export default function FileBrowser(
         </ol>
       </nav>
 
+      <Show when={!entries.loading && !entries.error && allEntries().length > 0}>
+        <div class="file-filter-bar">
+          <div class="file-filter-wrap">
+            <input
+              ref={(el) => {
+                filterInput = el;
+                el.value = fileFilter();
+              }}
+              type="search"
+              class="input file-filter-input"
+              aria-label={t("filterFiles")}
+              placeholder={t("filterFilesPlaceholder")}
+              onCompositionStart={() => {
+                filterComposing = true;
+              }}
+              onCompositionEnd={(e) => {
+                filterComposing = false;
+                setFileFilter(e.currentTarget.value);
+              }}
+              onInput={(e) => {
+                if (!e.isComposing && !filterComposing) {
+                  setFileFilter(e.currentTarget.value);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.isComposing || e.keyCode === 229) return;
+                if (e.key === "Escape" && fileFilter()) {
+                  e.preventDefault();
+                  filterComposing = false;
+                  setFileFilter("");
+                }
+              }}
+            />
+            <Show when={fileFilter().length > 0}>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm file-filter-clear"
+                aria-label={t("clearFileFilter")}
+                onClick={clearFileFilter}
+              >
+                {t("clear")}
+              </button>
+            </Show>
+          </div>
+          <span class="muted file-count" role="status" aria-live="polite">
+            {fileCountLabel()}
+          </span>
+        </div>
+      </Show>
+
       <div class="card panel-scroll" aria-busy={entries.loading}>
         <Show
           when={!entries.loading}
@@ -276,15 +371,35 @@ export default function FileBrowser(
             }
           >
             <Show
-              when={(entries() ?? []).length > 0}
+              when={allEntries().length > 0}
               fallback={
                 <div class="panel-empty muted">
                   {t("emptyDirectory")}
                 </div>
               }
             >
-              <For each={entries()}>
-                {(e) => {
+              <Show
+                when={filteredEntries().length > 0}
+                fallback={
+                  <div class="file-filter-empty">
+                    <div class="file-filter-empty-title">
+                      {t("noMatchingFiles")}
+                    </div>
+                    <div class="file-filter-empty-hint muted">
+                      {t("noMatchingFilesHint")}
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-ghost btn-sm"
+                      onClick={clearFileFilter}
+                    >
+                      {t("clearFilter")}
+                    </button>
+                  </div>
+                }
+              >
+                <For each={filteredEntries()}>
+                  {(e) => {
                   const icon = () =>
                     e.type === "directory"
                       ? "\u{1F4C1}"
@@ -354,6 +469,7 @@ export default function FileBrowser(
                   );
                 }}
               </For>
+              </Show>
             </Show>
           </Show>
         </Show>

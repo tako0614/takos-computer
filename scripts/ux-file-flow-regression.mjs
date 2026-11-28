@@ -32,6 +32,11 @@ const server = createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/html", "cache-control": "no-store" });
       return res.end(html);
     }
+    if (req.method === "GET" && ["/gui/manifest.webmanifest", "/gui/icons/icon-192.png", "/gui/icons/icon-512.png", "/gui/icons/icon-maskable-512.png", "/gui/icons/apple-touch-icon.png"].includes(u.pathname)) {
+      const resource = await readFile(join(repo, "packages/dashboard/public", u.pathname.slice(5)));
+      res.writeHead(200, { "content-type": u.pathname.endsWith(".png") ? "image/png" : "application/manifest+json" });
+      return res.end(resource);
+    }
     if (req.method === "GET" && u.pathname === "/favicon.ico") {
       res.writeHead(204);
       return res.end();
@@ -162,8 +167,9 @@ async function setPath(path) {
   await cdp("Input.insertText", { text: path });
   actions.push({ action: "edit path " + path, kind: "keyboard", at: Date.now() });
 }
+const fileRefreshBtn = `[...(${filesRoot})?.querySelectorAll('button')].find(e=>e.textContent.trim()==='Refresh')`;
 async function refresh() {
-  await click(`(${filesRoot})?.querySelector('button')`, "file Refresh");
+  await click(fileRefreshBtn, "file Refresh");
 }
 async function snap(name) {
   const v = await ev(`(()=>{const r=${filesRoot},i=${cwd},d=document.querySelector('[role=dialog]');return {url:location.pathname+location.search,cwd:i?.value??null,fileText:r?.innerText??null,alerts:[...document.querySelectorAll('[role=alert]')].map(e=>e.textContent.trim()),body:document.body.innerText,focus:{tag:document.activeElement?.tagName,name:document.activeElement?.getAttribute('name'),text:document.activeElement?.textContent?.trim().slice(0,70)},dialog:d?{name:document.getElementById(d.getAttribute('aria-labelledby'))?.textContent,inputs:[...d.querySelectorAll('input')].map(e=>({name:e.name,value:e.value,labels:e.labels.length})),busy:d.getAttribute('aria-busy')}:null,viewport:{width:innerWidth,bodyScroll:document.documentElement.scrollWidth,bodyClient:document.documentElement.clientWidth,fileScroll:r?.scrollWidth,fileClient:r?.clientWidth},};})()`);
@@ -180,7 +186,7 @@ try {
   fixturePort = await listen(server);
   debugPort = await reserve();
   profile = await mkdtemp(join(tmpdir(), "computer-flow-chrome-"));
-  chrome = spawn("google-chrome", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--no-first-run", "--no-default-browser-check", "--remote-debugging-address=127.0.0.1", `--remote-debugging-port=${debugPort}`, "--remote-allow-origins=*", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
+  chrome = spawn("google-chrome", ["--headless=new", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--password-store=basic", "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--no-first-run", "--no-default-browser-check", "--remote-debugging-address=127.0.0.1", `--remote-debugging-port=${debugPort}`, "--remote-allow-origins=*", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost", `--user-data-dir=${profile}`, "about:blank"], { stdio: "ignore" });
   chromeExit = new Promise((resolve2) => {
     chrome.once("exit", (code, signal) => resolve2({ code, signal }));
     chrome.once("error", (e) => resolve2({ error: e.message }));
@@ -261,9 +267,15 @@ try {
   const directoryControl = await ev(`(()=>{const e=${folder};const c=e?.closest('button,a,[role=button]');return c?{tag:c.tagName,tabIndex:c.tabIndex,disabled:c.disabled??false}:null;})()`);
   check("directory is an accessible keyboard control", !!directoryControl && directoryControl.tabIndex >= 0 && !directoryControl.disabled, directoryControl);
   if (directoryControl) {
-    await ev(`(${filesRoot}).querySelector('button').focus()`);
-    await key("Tab");
-    const focused = await ev(`document.activeElement?.textContent.includes('documents')`);
+    await ev(`(${fileRefreshBtn}).focus()`);
+    let focused = false;
+    for (let step = 0; step < 6; step++) {
+      await key("Tab");
+      if (await ev(`document.activeElement?.textContent.includes('documents')`)) {
+        focused = true;
+        break;
+      }
+    }
     check("Tab reaches folder after file Refresh", focused, await snap("05-folder-focus"));
     await key("Enter");
     actions.push({ action: "enter documents", kind: "keyboard", at: Date.now() });

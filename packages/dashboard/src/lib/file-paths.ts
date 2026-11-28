@@ -142,6 +142,123 @@ export function isLikelyBinaryFile(name: string, content?: string): boolean {
   return false;
 }
 
+export const FILE_READ_CHUNK_BYTES = 256 * 1024;
+export const MAX_IMAGE_PREVIEW_BYTES = 4 * 1024 * 1024;
+export const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+
+const PREVIEW_IMAGE_MIME_TYPES: Record<string, string> = {
+  ".bmp": "image/bmp",
+  ".gif": "image/gif",
+  ".ico": "image/x-icon",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+};
+
+export function getPreviewImageMimeType(name: string): string | null {
+  const lower = name.toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  if (dot <= 0) return null;
+  return PREVIEW_IMAGE_MIME_TYPES[lower.slice(dot)] ?? null;
+}
+
+export function base64ToBytes(base64: string): Uint8Array<ArrayBuffer> {
+  if (!base64) return new Uint8Array(new ArrayBuffer(0));
+  const binary = atob(base64);
+  const buffer = new ArrayBuffer(binary.length);
+  const bytes = new Uint8Array(buffer);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+export interface ChunkedFileReadChunk {
+  content?: string;
+  size?: number;
+  truncated?: boolean;
+}
+
+export type ChunkedReadOutcome =
+  | { ok: true; chunks: Uint8Array<ArrayBuffer>[]; size: number }
+  | { ok: false; reason: "cancelled" }
+  | { ok: false; reason: "too_large"; size: number };
+
+export async function readChunkedBase64File(
+  readChunk: (
+    offset: number,
+    limit: number,
+  ) => Promise<ChunkedFileReadChunk | null | undefined>,
+  maxBytes: number,
+  isCancelled: () => boolean,
+  chunkBytes: number = FILE_READ_CHUNK_BYTES,
+): Promise<ChunkedReadOutcome> {
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let offset = 0;
+  let totalSize = 0;
+
+  while (true) {
+    if (isCancelled()) return { ok: false, reason: "cancelled" };
+    const result = await readChunk(offset, chunkBytes);
+    if (isCancelled()) return { ok: false, reason: "cancelled" };
+
+    const size = typeof result?.size === "number" && Number.isFinite(result.size)
+      ? result.size
+      : totalSize;
+    totalSize = size;
+    if (size > maxBytes) {
+      return { ok: false, reason: "too_large", size };
+    }
+
+    const content = typeof result?.content === "string" ? result.content : "";
+    const bytes = base64ToBytes(content);
+    if (bytes.byteLength > 0) {
+      chunks.push(bytes);
+      offset += bytes.byteLength;
+    }
+
+    if (offset > maxBytes) {
+      return {
+        ok: false,
+        reason: "too_large",
+        size: Math.max(totalSize, offset),
+      };
+    }
+
+    if (!result?.truncated) {
+      break;
+    }
+
+    if (offset >= maxBytes) {
+      return {
+        ok: false,
+        reason: "too_large",
+        size: Math.max(totalSize, offset),
+      };
+    }
+
+    if (bytes.byteLength === 0) {
+      throw new Error("Unexpected empty chunk before end of file");
+    }
+  }
+
+  return { ok: true, chunks, size: Math.max(totalSize, offset) };
+}
+
+export function filterFileEntries<T extends { name: string }>(
+  entries: readonly T[],
+  rawQuery: string,
+): T[] {
+  const normalized = rawQuery.trim().toLowerCase();
+  if (!normalized) return [...entries];
+  const terms = normalized.split(/\s+/).filter(Boolean);
+  return entries.filter((entry) => {
+    const lowerName = entry.name.toLowerCase();
+    return terms.every((term) => lowerName.includes(term));
+  });
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} K`;

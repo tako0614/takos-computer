@@ -112,6 +112,12 @@ server = createServer(async (req, res) => {
     res.end(dashboard);
     return;
   }
+  if (req.method === "GET" && ["/gui/manifest.webmanifest", "/gui/icons/icon-192.png", "/gui/icons/icon-512.png", "/gui/icons/icon-maskable-512.png", "/gui/icons/apple-touch-icon.png"].includes(url.pathname)) {
+    const resource = await readFile(join(repoRoot, "packages/dashboard/public", url.pathname.slice(5)));
+    requests.push({ kind: "local-static-resource", method: req.method, path: url.pathname });
+    res.writeHead(200, { "Content-Type": url.pathname.endsWith(".png") ? "image/png" : "application/manifest+json", "Cache-Control": "no-store" });
+    return res.end(resource);
+  }
   if (url.pathname === "/favicon.ico" && req.method === "GET") {
     requests.push({ kind: "local-static-resource", method: req.method, path: url.pathname });
     res.writeHead(204, { "Cache-Control": "no-store" });
@@ -366,6 +372,7 @@ try {
     "--headless=new",
     "--no-sandbox",
     "--disable-gpu",
+    "--password-store=basic",
     "--disable-extensions",
     "--disable-background-networking",
     "--disable-component-update",
