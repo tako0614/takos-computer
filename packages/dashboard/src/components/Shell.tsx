@@ -53,8 +53,12 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
     lines().some((line) => !line.initialHint)
   );
 
+  const activeSearchQuery = createMemo(() =>
+    searchOpen() ? searchQuery() : ""
+  );
+
   const highlighted = createMemo(() =>
-    highlightShellLines(lines(), searchOpen() ? searchQuery() : "")
+    highlightShellLines(lines(), activeSearchQuery())
   );
 
   const searchCountLabel = createMemo(() => {
@@ -347,7 +351,7 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
             class="shell-clear-btn"
             classList={{ active: searchOpen() }}
             aria-expanded={searchOpen()}
-            aria-controls={searchBarId}
+            aria-controls={searchOpen() ? searchBarId : undefined}
             disabled={!hasOutput()}
             onClick={() => (searchOpen() ? closeSearch() : openSearch())}
           >
@@ -452,32 +456,43 @@ export default function Shell(props: { mcpUrl: string; cwd: () => string }) {
         classList={{ "shell-output-nowrap": !wrapLines() }}
         role="log"
         tabIndex={0}
-        aria-live="polite"
+        aria-live={activeSearchQuery() ? "off" : "polite"}
         aria-busy={runningCount() > 0}
         aria-label={t("shellOutput")}
         onClick={() => {
           if (!window.getSelection()?.toString()) inputRef?.focus();
         }}
       >
-        <For each={highlighted().lines}>
-          {(line) => (
-            <span class={`shell-line-${line.kind}`}>
-              <For each={line.segments}>
-                {(seg) =>
-                  seg.matchIndex === null ? seg.text : (
-                    <mark
-                      class="shell-match"
-                      classList={{
-                        "shell-match-active": seg.matchIndex === activeMatch(),
-                      }}
-                      data-match-index={seg.matchIndex}
-                    >
-                      {seg.text}
-                    </mark>
+        <For each={lines()}>
+          {(line) => {
+            const segments = createMemo(() => {
+              if (!activeSearchQuery()) return undefined;
+              return highlighted().matchesByLine.get(line);
+            });
+            return (
+              <span class={`shell-line-${line.kind}`}>
+                <Show when={segments()} fallback={line.text}>
+                  {(segs) => (
+                    <For each={segs()}>
+                      {(seg) =>
+                        seg.matchIndex === null ? seg.text : (
+                          <mark
+                            class="shell-match"
+                            classList={{
+                              "shell-match-active":
+                                seg.matchIndex === activeMatch(),
+                            }}
+                            data-match-index={seg.matchIndex}
+                          >
+                            {seg.text}
+                          </mark>
+                        )}
+                    </For>
                   )}
-              </For>
-            </span>
-          )}
+                </Show>
+              </span>
+            );
+          }}
         </For>
       </div>
       <div class="shell-prompt-bar">

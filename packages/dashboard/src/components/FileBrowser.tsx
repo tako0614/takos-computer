@@ -634,7 +634,7 @@ function CreateFileDialog(props: {
             <h2 id={`${id}-title`} class="modal-title">
               {t("createFileTitle")}
             </h2>
-            <form onSubmit={(e) => void handleSubmit(e)}>
+            <form noValidate onSubmit={(e) => void handleSubmit(e)}>
               <label for={`${id}-name`}>{t("fileNameLabel")}</label>
               <input
                 ref={(el) => {

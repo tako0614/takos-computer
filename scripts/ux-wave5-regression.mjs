@@ -298,9 +298,33 @@ try {
   await key("Escape");
   await paint();
 
-  // 3. CreateModal client-side validation a11y (aria-invalid, aria-describedby, focus invalid field)
+  // 3. CreateModal client-side validation a11y (noValidate empty submit + scoped aria-invalid/aria-describedby)
   await click(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='+ Sandbox Session')`, "open CreateModal");
   await wait(`document.querySelector('[role="dialog"]')`, "CreateModal open");
+  await click(`document.querySelector('[role="dialog"] button[type="submit"]')`, "submit empty CreateModal");
+  await paint();
+  const emptyCreateValidation = await ev(`(()=>{
+    const s = document.querySelector('input[name="sessionId"]');
+    const sp = document.querySelector('input[name="spaceId"]');
+    const u = document.querySelector('input[name="userId"]');
+    const alert = document.querySelector('[role="dialog"] [role="alert"]');
+    return {
+      alertId: alert?.id ?? '',
+      alertText: alert?.textContent?.trim() ?? '',
+      invalids: [s, sp, u].map((el) => el?.getAttribute('aria-invalid')),
+      describedBys: [s, sp, u].map((el) => el?.getAttribute('aria-describedby')),
+      focusedSessionId: document.activeElement === s,
+    };
+  })()`);
+  check(
+    "CreateModal empty submit runs localized validation (noValidate), marks all empty fields invalid, and focuses sessionId",
+    Boolean(emptyCreateValidation.alertId) &&
+      emptyCreateValidation.alertText.includes("required") &&
+      emptyCreateValidation.invalids.every((v) => v === "true") &&
+      emptyCreateValidation.describedBys.every((v) => v === emptyCreateValidation.alertId) &&
+      emptyCreateValidation.focusedSessionId,
+    emptyCreateValidation,
+  );
   await ev(`(()=>{
     document.querySelector('input[name="sessionId"]').value = 'pmcp-reserved';
     document.querySelector('input[name="spaceId"]').value = 'sp-1';
@@ -310,19 +334,29 @@ try {
   await paint();
   const createValidation = await ev(`(()=>{
     const input = document.querySelector('input[name="sessionId"]');
+    const space = document.querySelector('input[name="spaceId"]');
+    const user = document.querySelector('input[name="userId"]');
     const alert = document.querySelector('[role="dialog"] [role="alert"]');
     return {
       invalid: input?.getAttribute('aria-invalid'),
       describedBy: input?.getAttribute('aria-describedby'),
+      spaceInvalid: space?.getAttribute('aria-invalid'),
+      spaceDescribedBy: space?.getAttribute('aria-describedby'),
+      userInvalid: user?.getAttribute('aria-invalid'),
+      userDescribedBy: user?.getAttribute('aria-describedby'),
       alertId: alert?.id,
       focusedSessionId: document.activeElement === input,
     };
   })()`);
   check(
-    "CreateModal marks invalid field with aria-invalid, aria-describedby, and focuses it",
+    "CreateModal scopes aria-invalid and aria-describedby only to invalid sessionId and focuses it",
     createValidation.invalid === "true" &&
       Boolean(createValidation.alertId) &&
       createValidation.describedBy === createValidation.alertId &&
+      createValidation.spaceInvalid === null &&
+      createValidation.spaceDescribedBy === null &&
+      createValidation.userInvalid === null &&
+      createValidation.userDescribedBy === null &&
       createValidation.focusedSessionId,
     createValidation,
   );
@@ -408,11 +442,76 @@ try {
     afterStatusChange,
   );
 
-  // 6. Shell line-wrap toggle and inline output search
+  // Manual Refresh status when status is unchanged sets aria-busy while held and re-confirms in SR live region
+  const mutationsBeforeManualSame = await ev(`window.__srMutations`);
+  holdNextStatus = true;
+  await click(`[...document.querySelectorAll('.viewer-controls button')].find(b=>b.textContent.trim()==='Refresh status')`, "manual refresh status while unchanged");
+  const manualHeldEnd = Date.now() + 3000;
+  while (!releaseStatus && Date.now() < manualHeldEnd) await delay(20);
+  if (!releaseStatus) throw Error("held manual status refresh missing");
+  await paint();
+  const manualBusy = await ev(`[...document.querySelectorAll('.viewer-controls button')].find(b=>b.textContent.trim()==='Refresh status')?.getAttribute('aria-busy')`);
+  releaseStatus();
+  releaseStatus = null;
+  await wait(`document.querySelector('.viewer-header .badge')?.textContent.trim()==='stopped'`, "manual unchanged refresh settled");
+  await paint();
+  const afterManualSame = await ev(`({
+    busyAfter: [...document.querySelectorAll('.viewer-controls button')].find(b=>b.textContent.trim()==='Refresh status')?.getAttribute('aria-busy'),
+    srText: document.querySelector('.viewer-controls .sr-only[role="status"][aria-live="polite"]')?.textContent.trim(),
+    srMutations: window.__srMutations,
+  })`);
+  check(
+    "manual Refresh status sets aria-busy in flight and re-confirms unchanged status for screen readers",
+    manualBusy === "true" &&
+      afterManualSame.busyAfter === "false" &&
+      afterManualSame.srText === "Session status: stopped" &&
+      afterManualSame.srMutations > mutationsBeforeManualSame,
+    { manualBusy, mutationsBeforeManualSame, afterManualSame },
+  );
+
+  // 6. Shell line-wrap toggle, DOM node stability, light-theme focus ring, and inline output search
+  const findControlsClosed = await ev(`[...document.querySelectorAll('.shell-header-actions button')].find(b=>b.textContent.trim()==='Find')?.hasAttribute('aria-controls')`);
+  check("Find button omits dangling aria-controls while search bar is closed", findControlsClosed === false, findControlsClosed);
+
   await click(`document.querySelector('.shell-input')`, "focus shell command input");
   await typeText("wide-table");
   await key("Enter");
   await wait(`document.querySelector('.shell-output')?.textContent.includes('final-match-here')`, "wide-table output rendered");
+
+  // Observe Shell output DOM stability across command append, Find open (empty query), and Find search
+  await ev(`(()=>{
+    const out = document.querySelector('.shell-output');
+    window.__firstCmdSpan = out.querySelector('.shell-line-cmd');
+    window.__shellMutations = { added: 0, removed: 0 };
+    const obs = new MutationObserver((records) => {
+      for (const r of records) {
+        window.__shellMutations.added += r.addedNodes.length;
+        window.__shellMutations.removed += r.removedNodes.length;
+      }
+    });
+    obs.observe(out, { childList: true });
+  })()`);
+  await typeText("second-cmd");
+  await key("Enter");
+  await wait(`document.querySelector('.shell-output')?.textContent.includes('ok: second-cmd')`, "second-cmd output rendered");
+  const afterSecondAppend = await ev(`({
+    firstConnected: window.__firstCmdSpan?.isConnected === true,
+    removed: window.__shellMutations.removed,
+    added: window.__shellMutations.added,
+  })`);
+  check(
+    "appending new shell output keeps existing line spans mounted without removing prior nodes",
+    afterSecondAppend.firstConnected && afterSecondAppend.removed === 0 && afterSecondAppend.added === 2,
+    afterSecondAppend,
+  );
+
+  // Light-mode focus ring inside dark .shell-box stays high-contrast #60a5fa
+  await click(`[...document.querySelectorAll('.theme-switcher button')].find(b=>b.textContent.trim()==='Light')`, "switch to Light theme");
+  await paint();
+  const shellLightFocusRing = await ev(`getComputedStyle(document.querySelector('.shell-box')).getPropertyValue('--tc-focus-ring').trim().toLowerCase()`);
+  check("dark .shell-box keeps high-contrast #60a5fa focus ring in Light theme", shellLightFocusRing === "#60a5fa", shellLightFocusRing);
+  await click(`[...document.querySelectorAll('.theme-switcher button')].find(b=>b.textContent.trim()==='Dark')`, "restore Dark theme");
+  await paint();
 
   // Toggle Wrap off -> no-wrap mode scrolls horizontally inside shell without page overflow
   const wrapBefore = await ev(`({
@@ -438,9 +537,25 @@ try {
     { wrapBefore, wrapAfter },
   );
 
-  // Open Shell output search via Find button, test IME safety, match count, Enter/Shift+Enter navigation, and Escape close
+  // Open Shell output search via Find button, verify 0 output DOM churn on open, valid aria-controls, IME safety, aria-live="off", match count, and Escape close
+  await ev(`window.__shellMutations = { added: 0, removed: 0 }`);
   await click(`[...document.querySelectorAll('.shell-header-actions button')].find(b=>b.textContent.trim()==='Find')`, "open shell find bar");
   await wait(`document.querySelector('.shell-search-input')`, "shell search bar visible");
+  const onFindOpen = await ev(`(()=>{
+    const btn = [...document.querySelectorAll('.shell-header-actions button')].find(b=>b.textContent.trim()==='Find');
+    const ctrl = btn?.getAttribute('aria-controls');
+    return {
+      ctrlExists: Boolean(ctrl && document.getElementById(ctrl)),
+      added: window.__shellMutations.added,
+      removed: window.__shellMutations.removed,
+      firstConnected: window.__firstCmdSpan?.isConnected === true,
+    };
+  })()`);
+  check(
+    "opening Find binds valid aria-controls and causes zero shell-output DOM mutations",
+    onFindOpen.ctrlExists && onFindOpen.added === 0 && onFindOpen.removed === 0 && onFindOpen.firstConnected,
+    onFindOpen,
+  );
 
   const shellSearchIme = await ev(`(()=>{
     const input = document.querySelector('.shell-search-input');
@@ -458,13 +573,19 @@ try {
     marks: document.querySelectorAll('.shell-output mark.shell-match').length,
     activeIdx: document.querySelector('.shell-output mark.shell-match-active')?.getAttribute('data-match-index'),
     countText: document.querySelector('.shell-search-count')?.textContent.trim(),
+    ariaLiveDuringSearch: document.querySelector('.shell-output')?.getAttribute('aria-live'),
+    firstConnected: window.__firstCmdSpan?.isConnected === true,
+    outputChildChurn: window.__shellMutations.added + window.__shellMutations.removed,
   })`);
   check(
-    "Shell output search guards IME composition and highlights matches with count",
+    "Shell output search guards IME composition, silences shell-output aria-live, preserves spans, and highlights matches",
     shellSearchIme.duringMarks === 0 &&
       afterShellIme.marks === 4 &&
       afterShellIme.activeIdx === "0" &&
-      afterShellIme.countText === "1 / 4",
+      afterShellIme.countText === "1 / 4" &&
+      afterShellIme.ariaLiveDuringSearch === "off" &&
+      afterShellIme.firstConnected === true &&
+      afterShellIme.outputChildChurn === 0,
     { shellSearchIme, afterShellIme },
   );
 
@@ -523,16 +644,43 @@ try {
   const afterNavEsc = await ev(`({
     open: Boolean(document.querySelector('.shell-search-input')),
     focusedFind: document.activeElement?.textContent?.trim() === 'Find',
+    ariaLiveRestored: document.querySelector('.shell-output')?.getAttribute('aria-live') === 'polite',
+    findHasControls: [...document.querySelectorAll('.shell-header-actions button')].find(b=>b.textContent.trim()==='Find')?.hasAttribute('aria-controls'),
   })`);
   check(
-    "Ctrl+F opens shell search and Escape from nav buttons closes it cleanly",
-    afterNavEsc.open === false && afterNavEsc.focusedFind === true,
+    "Ctrl+F opens shell search and Escape from nav buttons closes it cleanly, restoring aria-live and omitting aria-controls",
+    afterNavEsc.open === false &&
+      afterNavEsc.focusedFind === true &&
+      afterNavEsc.ariaLiveRestored === true &&
+      afterNavEsc.findHasControls === false,
     afterNavEsc,
   );
 
-  // CreateFileDialog client-side validation a11y
+  // CreateFileDialog client-side validation a11y (noValidate empty submit + invalid path)
   await click(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='+ New file')`, "open CreateFileDialog");
   await wait(`document.querySelector('[role="dialog"] input[name="fileName"]')`, "CreateFileDialog open");
+  await click(`document.querySelector('[role="dialog"] button[type="submit"]')`, "submit empty CreateFileDialog");
+  await paint();
+  const emptyFileValidation = await ev(`(()=>{
+    const input = document.querySelector('[role="dialog"] input[name="fileName"]');
+    const alert = document.querySelector('[role="dialog"] [role="alert"]');
+    return {
+      invalid: input?.getAttribute('aria-invalid'),
+      describedBy: input?.getAttribute('aria-describedby') ?? '',
+      alertId: alert?.id ?? '',
+      alertText: alert?.textContent?.trim() ?? '',
+      focusedInput: document.activeElement === input,
+    };
+  })()`);
+  check(
+    "CreateFileDialog empty submit runs localized validation (noValidate) and focuses input",
+    emptyFileValidation.invalid === "true" &&
+      Boolean(emptyFileValidation.alertId) &&
+      emptyFileValidation.describedBy.includes(emptyFileValidation.alertId) &&
+      emptyFileValidation.alertText.includes("Enter a file name") &&
+      emptyFileValidation.focusedInput,
+    emptyFileValidation,
+  );
   await ev(`document.querySelector('[role="dialog"] input[name="fileName"]').value = '../escape.txt'`);
   await click(`document.querySelector('[role="dialog"] button[type="submit"]')`, "submit invalid filename");
   await paint();

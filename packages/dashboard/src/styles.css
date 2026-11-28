@@ -58,6 +58,7 @@
   --tc-term-match-fg: #f8fafc;
   --tc-term-match-active-bg: #f59e0b;
   --tc-term-match-active-fg: #0b1220;
+  --tc-term-focus-ring: #60a5fa;
 
   --tc-overlay: rgba(2, 6, 23, 0.7);
   --tc-shadow: 0 12px 32px rgba(2, 6, 23, 0.45);
@@ -835,6 +836,7 @@ textarea {
 
 /* Shell */
 .shell-box {
+  --tc-focus-ring: var(--tc-term-focus-ring);
   background: var(--tc-term-bg);
   border: 1px solid var(--tc-term-border);
   border-radius: 0.75rem;

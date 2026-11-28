@@ -356,6 +356,16 @@ test("dashboard CSS tokens meet WCAG AA (>= 4.5:1) contrast in dark and light th
         tokens["--tc-term-match-active-fg"]!,
         tokens["--tc-term-match-active-bg"]!,
       ],
+      [
+        "term-focus-ring on term-bg",
+        tokens["--tc-term-focus-ring"]!,
+        tokens["--tc-term-bg"]!,
+      ],
+      [
+        "term-focus-ring on term-header",
+        tokens["--tc-term-focus-ring"]!,
+        tokens["--tc-term-header"]!,
+      ],
     ];
     for (const [label, fg, bg] of pairs) {
       const ratio = contrastRatio(fg, bg);
@@ -384,6 +394,10 @@ test("dashboard CSS tokens meet WCAG AA (>= 4.5:1) contrast in dark and light th
   expect(
     contrastRatio(lightTokens["--tc-fg-muted"]!, lightTokens["--tc-surface-subtle"]!),
   ).toBeGreaterThanOrEqual(4.5);
+  // Dark terminal keeps high-contrast focus ring even in light theme.
+  expect(css).toContain(
+    ".shell-box {\n  --tc-focus-ring: var(--tc-term-focus-ring);",
+  );
 });
 
 test("dashboard index.html includes favicon, color-scheme, theme-color, and pre-hydration theme guard", () => {
@@ -1001,26 +1015,30 @@ test("shell output search highlights case-insensitively, skips initial hint, han
     { text: "Line 2: ok\n", kind: "out" as const },
   ];
 
-  // Empty query returns plain segments with 0 matches
+  // Empty query returns plain segments with 0 matches and empty matchesByLine
   const empty = highlightShellLines(lines, "");
   expect(empty.totalMatches).toBe(0);
   expect(empty.capped).toBe(false);
   expect(empty.lines).toHaveLength(4);
+  expect(empty.matchesByLine.has(lines[1]!)).toBe(false);
 
   // Initial hint is never highlighted even when query matches its text
   const hintOnly = highlightShellLines(lines, "press Enter");
   expect(hintOnly.totalMatches).toBe(0);
+  expect(hintOnly.matchesByLine.has(lines[0]!)).toBe(false);
 
   // Regex metacharacters are matched literally and case-insensitively
   const res = highlightShellLines(lines, "[error]");
   expect(res.totalMatches).toBe(3);
   expect(res.capped).toBe(false);
-  expect(res.lines[1]?.segments).toEqual([
+  expect(res.matchesByLine.has(lines[0]!)).toBe(false);
+  expect(res.matchesByLine.has(lines[3]!)).toBe(false);
+  expect(res.matchesByLine.get(lines[1]!)).toEqual([
     { text: "$ grep ", matchIndex: null },
     { text: "[error]", matchIndex: 0 },
     { text: " log\n", matchIndex: null },
   ]);
-  expect(res.lines[2]?.segments).toEqual([
+  expect(res.matchesByLine.get(lines[2]!)).toEqual([
     { text: "Line 1: ", matchIndex: null },
     { text: "[ERROR]", matchIndex: 1 },
     { text: " alpha ", matchIndex: null },

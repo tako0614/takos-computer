@@ -284,7 +284,7 @@ try {
   await wait(`(${filesRoot})?.innerText.includes('retained.txt')`, "nested list ready");
   if (hasUp) {
     await click(up, "nested Up");
-    await wait(`(${cwd}).value==='./documents'`, "nested parent");
+    await wait(`(${cwd}).value==='./documents'&&(${filesRoot})?.innerText.includes('draft.md')&&!(${filesRoot})?.innerText.includes('Loading')`, "nested parent");
     check("nested Up returns one parent", true, await ev(`(${cwd}).value`));
   } else await setPath("./documents");
   mode = "http-error";

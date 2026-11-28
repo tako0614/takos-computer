@@ -273,9 +273,11 @@ export default function SandboxViewer() {
             type="button"
             class="btn btn-ghost btn-sm"
             aria-disabled={status.loading}
+            aria-busy={status.loading && manualRefresh()}
             onClick={() => {
               if (!status.loading) {
                 setManualRefresh(true);
+                setAnnouncedStatus(null);
                 setStatusVersion((v) => v + 1);
               }
             }}

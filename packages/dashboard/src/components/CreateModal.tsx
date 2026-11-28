@@ -142,6 +142,11 @@ export default function CreateModal(props: {
     }
   };
 
+  const fieldDescribedBy = (field: string) =>
+    error() && (invalidFields().has(field) || invalidFields().size === 0)
+      ? `${id}-error`
+      : undefined;
+
   return (
     <Show when={props.open}>
       <Portal>
@@ -165,7 +170,7 @@ export default function CreateModal(props: {
             <h2 id={`${id}-title`} class="modal-title">
               {t("createSandboxSession")}
             </h2>
-            <form ref={formRef} onSubmit={handleSubmit}>
+            <form ref={formRef} noValidate onSubmit={handleSubmit}>
               <label for={`${id}-session`}>{t("sessionId")}</label>
               <input
                 id={`${id}-session`}
@@ -175,7 +180,7 @@ export default function CreateModal(props: {
                 aria-invalid={invalidFields().has("sessionId")
                   ? "true"
                   : undefined}
-                aria-describedby={error() ? `${id}-error` : undefined}
+                aria-describedby={fieldDescribedBy("sessionId")}
                 autocomplete="off"
                 spellcheck={false}
                 placeholder={t("sessionIdPlaceholder")}
@@ -191,7 +196,7 @@ export default function CreateModal(props: {
                 aria-invalid={invalidFields().has("spaceId")
                   ? "true"
                   : undefined}
-                aria-describedby={error() ? `${id}-error` : undefined}
+                aria-describedby={fieldDescribedBy("spaceId")}
                 autocomplete="off"
                 spellcheck={false}
                 placeholder={t("spaceIdPlaceholder")}
@@ -207,7 +212,7 @@ export default function CreateModal(props: {
                 aria-invalid={invalidFields().has("userId")
                   ? "true"
                   : undefined}
-                aria-describedby={error() ? `${id}-error` : undefined}
+                aria-describedby={fieldDescribedBy("userId")}
                 autocomplete="off"
                 spellcheck={false}
                 placeholder={t("userIdPlaceholder")}

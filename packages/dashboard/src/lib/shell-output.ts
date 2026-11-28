@@ -18,6 +18,7 @@ export interface HighlightedShellLine {
 
 export interface ShellHighlightResult {
   lines: HighlightedShellLine[];
+  matchesByLine: WeakMap<ShellLine, ShellMatchSegment[]>;
   totalMatches: number;
   capped: boolean;
 }
@@ -33,12 +34,14 @@ export function highlightShellLines(
   query: string,
   maxMatches: number = MAX_SHELL_SEARCH_MATCHES,
 ): ShellHighlightResult {
+  const matchesByLine = new WeakMap<ShellLine, ShellMatchSegment[]>();
   if (!query) {
     return {
       lines: lines.map((line) => ({
         kind: line.kind,
         segments: [{ text: line.text, matchIndex: null }],
       })),
+      matchesByLine,
       totalMatches: 0,
       capped: false,
     };
@@ -97,10 +100,11 @@ export function highlightShellLines(
       });
     }
 
+    matchesByLine.set(line, segments);
     return { kind: line.kind, segments };
   });
 
-  return { lines: highlighted, totalMatches, capped };
+  return { lines: highlighted, matchesByLine, totalMatches, capped };
 }
 
 export function stepShellSearchMatch(
